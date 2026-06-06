@@ -47,17 +47,25 @@ pub fn save_app_config(app: AppHandle, config: AppConfig) -> Result<(), String> 
     save_config(&app, &config)
 }
 
-#[tauri::command]
-pub async fn sync_to_cloud(app: AppHandle, data: String) -> Result<(), String> {
-    let config = load_config(&app);
+/// WebDAV 连接信息，包含认证凭据和构建好的目标 URL
+struct WebDavConn {
+    user: String,
+    pass: String,
+    target: String,
+}
+
+/// 从配置中构建 WebDAV 连接信息
+fn build_webdav_conn(app: &AppHandle) -> Result<WebDavConn, String> {
+    let config = load_config(app);
     if config.sync_mode.as_deref() != Some("webdav") {
-        return Ok(());
+        return Err("Not in WebDAV mode".to_string());
     }
     let url = config.webdav_url.as_deref().unwrap_or("https://dav.jianguoyun.com/dav/");
-    let user = config.webdav_username.as_deref().unwrap_or("");
-    let pass = config.webdav_password.as_deref().unwrap_or("");
-    let mut file_path = config.webdav_filepath.as_deref().unwrap_or("我的坚果云/to-do/todo_data.json");
-    if file_path.is_empty() { file_path = "我的坚果云/to-do/todo_data.json"; }
+    let user = config.webdav_username.as_deref().unwrap_or("").to_string();
+    let pass = config.webdav_password.as_deref().unwrap_or("").to_string();
+    let file_path = config.webdav_filepath.as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("我的坚果云/to-do/todo_data.json");
 
     let encoded_path = file_path.split('/').map(|s| {
         if s.is_empty() { String::new() } else { urlencoding::encode(s).into_owned() }
@@ -65,10 +73,16 @@ pub async fn sync_to_cloud(app: AppHandle, data: String) -> Result<(), String> {
 
     let target = if url.ends_with('/') { format!("{}{}", url, encoded_path) } else { format!("{}/{}", url, encoded_path) };
 
+    Ok(WebDavConn { user, pass, target })
+}
+
+#[tauri::command]
+pub async fn sync_to_cloud(app: AppHandle, data: String) -> Result<(), String> {
+    let conn = build_webdav_conn(&app)?;
     let client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().map_err(|e| e.to_string())?;
 
-    let resp = client.put(&target)
-        .basic_auth(user, Some(pass))
+    let resp = client.put(&conn.target)
+        .basic_auth(&conn.user, Some(&conn.pass))
         .header("Content-Type", "application/json; charset=utf-8")
         .body(data)
         .send().await.map_err(|e| e.to_string())?;
@@ -82,26 +96,11 @@ pub async fn sync_to_cloud(app: AppHandle, data: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn fetch_from_cloud(app: AppHandle) -> Result<String, String> {
-    let config = load_config(&app);
-    if config.sync_mode.as_deref() != Some("webdav") {
-        return Err("Not in WebDAV mode".to_string());
-    }
-    let url = config.webdav_url.as_deref().unwrap_or("https://dav.jianguoyun.com/dav/");
-    let user = config.webdav_username.as_deref().unwrap_or("");
-    let pass = config.webdav_password.as_deref().unwrap_or("");
-    let mut file_path = config.webdav_filepath.as_deref().unwrap_or("我的坚果云/to-do/todo_data.json");
-    if file_path.is_empty() { file_path = "我的坚果云/to-do/todo_data.json"; }
-
-    let encoded_path = file_path.split('/').map(|s| {
-        if s.is_empty() { String::new() } else { urlencoding::encode(s).into_owned() }
-    }).collect::<Vec<_>>().join("/");
-
-    let target = if url.ends_with('/') { format!("{}{}", url, encoded_path) } else { format!("{}/{}", url, encoded_path) };
-
+    let conn = build_webdav_conn(&app)?;
     let client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().map_err(|e| e.to_string())?;
 
-    let resp = client.get(&target)
-        .basic_auth(user, Some(pass))
+    let resp = client.get(&conn.target)
+        .basic_auth(&conn.user, Some(&conn.pass))
         .send().await.map_err(|e| e.to_string())?;
 
     if resp.status().is_success() {

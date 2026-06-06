@@ -8,6 +8,7 @@ let todoData = {
     todos: []
 };
 
+let saving = false; // guard against self-triggered file watcher reloads
 let currentView = 'list'; // 'list' | 'matrix' | 'stats'
 let appConfig = {};
 let isPinned = false;
@@ -33,17 +34,13 @@ const ICON_VIEW_MATRIX = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www
 let listEl, formEl, inputEl, statusEl;
 
 // ====== Utility Functions ======
+const SyncState = { IDLE: 'idle', SYNCING: 'syncing', ERROR: 'error' };
+
 function setSyncStatus(state) {
     if (statusEl) {
-        if (state === 'error') {
-            statusEl.classList.remove('syncing');
-            statusEl.classList.add('error');
-        } else if (state === true) {
-            statusEl.classList.remove('error');
-            statusEl.classList.add('syncing');
-        } else {
-            statusEl.classList.remove('syncing', 'error');
-        }
+        statusEl.classList.remove('syncing', 'error');
+        if (state === SyncState.SYNCING) statusEl.classList.add('syncing');
+        else if (state === SyncState.ERROR) statusEl.classList.add('error');
     }
 }
 
@@ -98,36 +95,91 @@ function setActiveRatingBtn(groupId, value) {
     });
 }
 
-function mergeTodoData(localData, cloudData) {
-    if (!localData || !localData.todos) return cloudData;
-    if (!cloudData || !cloudData.todos) return localData;
-    const mergedTodos = {};
-    const allIds = new Set([...localData.todos.map(t => t.id), ...cloudData.todos.map(t => t.id)]);
-    for (const id of allIds) {
-        const lTodo = localData.todos.find(t => t.id === id);
-        const cTodo = cloudData.todos.find(t => t.id === id);
-        if (lTodo && cTodo) {
-            const lTime = new Date(lTodo.updated_at || lTodo.created_at || 0).getTime();
-            const cTime = new Date(cTodo.updated_at || cTodo.created_at || 0).getTime();
-            mergedTodos[id] = cTime > lTime ? cTodo : lTodo;
-        } else if (lTodo) {
-            mergedTodos[id] = lTodo;
-        } else if (cTodo) {
-            mergedTodos[id] = cTodo;
+function createTodo(content, date, importance = 2, urgency = 2) {
+    return {
+        id: crypto.randomUUID(),
+        content,
+        date,
+        time: null,
+        importance,
+        urgency,
+        completed: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        deleted: false,
+        recurring: 'none',
+        subtasks: []
+    };
+}
+
+function parseInputSyntax(rawContent) {
+    const syntaxRegex = /(?:\s+|^)!([1-3])([1-3])?$/;
+    const dateRegex = /(?:\s+|^)@(today|tomorrow|week|month|\d{4}-\d{2}-\d{2}|\d{2}-\d{2})$/i;
+
+    let content = rawContent.trim();
+    let importance = 2, urgency = 2;
+    let taskDate = getTodayString();
+
+    // Two passes to handle either order: "!12 @today" or "@today !12"
+    for (let pass = 0; pass < 2; pass++) {
+        const scoreMatch = content.match(syntaxRegex);
+        if (scoreMatch) {
+            importance = parseInt(scoreMatch[1], 10);
+            if (scoreMatch[2]) urgency = parseInt(scoreMatch[2], 10);
+            content = content.replace(syntaxRegex, '').trim();
+        }
+        const dateMatch = content.match(dateRegex);
+        if (dateMatch) {
+            const v = dateMatch[1].toLowerCase();
+            if (v === 'today') taskDate = getTodayString();
+            else if (v === 'tomorrow') taskDate = getTomorrowString();
+            else if (v === 'week') taskDate = getThisWeekString();
+            else if (v === 'month') taskDate = getThisMonthString();
+            else if (/^\d{4}-\d{2}-\d{2}$/.test(v)) taskDate = v;
+            else if (/^\d{2}-\d{2}$/.test(v)) taskDate = `${new Date().getFullYear()}-${v}`;
+            content = content.replace(dateRegex, '').trim();
         }
     }
-    const newTodos = Object.values(mergedTodos).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    return { content, importance, urgency, taskDate };
+}
+
+function mergeTodoData(localData, cloudData) {
+    if (!localData || !localData.todos) return { data: cloudData, changed: true };
+    if (!cloudData || !cloudData.todos) return { data: localData, changed: false };
+    const localMap = new Map(localData.todos.map(t => [t.id, t]));
+    const cloudMap = new Map(cloudData.todos.map(t => [t.id, t]));
+    const mergedTodos = [];
+    let changed = false;
+    for (const [id, lTodo] of localMap) {
+        const cTodo = cloudMap.get(id);
+        if (cTodo) {
+            const lTime = new Date(lTodo.updated_at || lTodo.created_at || 0).getTime();
+            const cTime = new Date(cTodo.updated_at || cTodo.created_at || 0).getTime();
+            if (cTime > lTime) { mergedTodos.push(cTodo); changed = true; }
+            else { mergedTodos.push(lTodo); }
+        } else {
+            mergedTodos.push(lTodo);
+        }
+    }
+    for (const [id, cTodo] of cloudMap) {
+        if (!localMap.has(id)) { mergedTodos.push(cTodo); changed = true; }
+    }
+    mergedTodos.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     return {
-        version: localData.version || 1,
-        last_updated: new Date().toISOString(),
-        todos: newTodos
+        data: {
+            version: localData.version || 1,
+            last_updated: new Date().toISOString(),
+            todos: mergedTodos
+        },
+        changed
     };
 }
 
 // ====== Data I/O ======
 async function loadData() {
     try {
-        setSyncStatus(true);
+        setSyncStatus(SyncState.SYNCING);
         appConfig = await invoke("get_app_config");
 
         let localJsonStr = await invoke("read_todo_data").catch(() => "{}");
@@ -138,14 +190,12 @@ async function loadData() {
             try {
                 let cloudJsonStr = await invoke("fetch_from_cloud");
                 let cloudData = JSON.parse(cloudJsonStr);
-                
-                let mergedData = mergeTodoData(localData, cloudData);
-                await invoke("write_todo_data", { data: JSON.stringify(mergedData) });
-                
+
+                let { data: mergedData, changed } = mergeTodoData(localData, cloudData);
                 todoData = mergedData;
                 render();
-                
-                if (JSON.stringify(mergedData.todos) !== JSON.stringify(cloudData.todos)) {
+
+                if (changed) {
                     await saveData();
                 }
             } catch (e) {
@@ -154,7 +204,7 @@ async function loadData() {
                     todoData = localData;
                     render();
                 }
-                setSyncStatus('error');
+                setSyncStatus(SyncState.ERROR);
             }
         } else {
             if (localData && localData.todos) {
@@ -164,20 +214,25 @@ async function loadData() {
         }
 
         if (statusEl && !statusEl.classList.contains('error')) {
-            setTimeout(() => setSyncStatus(false), 500);
+            setTimeout(() => setSyncStatus(SyncState.IDLE), 500);
         }
     } catch (e) {
         console.error("Failed to load data:", e);
-        setSyncStatus('error');
+        setSyncStatus(SyncState.ERROR);
     }
 }
 
 async function saveData() {
     try {
-        setSyncStatus(true);
+        setSyncStatus(SyncState.SYNCING);
         todoData.last_updated = new Date().toISOString();
         const jsonStr = JSON.stringify(todoData, null, 2);
-        await invoke("write_todo_data", { data: jsonStr });
+        saving = true;
+        try {
+            await invoke("write_todo_data", { data: jsonStr });
+        } finally {
+            saving = false;
+        }
 
         if (appConfig.sync_mode === 'webdav') {
             try {
@@ -185,15 +240,15 @@ async function saveData() {
             } catch (e) {
                 console.error("WebDAV push failed:", e);
                 alert("推送至云端失败: " + e);
-                setSyncStatus('error');
+                setSyncStatus(SyncState.ERROR);
                 return;
             }
         }
 
-        setTimeout(() => setSyncStatus(false), 500);
+        setTimeout(() => setSyncStatus(SyncState.IDLE), 500);
     } catch (e) {
         console.error("Failed to save data:", e);
-        setSyncStatus('error');
+        setSyncStatus(SyncState.ERROR);
     }
 }
 
@@ -946,15 +1001,11 @@ window.addEventListener("DOMContentLoaded", () => {
         let imported = false;
         listItems.forEach((li, idx) => {
             if (li.getAttribute('data-selected') === 'true') {
-                const originalTodo = currentImportCandidates[idx];
-                const newTodo = {
-                    ...originalTodo,
-                    id: crypto.randomUUID(),
-                    date: targetDateStr,
-                    completed: false,
-                    created_at: new Date().toISOString(),
-                    subtasks: originalTodo.subtasks ? JSON.parse(JSON.stringify(originalTodo.subtasks)).map(s => { s.completed = false; return s; }) : []
-                };
+                const orig = currentImportCandidates[idx];
+                const newTodo = createTodo(orig.content, targetDateStr, orig.importance, orig.urgency);
+                newTodo.time = orig.time || null;
+                newTodo.recurring = orig.recurring || 'none';
+                newTodo.subtasks = orig.subtasks ? JSON.parse(JSON.stringify(orig.subtasks)).map(s => { s.completed = false; return s; }) : [];
                 todoData.todos.push(newTodo);
                 imported = true;
             }
@@ -1010,64 +1061,11 @@ window.addEventListener("DOMContentLoaded", () => {
     // 添加新待办表单
     formEl.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const content = inputEl.value.trim();
+        const raw = inputEl.value;
+        const { content, importance, urgency, taskDate } = parseInputSyntax(raw);
         if (!content) return;
 
-        let importance = 2;
-        let urgency = 2;
-        let taskDate = getTodayString();
-        let finalContent = content;
-
-        const syntaxRegex = /(?:\s+|^)!([1-3])([1-3])?$/;
-        const dateRegex = /(?:\s+|^)@(today|tomorrow|week|month|\d{4}-\d{2}-\d{2}|\d{2}-\d{2})$/i;
-
-        // 尝试匹配评分
-        let match = finalContent.match(syntaxRegex);
-        if (match) {
-            importance = parseInt(match[1], 10);
-            if (match[2]) urgency = parseInt(match[2], 10);
-            finalContent = finalContent.replace(syntaxRegex, '').trim();
-        }
-
-        // 尝试匹配日期
-        let dateMatch = finalContent.match(dateRegex);
-        if (dateMatch) {
-            const dateVal = dateMatch[1].toLowerCase();
-            if (dateVal === 'today') taskDate = getTodayString();
-            else if (dateVal === 'tomorrow') taskDate = getTomorrowString();
-            else if (dateVal === 'week') taskDate = getThisWeekString();
-            else if (dateVal === 'month') taskDate = getThisMonthString();
-            else if (/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) taskDate = dateVal;
-            else if (/^\d{2}-\d{2}$/.test(dateVal)) taskDate = `${new Date().getFullYear()}-${dateVal}`;
-            finalContent = finalContent.replace(dateRegex, '').trim();
-        }
-
-        // 再次尝试匹配评分（防止顺序是 @date !score）
-        match = finalContent.match(syntaxRegex);
-        if (match) {
-            importance = parseInt(match[1], 10);
-            if (match[2]) urgency = parseInt(match[2], 10);
-            finalContent = finalContent.replace(syntaxRegex, '').trim();
-        }
-
-        if (!finalContent) return;
-
-        const newTodo = {
-            id: crypto.randomUUID(),
-            content: finalContent,
-            date: taskDate,
-            time: null,
-            importance: importance,
-            urgency: urgency,
-            completed: false,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            deleted: false,
-            recurring: 'none',
-            subtasks: []
-        };
-
-        todoData.todos.push(newTodo);
+        todoData.todos.push(createTodo(content, taskDate, importance, urgency));
         inputEl.value = '';
         render();
         await saveData();
@@ -1075,8 +1073,8 @@ window.addEventListener("DOMContentLoaded", () => {
 
     // Watch file changes
     listen("todo_data_changed", () => {
-        if (appConfig.sync_mode === 'webdav') {
-            return; // 避免 WebDAV 模式下本地写入引发死循环 GET 请求
+        if (saving || appConfig.sync_mode === 'webdav') {
+            return; // 避免自身写入触发重载，或 WebDAV 模式下死循环
         }
         loadData();
     });
@@ -1100,22 +1098,8 @@ window.addEventListener("DOMContentLoaded", () => {
             e.preventDefault();
             const content = quickAddInput.value.trim();
             if (!content) return;
-            
-            const newTodo = {
-                id: crypto.randomUUID(),
-                content: content,
-                date: getTodayString(),
-                time: null,
-                importance: 2,
-                urgency: 2,
-                completed: false,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                deleted: false,
-                recurring: 'none',
-                subtasks: []
-            };
-            todoData.todos.push(newTodo);
+
+            todoData.todos.push(createTodo(content, getTodayString()));
             quickAddModal.classList.remove('active');
             render();
             await saveData();

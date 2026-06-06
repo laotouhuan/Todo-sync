@@ -6,7 +6,8 @@ import com.todo.app.data.model.TodoData
 import com.todo.app.data.ConfigManager
 import com.todo.app.data.WebDavClient
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,15 +24,21 @@ import java.util.UUID
  * 待办事项数据仓库接口，模拟本地持久化。
  */
 class TodoRepository(private val context: Context) {
-    private val jsonFormat = Json { 
-        ignoreUnknownKeys = true 
-        encodeDefaults = true 
+    private val jsonFormat = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
         prettyPrint = true
     }
+
+    private fun nowIso(): String =
+        java.time.OffsetDateTime.now().format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME)
     
     private val dataFile = File(context.filesDir, "todo_data.json")
     private val configManager = ConfigManager(context)
     private var webDavClient: WebDavClient? = null
+    // Repository-scoped coroutine scope: SupervisorJob ensures one failed upload doesn't cancel future ones.
+    // Not cancelled explicitly — TodoRepository is an app-singleton; call repoScope.cancel() if ever scoped shorter.
+    private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     
     private fun initWebDavClient() {
         if (configManager.isConfigured()) {
@@ -42,7 +49,7 @@ class TodoRepository(private val context: Context) {
     private val _todoData = MutableStateFlow(
         TodoData(
             version = 1,
-            last_updated = OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+            last_updated = nowIso(),
             todos = emptyList()
         )
     )
@@ -121,6 +128,28 @@ class TodoRepository(private val context: Context) {
         return@withContext false
     }
 
+    private fun mergeTodoData(local: TodoData, cloud: TodoData): TodoData {
+        val localTodos = local.todos.associateBy { it.id }
+        val cloudTodos = cloud.todos.associateBy { it.id }
+        val merged = mutableMapOf<String, Todo>()
+        for (id in localTodos.keys + cloudTodos.keys) {
+            val l = localTodos[id]
+            val c = cloudTodos[id]
+            if (l != null && c != null) {
+                val lTime = try { OffsetDateTime.parse(l.updated_at) } catch (_: Exception) { OffsetDateTime.MIN }
+                val cTime = try { OffsetDateTime.parse(c.updated_at) } catch (_: Exception) { OffsetDateTime.MIN }
+                merged[id] = if (cTime.isAfter(lTime)) c else l
+            } else {
+                merged[id] = l ?: c!!
+            }
+        }
+        return TodoData(
+            version = local.version,
+            last_updated = nowIso(),
+            todos = merged.values.sortedByDescending { it.created_at }
+        )
+    }
+
     suspend fun syncWithCloud() = withContext(Dispatchers.IO) {
         if (isSyncing.value) return@withContext
         isSyncing.value = true
@@ -133,41 +162,12 @@ class TodoRepository(private val context: Context) {
             if (cloudJson != null) {
                 try {
                     val cloudData = jsonFormat.decodeFromString<TodoData>(cloudJson)
-                    val localTime = try { OffsetDateTime.parse(_todoData.value.last_updated) } catch (e: Exception) { OffsetDateTime.MIN }
-                    val cloudTime = try { OffsetDateTime.parse(cloudData.last_updated) } catch (e: Exception) { OffsetDateTime.MIN }
-                    
                     val localData = _todoData.value
-                    val cloudTodos = cloudData.todos.associateBy { it.id }
-                    val localTodos = localData.todos.associateBy { it.id }
-                    val mergedTodos = mutableMapOf<String, Todo>()
-                    val allIds = cloudTodos.keys + localTodos.keys
-                    
-                    for (id in allIds) {
-                        val cTodo = cloudTodos[id]
-                        val lTodo = localTodos[id]
-                        if (cTodo != null && lTodo != null) {
-                            val cTime = try { OffsetDateTime.parse(cTodo.updated_at) } catch(e:Exception) { OffsetDateTime.MIN }
-                            val lTime = try { OffsetDateTime.parse(lTodo.updated_at) } catch(e:Exception) { OffsetDateTime.MIN }
-                            mergedTodos[id] = if (cTime.isAfter(lTime)) cTodo else lTodo
-                        } else if (cTodo != null) {
-                            mergedTodos[id] = cTodo
-                        } else if (lTodo != null) {
-                            mergedTodos[id] = lTodo
-                        }
-                    }
-                    
-                    val newTodosList = mergedTodos.values.toList().sortedByDescending { it.created_at }
-                    
-                    val mergedData = TodoData(
-                        version = localData.version,
-                        last_updated = OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
-                        todos = newTodosList
-                    )
-                    
+                    val mergedData = mergeTodoData(localData, cloudData)
+
                     val mergedJson = jsonFormat.encodeToString(mergedData)
                     val localChanged = mergedData.todos != localData.todos
                     val cloudChanged = mergedData.todos != cloudData.todos
-                    
                     if (localChanged) {
                         createLocalBackup()
                         _todoData.value = mergedData
@@ -234,7 +234,7 @@ class TodoRepository(private val context: Context) {
     suspend fun saveTodos(todos: List<Todo>) = withContext(Dispatchers.IO) {
         val updated = TodoData(
             version = _todoData.value.version,
-            last_updated = OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+            last_updated = nowIso(),
             todos = todos
         )
         _todoData.value = updated
@@ -246,9 +246,8 @@ class TodoRepository(private val context: Context) {
             com.todo.app.widget.refreshAllWidgets(context)
             
             // 异步后台同步到云端，不阻塞当前流程
-            kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+            repoScope.launch {
                 syncStatus = 1
-                com.todo.app.widget.refreshAllWidgets(context)
                 try {
                     initWebDavClient()
                     webDavClient?.uploadFile(configManager.filePath, jsonString)
@@ -266,7 +265,7 @@ class TodoRepository(private val context: Context) {
 
     suspend fun addTodo(todo: Todo) {
         val current = _todoData.value.todos.toMutableList()
-        todo.updated_at = OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+        todo.updated_at = nowIso()
         current.add(todo)
         saveTodos(current)
     }
@@ -275,7 +274,7 @@ class TodoRepository(private val context: Context) {
         val current = _todoData.value.todos.toMutableList()
         val index = current.indexOfFirst { it.id == todo.id }
         if (index != -1) {
-            todo.updated_at = OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+            todo.updated_at = nowIso()
             current[index] = todo
             saveTodos(current)
         }
@@ -287,7 +286,7 @@ class TodoRepository(private val context: Context) {
         if (index != -1) {
             val updated = current[index].copy(
                 deleted = true,
-                updated_at = OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                updated_at = nowIso()
             )
             current[index] = updated
             saveTodos(current)
@@ -306,15 +305,15 @@ class TodoRepository(private val context: Context) {
                     id = UUID.randomUUID().toString(),
                     date = nextDate,
                     completed = false,
-                    created_at = OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
-                    updated_at = OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+                    created_at = nowIso(),
+                    updated_at = nowIso(),
                     subtasks = todo.subtasks.map { it.copy(id = UUID.randomUUID().toString(), completed = false) }
                 )
                 current.add(clone)
             }
             val updatedTodo = todo.copy(
                 completed = !todo.completed,
-                updated_at = OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                updated_at = nowIso()
             )
             current[index] = updatedTodo
             saveTodos(current)
