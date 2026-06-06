@@ -1,14 +1,23 @@
 package com.todo.app.ui.view
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,9 +30,11 @@ import java.time.LocalDate
 import java.time.temporal.WeekFields
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ListView(viewModel: TodoViewModel) {
     val todos by viewModel.todos.collectAsState()
+    val isSyncing by viewModel.isSyncing.collectAsState()
     var selectedTab by remember { mutableStateOf(0) }
     var showEditDialogFor by remember { mutableStateOf<Todo?>(null) }
     
@@ -43,9 +54,18 @@ fun ListView(viewModel: TodoViewModel) {
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = selectedTab) {
-            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("今天聚焦") })
-            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("全部待办") })
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TabRow(selectedTabIndex = selectedTab, modifier = Modifier.weight(1f)) {
+                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("今天聚焦") })
+                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("全部待办") })
+            }
+            IconButton(onClick = { viewModel.syncWithCloud() }) {
+                if (isSyncing) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Filled.Refresh, contentDescription = "同步", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
         }
         
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -161,15 +181,66 @@ fun GroupHeader(title: String, color: Color, isExpanded: Boolean = true, onClick
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TodoItemRow(todo: Todo, viewModel: TodoViewModel, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).clickable { onClick() },
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    val coroutineScope = rememberCoroutineScope()
+    val offsetX = remember { Animatable(0f) }
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    val maxSwipePx = -80f * density
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .background(Color.Red, RoundedCornerShape(12.dp))
     ) {
-        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(80.dp)
+                .clickable { viewModel.deleteTodo(todo.id) },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Filled.Delete, contentDescription = "删除", tint = Color.White)
+        }
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            coroutineScope.launch {
+                                if (offsetX.value < maxSwipePx / 2) {
+                                    offsetX.animateTo(maxSwipePx)
+                                } else {
+                                    offsetX.animateTo(0f)
+                                }
+                            }
+                        }
+                    ) { change, dragAmount ->
+                        change.consume()
+                        coroutineScope.launch {
+                            val newValue = (offsetX.value + dragAmount).coerceIn(maxSwipePx, 0f)
+                            offsetX.snapTo(newValue)
+                        }
+                    }
+                }
+                .clickable {
+                    if (offsetX.value < -5f) {
+                        coroutineScope.launch { offsetX.animateTo(0f) }
+                    } else {
+                        onClick()
+                    }
+                },
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = todo.completed, onCheckedChange = { viewModel.toggleTodoStatus(todo.id) })
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -195,5 +266,6 @@ fun TodoItemRow(todo: Todo, viewModel: TodoViewModel, onClick: () -> Unit) {
             }
             Surface(modifier = Modifier.size(12.dp), shape = androidx.compose.foundation.shape.CircleShape, color = severityColor) {}
         }
+    }
     }
 }

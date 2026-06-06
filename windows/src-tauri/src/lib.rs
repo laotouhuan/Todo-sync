@@ -3,7 +3,7 @@ mod todo_store;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, AppHandle,
+    Manager, AppHandle, Emitter,
 };
 use tauri_plugin_global_shortcut::ShortcutState;
 use notify::{Watcher, RecursiveMode, Event};
@@ -13,10 +13,12 @@ use std::thread;
 fn toggle_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let is_visible = window.is_visible().unwrap_or(false);
-        if is_visible {
+        let is_focused = window.is_focused().unwrap_or(false);
+        if is_visible && is_focused {
             let _ = window.hide();
         } else {
             let _ = window.show();
+            let _ = window.unminimize();
             let _ = window.set_focus();
         }
     }
@@ -75,11 +77,21 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_shortcuts(["ctrl+shift+t"])
+                .with_shortcuts(["ctrl+shift+space", "ctrl+shift+t"])
                 .unwrap()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state == ShortcutState::Pressed {
-                        toggle_window(app);
+                        use tauri_plugin_global_shortcut::{Code, Modifiers};
+                        if shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::Space) {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                                let _ = app.emit("trigger-quick-add", "show");
+                            }
+                        } else if shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyT) {
+                            toggle_window(app);
+                        }
                     }
                 })
                 .build(),
@@ -126,7 +138,11 @@ pub fn run() {
             todo_store::read_todo_data,
             todo_store::write_todo_data,
             todo_store::list_backups,
-            todo_store::restore_backup
+            todo_store::restore_backup,
+            todo_store::get_app_config,
+            todo_store::save_app_config,
+            todo_store::sync_to_cloud,
+            todo_store::fetch_from_cloud
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

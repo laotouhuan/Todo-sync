@@ -6,9 +6,14 @@ use tauri_plugin_dialog::DialogExt;
 use std::time::Duration;
 use fs2::FileExt;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct AppConfig {
+    pub sync_mode: Option<String>, // "local" or "webdav"
     pub sync_path: Option<String>,
+    pub webdav_url: Option<String>,
+    pub webdav_username: Option<String>,
+    pub webdav_password: Option<String>,
+    pub webdav_filepath: Option<String>,
 }
 
 pub fn get_config_path(app: &AppHandle) -> PathBuf {
@@ -30,6 +35,80 @@ pub fn save_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
     let path = get_config_path(app);
     let data = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
     fs::write(&path, data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_app_config(app: AppHandle) -> AppConfig {
+    load_config(&app)
+}
+
+#[tauri::command]
+pub fn save_app_config(app: AppHandle, config: AppConfig) -> Result<(), String> {
+    save_config(&app, &config)
+}
+
+#[tauri::command]
+pub async fn sync_to_cloud(app: AppHandle, data: String) -> Result<(), String> {
+    let config = load_config(&app);
+    if config.sync_mode.as_deref() != Some("webdav") {
+        return Ok(());
+    }
+    let url = config.webdav_url.as_deref().unwrap_or("https://dav.jianguoyun.com/dav/");
+    let user = config.webdav_username.as_deref().unwrap_or("");
+    let pass = config.webdav_password.as_deref().unwrap_or("");
+    let mut file_path = config.webdav_filepath.as_deref().unwrap_or("我的坚果云/to-do/todo_data.json");
+    if file_path.is_empty() { file_path = "我的坚果云/to-do/todo_data.json"; }
+
+    let encoded_path = file_path.split('/').map(|s| {
+        if s.is_empty() { String::new() } else { urlencoding::encode(s).into_owned() }
+    }).collect::<Vec<_>>().join("/");
+
+    let target = if url.ends_with('/') { format!("{}{}", url, encoded_path) } else { format!("{}/{}", url, encoded_path) };
+
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().map_err(|e| e.to_string())?;
+
+    let resp = client.put(&target)
+        .basic_auth(user, Some(pass))
+        .header("Content-Type", "application/json; charset=utf-8")
+        .body(data)
+        .send().await.map_err(|e| e.to_string())?;
+
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("WebDAV PUT Error: {}", resp.status()))
+    }
+}
+
+#[tauri::command]
+pub async fn fetch_from_cloud(app: AppHandle) -> Result<String, String> {
+    let config = load_config(&app);
+    if config.sync_mode.as_deref() != Some("webdav") {
+        return Err("Not in WebDAV mode".to_string());
+    }
+    let url = config.webdav_url.as_deref().unwrap_or("https://dav.jianguoyun.com/dav/");
+    let user = config.webdav_username.as_deref().unwrap_or("");
+    let pass = config.webdav_password.as_deref().unwrap_or("");
+    let mut file_path = config.webdav_filepath.as_deref().unwrap_or("我的坚果云/to-do/todo_data.json");
+    if file_path.is_empty() { file_path = "我的坚果云/to-do/todo_data.json"; }
+
+    let encoded_path = file_path.split('/').map(|s| {
+        if s.is_empty() { String::new() } else { urlencoding::encode(s).into_owned() }
+    }).collect::<Vec<_>>().join("/");
+
+    let target = if url.ends_with('/') { format!("{}{}", url, encoded_path) } else { format!("{}/{}", url, encoded_path) };
+
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().map_err(|e| e.to_string())?;
+
+    let resp = client.get(&target)
+        .basic_auth(user, Some(pass))
+        .send().await.map_err(|e| e.to_string())?;
+
+    if resp.status().is_success() {
+        resp.text().await.map_err(|e| e.to_string())
+    } else {
+        Err(format!("WebDAV GET Error: {}", resp.status()))
+    }
 }
 
 #[tauri::command]
@@ -81,7 +160,11 @@ fn acquire_lock(path: &Path, exclusive: bool) -> Result<File, String> {
     let lock_path = path.with_extension("lock");
     for _ in 0..20 {
         if let Ok(file) = OpenOptions::new().read(true).write(true).create(true).open(&lock_path) {
-            let ok = if exclusive { file.try_lock_exclusive() } else { file.try_lock_shared() };
+            let ok = if exclusive {
+                file.try_lock_exclusive().map_err(|_| ())
+            } else {
+                file.try_lock_shared().map_err(|_| ())
+            };
             if ok.is_ok() { return Ok(file); }
         }
         std::thread::sleep(Duration::from_millis(50));

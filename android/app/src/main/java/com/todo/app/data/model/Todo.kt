@@ -19,6 +19,8 @@ data class Todo(
     var urgency: Int,
     var completed: Boolean,
     val created_at: String,
+    var updated_at: String = created_at,
+    var deleted: Boolean = false,
     var recurring: String = "none", // none, daily, weekly, monthly
     var subtasks: List<Subtask> = emptyList()
 )

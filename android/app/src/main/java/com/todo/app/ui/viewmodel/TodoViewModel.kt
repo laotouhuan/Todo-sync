@@ -19,11 +19,20 @@ import java.util.UUID
 
 class TodoViewModel(val repository: TodoRepository, val configManager: ConfigManager) : ViewModel() {
     
-    val todos = repository.getTodoData().map { it.todos }.stateIn(
+    val todos = repository.getTodoData().map { data -> 
+        data.todos.filter { !it.deleted }
+    }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = emptyList()
     )
+
+    val isSyncing = repository.isSyncing
+
+    init {
+        // 启动时自动同步云端
+        syncWithCloud()
+    }
 
     fun toggleTodoStatus(id: String) {
         viewModelScope.launch {

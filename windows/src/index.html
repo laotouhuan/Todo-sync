@@ -18,6 +18,11 @@
         <div class="status-indicator" id="sync-status"></div>
       </div>
       <div class="header-right">
+        <button id="manual-sync-btn" class="icon-btn" title="云同步">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
+            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="currentColor"/>
+          </svg>
+        </button>
         <button id="stats-btn" class="icon-btn" title="任务回顾">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
             <path d="M3 3V21H21V19H5V3H3ZM7 17H10V10H7V17ZM12 17H15V6H12V17ZM17 17H20V13H17V17Z" fill="currentColor"/>
@@ -231,7 +236,63 @@
       </div>
     </div>
   </div>
-  
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal-overlay">
+    <div class="modal-content glass-panel" style="max-width: 450px;">
+      <h3>同步设置</h3>
+      <div class="modal-body">
+        <div class="input-group">
+          <label>同步模式</label>
+          <select id="setting-sync-mode" class="custom-select">
+            <option value="local">本地坚果云目录</option>
+            <option value="webdav">坚果云 WebDAV (直连)</option>
+          </select>
+        </div>
+
+        <div id="setting-local-group" class="input-group">
+          <label>本地同步目录</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="setting-sync-path" readonly placeholder="未选择" style="flex: 1;" />
+            <button id="setting-choose-dir-btn" class="modal-btn secondary">选择</button>
+          </div>
+        </div>
+
+        <div id="setting-webdav-group" style="display: none; border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 10px;">
+          <div class="input-group">
+            <label>WebDAV 服务器地址</label>
+            <input type="text" id="setting-webdav-url" placeholder="https://dav.jianguoyun.com/dav/" />
+          </div>
+          <div class="input-group">
+            <label>坚果云账号</label>
+            <input type="text" id="setting-webdav-user" placeholder="您的邮箱" />
+          </div>
+          <div class="input-group">
+            <label>应用密码</label>
+            <input type="password" id="setting-webdav-pass" placeholder="坚果云第三方应用密码" />
+          </div>
+          <div class="input-group">
+            <label>云端文件路径</label>
+            <input type="text" id="setting-webdav-filepath" placeholder="我的坚果云/to-do/todo_data.json" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div class="footer-right" style="width: 100%; justify-content: flex-end;">
+          <button id="settings-cancel-btn" class="modal-btn secondary">取消</button>
+          <button id="settings-save-btn" class="modal-btn primary">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 闪电录入（聚光灯模式）遮罩层 -->
+  <div class="modal-overlay" id="quick-add-modal">
+    <div style="width: 80%; max-width: 600px;">
+      <input type="text" id="quick-add-input" placeholder="输入待办事项，按回车闪电保存..." 
+        style="width: 100%; padding: 20px 30px; font-size: 24px; border: none; border-radius: 16px; background: rgba(255,255,255,0.1); color: #fff; outline: none; box-shadow: 0 10px 30px rgba(0,0,0,0.3); backdrop-filter: blur(20px);" />
+    </div>
+  </div>
+
   <script type="module" src="/main.js"></script>
 </body>
 </html>

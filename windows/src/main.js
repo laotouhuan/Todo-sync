@@ -9,6 +9,7 @@ let todoData = {
 };
 
 let currentView = 'list'; // 'list' | 'matrix' | 'stats'
+let appConfig = {};
 let isPinned = false;
 let statsPeriod = 'day'; // 'day' | 'week' | 'month'
 let statsStatus = 'all'; // 'all' | 'completed' | 'uncompleted'
@@ -32,10 +33,17 @@ const ICON_VIEW_MATRIX = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www
 let listEl, formEl, inputEl, statusEl;
 
 // ====== Utility Functions ======
-function setSyncStatus(isSyncing) {
+function setSyncStatus(state) {
     if (statusEl) {
-        if (isSyncing) statusEl.classList.add('syncing');
-        else statusEl.classList.remove('syncing');
+        if (state === 'error') {
+            statusEl.classList.remove('syncing');
+            statusEl.classList.add('error');
+        } else if (state === true) {
+            statusEl.classList.remove('error');
+            statusEl.classList.add('syncing');
+        } else {
+            statusEl.classList.remove('syncing', 'error');
+        }
     }
 }
 
@@ -90,20 +98,77 @@ function setActiveRatingBtn(groupId, value) {
     });
 }
 
+function mergeTodoData(localData, cloudData) {
+    if (!localData || !localData.todos) return cloudData;
+    if (!cloudData || !cloudData.todos) return localData;
+    const mergedTodos = {};
+    const allIds = new Set([...localData.todos.map(t => t.id), ...cloudData.todos.map(t => t.id)]);
+    for (const id of allIds) {
+        const lTodo = localData.todos.find(t => t.id === id);
+        const cTodo = cloudData.todos.find(t => t.id === id);
+        if (lTodo && cTodo) {
+            const lTime = new Date(lTodo.updated_at || lTodo.created_at || 0).getTime();
+            const cTime = new Date(cTodo.updated_at || cTodo.created_at || 0).getTime();
+            mergedTodos[id] = cTime > lTime ? cTodo : lTodo;
+        } else if (lTodo) {
+            mergedTodos[id] = lTodo;
+        } else if (cTodo) {
+            mergedTodos[id] = cTodo;
+        }
+    }
+    const newTodos = Object.values(mergedTodos).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return {
+        version: localData.version || 1,
+        last_updated: new Date().toISOString(),
+        todos: newTodos
+    };
+}
+
 // ====== Data I/O ======
 async function loadData() {
     try {
         setSyncStatus(true);
-        const jsonStr = await invoke("read_todo_data");
-        const parsed = JSON.parse(jsonStr);
-        if (parsed && parsed.todos) {
-            todoData = parsed;
-            render();
+        appConfig = await invoke("get_app_config");
+
+        let localJsonStr = await invoke("read_todo_data").catch(() => "{}");
+        let localData = null;
+        try { localData = JSON.parse(localJsonStr); } catch (e) {}
+
+        if (appConfig.sync_mode === 'webdav') {
+            try {
+                let cloudJsonStr = await invoke("fetch_from_cloud");
+                let cloudData = JSON.parse(cloudJsonStr);
+                
+                let mergedData = mergeTodoData(localData, cloudData);
+                await invoke("write_todo_data", { data: JSON.stringify(mergedData) });
+                
+                todoData = mergedData;
+                render();
+                
+                if (JSON.stringify(mergedData.todos) !== JSON.stringify(cloudData.todos)) {
+                    await saveData();
+                }
+            } catch (e) {
+                console.error("WebDAV pull failed, using local cache:", e);
+                if (localData && localData.todos) {
+                    todoData = localData;
+                    render();
+                }
+                setSyncStatus('error');
+            }
+        } else {
+            if (localData && localData.todos) {
+                todoData = localData;
+                render();
+            }
         }
-        setTimeout(() => setSyncStatus(false), 500);
+
+        if (statusEl && !statusEl.classList.contains('error')) {
+            setTimeout(() => setSyncStatus(false), 500);
+        }
     } catch (e) {
         console.error("Failed to load data:", e);
-        setSyncStatus(false);
+        setSyncStatus('error');
     }
 }
 
@@ -111,11 +176,24 @@ async function saveData() {
     try {
         setSyncStatus(true);
         todoData.last_updated = new Date().toISOString();
-        await invoke("write_todo_data", { data: JSON.stringify(todoData, null, 2) });
+        const jsonStr = JSON.stringify(todoData, null, 2);
+        await invoke("write_todo_data", { data: jsonStr });
+
+        if (appConfig.sync_mode === 'webdav') {
+            try {
+                await invoke("sync_to_cloud", { data: jsonStr });
+            } catch (e) {
+                console.error("WebDAV push failed:", e);
+                alert("推送至云端失败: " + e);
+                setSyncStatus('error');
+                return;
+            }
+        }
+
         setTimeout(() => setSyncStatus(false), 500);
     } catch (e) {
         console.error("Failed to save data:", e);
-        setSyncStatus(false);
+        setSyncStatus('error');
     }
 }
 
@@ -190,6 +268,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr) {
                 todoData.todos.push(clone);
             }
             t.completed = !t.completed;
+            t.updated_at = new Date().toISOString();
             render();
             await saveData();
         }
@@ -387,7 +466,7 @@ function render() {
     const thisMonthStr = getThisMonthString();
 
     // 根据 dateFilter 过滤数据
-    let filteredTodos = [...todoData.todos];
+    let filteredTodos = [...todoData.todos].filter(t => !t.deleted);
     if (dateFilter === 'today') {
         filteredTodos = filteredTodos.filter(t => {
             const isOverdue = t.date && t.date < todayStr && !t.completed && !t.date.includes('-W') && t.date.length !== 7;
@@ -549,32 +628,97 @@ window.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // 设置按钮（选择同步目录）
+    // 手动同步按钮
+    const manualSyncBtn = document.getElementById('manual-sync-btn');
+    if (manualSyncBtn) {
+        manualSyncBtn.addEventListener('click', async () => {
+            const svg = manualSyncBtn.querySelector('svg');
+            if (svg) svg.classList.add('sync-spin');
+            
+            await loadData();
+            
+            if (svg) svg.classList.remove('sync-spin');
+        });
+    }
+
+    // 设置同步目录/WebDAV
     const settingsBtn = document.getElementById('settings-btn');
+    const settingsModal = document.getElementById('settings-modal');
+    const settingsCancelBtn = document.getElementById('settings-cancel-btn');
+    const settingsSaveBtn = document.getElementById('settings-save-btn');
+    const settingSyncMode = document.getElementById('setting-sync-mode');
+    const settingLocalGroup = document.getElementById('setting-local-group');
+    const settingWebdavGroup = document.getElementById('setting-webdav-group');
+    const settingChooseDirBtn = document.getElementById('setting-choose-dir-btn');
+    const settingSyncPath = document.getElementById('setting-sync-path');
+    const settingWebdavUrl = document.getElementById('setting-webdav-url');
+    const settingWebdavUser = document.getElementById('setting-webdav-user');
+    const settingWebdavPass = document.getElementById('setting-webdav-pass');
+    const settingWebdavFilepath = document.getElementById('setting-webdav-filepath');
+
     if (settingsBtn) {
         settingsBtn.addEventListener('click', async () => {
+            appConfig = await invoke("get_app_config");
+            settingSyncMode.value = appConfig.sync_mode || 'local';
+            settingSyncPath.value = appConfig.sync_path || '';
+            settingWebdavUrl.value = appConfig.webdav_url || 'https://dav.jianguoyun.com/dav/';
+            settingWebdavUser.value = appConfig.webdav_username || '';
+            settingWebdavPass.value = appConfig.webdav_password || '';
+            settingWebdavFilepath.value = appConfig.webdav_filepath || '我的坚果云/to-do/todo_data.json';
+            
+            if (settingSyncMode.value === 'webdav') {
+                settingLocalGroup.style.display = 'none';
+                settingWebdavGroup.style.display = 'block';
+            } else {
+                settingLocalGroup.style.display = 'block';
+                settingWebdavGroup.style.display = 'none';
+            }
+            settingsModal.classList.add('active');
+        });
+
+        settingSyncMode.addEventListener('change', (e) => {
+            if (e.target.value === 'webdav') {
+                settingLocalGroup.style.display = 'none';
+                settingWebdavGroup.style.display = 'block';
+            } else {
+                settingLocalGroup.style.display = 'block';
+                settingWebdavGroup.style.display = 'none';
+            }
+        });
+
+        settingChooseDirBtn.addEventListener('click', async () => {
             try {
                 await invoke('set_always_on_top', { alwaysOnTop: true });
                 const selectedPath = await invoke("pick_sync_folder");
                 await invoke('set_always_on_top', { alwaysOnTop: false });
-
                 if (selectedPath) {
+                    settingSyncPath.value = selectedPath;
                     await invoke("set_sync_path", { newPath: selectedPath });
-                    const jsonStr = await invoke("read_todo_data");
-                    const parsed = JSON.parse(jsonStr);
-                    if (parsed && parsed.todos) {
-                        todoData = parsed;
-                        render();
-                    } else {
-                        await saveData();
-                    }
-                    alert("同步目录已更新为:\n" + selectedPath + "\n\n程序将自动从此目录加载/同步数据。");
                 }
             } catch (e) {
-                alert("打开文件夹选择器失败: " + JSON.stringify(e));
-                console.error("Failed to open dialog or set path:", e);
+                console.error("Failed to pick folder", e);
                 await invoke('set_always_on_top', { alwaysOnTop: false });
             }
+        });
+
+        settingsCancelBtn.addEventListener('click', () => {
+            settingsModal.classList.remove('active');
+        });
+
+        settingsSaveBtn.addEventListener('click', async () => {
+            const newConfig = {
+                sync_mode: settingSyncMode.value,
+                sync_path: settingSyncPath.value,
+                webdav_url: settingWebdavUrl.value,
+                webdav_username: settingWebdavUser.value,
+                webdav_password: settingWebdavPass.value,
+                webdav_filepath: settingWebdavFilepath.value,
+            };
+            await invoke("save_app_config", { config: newConfig });
+            appConfig = newConfig;
+            
+            settingsModal.classList.remove('active');
+            await loadData();
         });
     }
 
@@ -833,7 +977,8 @@ window.addEventListener("DOMContentLoaded", () => {
         if (!currentEditingTodo) return;
         const index = todoData.todos.findIndex(t => t.id === currentEditingTodo.id);
         if (index !== -1) {
-            todoData.todos.splice(index, 1);
+            todoData.todos[index].deleted = true;
+            todoData.todos[index].updated_at = new Date().toISOString();
             render();
             await saveData();
         }
@@ -855,6 +1000,7 @@ window.addEventListener("DOMContentLoaded", () => {
             const recurringSelect = document.getElementById('edit-recurring');
             todoData.todos[index].recurring = recurringSelect ? recurringSelect.value : 'none';
             todoData.todos[index].subtasks = JSON.parse(JSON.stringify(currentEditingSubtasks));
+            todoData.todos[index].updated_at = new Date().toISOString();
             render();
             await saveData();
         }
@@ -915,6 +1061,8 @@ window.addEventListener("DOMContentLoaded", () => {
             urgency: urgency,
             completed: false,
             created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            deleted: false,
             recurring: 'none',
             subtasks: []
         };
@@ -925,9 +1073,59 @@ window.addEventListener("DOMContentLoaded", () => {
         await saveData();
     });
 
-    // 监听后端文件变动，自动同步数据
+    // Watch file changes
     listen("todo_data_changed", () => {
+        if (appConfig.sync_mode === 'webdav') {
+            return; // 避免 WebDAV 模式下本地写入引发死循环 GET 请求
+        }
         loadData();
+    });
+
+    // 闪电录入逻辑
+    const quickAddModal = document.getElementById('quick-add-modal');
+    const quickAddInput = document.getElementById('quick-add-input');
+    
+    listen('trigger-quick-add', (event) => {
+        if (quickAddModal && quickAddInput) {
+            quickAddModal.classList.add('active');
+            quickAddInput.value = '';
+            setTimeout(() => quickAddInput.focus(), 100);
+        }
+    });
+
+    quickAddInput.addEventListener('keydown', async (e) => {
+        if (e.key === 'Escape') {
+            quickAddModal.classList.remove('active');
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const content = quickAddInput.value.trim();
+            if (!content) return;
+            
+            const newTodo = {
+                id: crypto.randomUUID(),
+                content: content,
+                date: getTodayString(),
+                time: null,
+                importance: 2,
+                urgency: 2,
+                completed: false,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                deleted: false,
+                recurring: 'none',
+                subtasks: []
+            };
+            todoData.todos.push(newTodo);
+            quickAddModal.classList.remove('active');
+            render();
+            await saveData();
+        }
+    });
+
+    quickAddModal.addEventListener('mousedown', (e) => {
+        if (e.target === quickAddModal) {
+            quickAddModal.classList.remove('active');
+        }
     });
 
     // 初始加载

@@ -71,7 +71,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
             val todayFocus = currentData.todos.filter { t ->
                 val dateStr = t.date
                 val isOverdue = dateStr != null && dateStr < todayStr && !t.completed && !dateStr.contains("-W") && dateStr.length != 7
-                dateStr == todayStr || isOverdue || dateStr == null || dateStr == thisWeekStr || dateStr == thisMonthStr
+                !t.deleted && (dateStr == todayStr || isOverdue || dateStr == null || dateStr == thisWeekStr || dateStr == thisMonthStr)
             }.sortedWith(Comparator { a, b ->
                 if (a.completed != b.completed) return@Comparator if (a.completed) 1 else -1
                 val scoreA = a.importance + a.urgency
@@ -88,6 +88,13 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
             val dateObj = LocalDate.now()
             val formatter = java.time.format.DateTimeFormatter.ofPattern("M月d日 EEEE", Locale.CHINESE)
             val dateString = dateObj.format(formatter)
+
+            val syncStatus = repository.syncStatus
+            val statusColor = ColorProvider(when (syncStatus) {
+                1 -> Color(0xFF1890FF)
+                2 -> Color(0xFFFA8C16)
+                else -> Color(0xFF52C41A)
+            })
 
             Column(
                 modifier = GlanceModifier
@@ -110,6 +117,19 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                             Text(
                                 text = dateString,
                                 style = TextStyle(color = textVariantColor, fontSize = 12.sp)
+                            )
+                        }
+                        
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = GlanceModifier.size(8.dp).background(statusColor).cornerRadius(4.dp)) {}
+                            Spacer(modifier = GlanceModifier.width(8.dp))
+                            Image(
+                                provider = ImageProvider(android.R.drawable.ic_popup_sync),
+                                contentDescription = "Sync",
+                                modifier = GlanceModifier
+                                    .size(28.dp)
+                                    .padding(4.dp)
+                                    .clickable(actionRunCallback<SyncActionCallback>())
                             )
                         }
                     }
@@ -222,6 +242,13 @@ class ToggleActionCallback : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val todoId = parameters[TodoIdKey] ?: return
         TodoApplication.instance.repository.toggleTodoStatus(todoId)
+        refreshAllWidgets(context)
+    }
+}
+
+class SyncActionCallback : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        TodoApplication.instance.repository.syncWithCloud()
         refreshAllWidgets(context)
     }
 }
