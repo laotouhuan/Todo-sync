@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TodoData",
+  "description": "Schema for Nutstore To-Do App Data",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "integer",
+      "description": "Data schema version"
+    },
+    "last_updated": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last updated timestamp in ISO 8601 format"
+    },
+    "todos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "content": {
+            "type": "string"
+          },
+          "date": {
+            "type": ["string", "null"]
+          },
+          "time": {
+            "type": ["string", "null"]
+          },
+          "importance": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "urgency": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recurring": {
+            "type": "string",
+            "default": "none"
+          },
+          "subtasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "completed": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["id", "content", "completed"]
+            },
+            "default": []
+          }
+        },
+        "required": [
+          "id",
+          "content",
+          "importance",
+          "urgency",
+          "completed",
+          "created_at"
+        ]
+      }
+    }
+  },
+  "required": ["version", "last_updated", "todos"]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "todo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  },
+  "dependencies": {
+    "acorn": "^8.16.0",
+    "esprima": "^4.0.1"
+  }
+}
