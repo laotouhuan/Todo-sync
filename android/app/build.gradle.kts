@@ -58,6 +58,9 @@ dependencies {
     implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.glance.material3)
 
+    // Reorderable
+    implementation(libs.reorderable)
+
     // Serialization
     implementation(libs.kotlinx.serialization.json)
 

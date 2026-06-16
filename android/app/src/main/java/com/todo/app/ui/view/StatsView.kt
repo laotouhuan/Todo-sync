@@ -14,6 +14,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import com.todo.app.ui.viewmodel.TodoViewModel
+import com.todo.app.data.model.Todo
+import com.todo.app.data.model.TodoComparator
+import com.todo.app.data.model.isOverdue
+import com.todo.app.data.model.weekStringOf
+import com.todo.app.data.model.monthStringOf
 import java.time.LocalDate
 import java.time.temporal.WeekFields
 import java.util.Locale
@@ -24,12 +29,10 @@ fun StatsView(viewModel: TodoViewModel) {
     var period by remember { mutableStateOf("day") }
     var targetDate by remember { mutableStateOf(LocalDate.now()) }
     var filterStatus by remember { mutableStateOf("all") } // all, completed, uncompleted
+    var showEditDialogFor by remember { mutableStateOf<Todo?>(null) }
 
-    val targetWeekStr = run {
-        val week = targetDate.get(WeekFields.of(Locale.getDefault()).weekOfYear())
-        "${targetDate.year}-W${week.toString().padStart(2, '0')}"
-    }
-    val targetMonthStr = "${targetDate.year}-${targetDate.monthValue.toString().padStart(2, '0')}"
+    val targetWeekStr = weekStringOf(targetDate)
+    val targetMonthStr = monthStringOf(targetDate)
 
     val periodTodos = when (period) {
         "day" -> todos.filter { it.date == targetDate.toString() }
@@ -49,9 +52,7 @@ fun StatsView(viewModel: TodoViewModel) {
     val progress = if (total == 0) 0f else completedCount.toFloat() / total
     
     val todayStr = LocalDate.now().toString()
-    val overdueCount = periodTodos.count {
-        it.date != null && it.date!! < todayStr && !it.completed && !it.date!!.contains("-W") && it.date!!.length != 7
-    }
+    val overdueCount = periodTodos.count { it.isOverdue(todayStr) }
 
     val displayTodos = when (filterStatus) {
         "completed" -> periodTodos.filter { it.completed }
@@ -82,10 +83,7 @@ fun StatsView(viewModel: TodoViewModel) {
             
             val label = when (period) {
                 "day" -> targetDate.toString()
-                "week" -> {
-                    val week = targetDate.get(WeekFields.of(Locale.getDefault()).weekOfYear())
-                    "${targetDate.year}年 第${week}周"
-                }
+                "week" -> "${targetDate.year}年 第${targetDate.get(WeekFields.of(Locale.getDefault()).weekOfYear())}周"
                 else -> "${targetDate.year}年 ${targetDate.monthValue}月"
             }
             Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
@@ -140,10 +138,35 @@ fun StatsView(viewModel: TodoViewModel) {
         }
 
         // List
+        val tomorrowStr = LocalDate.now().plusDays(1).toString()
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(displayTodos) { todo ->
-                TodoItemRow(todo, viewModel) {}
+                TodoItemRow(
+                    todo = todo,
+                    viewModel = viewModel,
+                    onEdit = { showEditDialogFor = todo },
+                    onMoveToTomorrow = {
+                        viewModel.updateTodo(todo.copy(date = tomorrowStr))
+                    },
+                    todayStr = todayStr,
+                    tomorrowStr = tomorrowStr
+                )
             }
         }
+    }
+
+    showEditDialogFor?.let { todo ->
+        EditTodoDialog(
+            todo = todo,
+            onDismiss = { showEditDialogFor = null },
+            onAutoSave = { updated -> 
+                viewModel.updateTodo(updated)
+                showEditDialogFor = updated 
+            },
+            onDelete = {
+                viewModel.deleteTodo(todo.id)
+                showEditDialogFor = null
+            }
+        )
     }
 }

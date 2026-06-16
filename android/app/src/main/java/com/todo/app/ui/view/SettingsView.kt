@@ -64,29 +64,29 @@ fun SettingsView(viewModel: TodoViewModel) {
                         label = { Text("WebDAV 服务器地址") },
                         modifier = Modifier.fillMaxWidth()
                     )
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
-                value = username,
-                onValueChange = { username = it },
-                label = { Text("坚果云账号 (邮箱)") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
-                value = appPassword,
-                onValueChange = { appPassword = it },
-                label = { Text("第三方应用密码") },
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
-                value = filePath,
-                onValueChange = { filePath = it },
-                label = { Text("云端文件路径") },
-                modifier = Modifier.fillMaxWidth()
-                )
-            }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = username,
+                        onValueChange = { username = it },
+                        label = { Text("坚果云账号 (邮箱)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = appPassword,
+                        onValueChange = { appPassword = it },
+                        label = { Text("第三方应用密码") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = filePath,
+                        onValueChange = { filePath = it },
+                        label = { Text("云端文件路径") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             } // Close ElevatedCard
             
             Spacer(modifier = Modifier.height(24.dp))

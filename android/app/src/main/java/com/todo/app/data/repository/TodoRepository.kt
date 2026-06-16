@@ -13,11 +13,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import com.todo.app.data.model.nowIso
+import com.todo.app.data.model.nowInstant
 import java.time.OffsetDateTime
-import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 /**
@@ -30,19 +33,29 @@ class TodoRepository(private val context: Context) {
         prettyPrint = true
     }
 
-    private fun nowIso(): String =
-        java.time.OffsetDateTime.now().format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME)
-    
     private val dataFile = File(context.filesDir, "todo_data.json")
+    private val tmpFile = File(context.filesDir, "todo_data.tmp")
     private val configManager = ConfigManager(context)
     private var webDavClient: WebDavClient? = null
     // Repository-scoped coroutine scope: SupervisorJob ensures one failed upload doesn't cancel future ones.
     // Not cancelled explicitly — TodoRepository is an app-singleton; call repoScope.cancel() if ever scoped shorter.
     private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val mutex = Mutex()
     
     private fun initWebDavClient() {
+        if (webDavClient != null) return
         if (configManager.isConfigured()) {
             webDavClient = WebDavClient(configManager.webDavUrl, configManager.username, configManager.appPassword)
+        }
+    }
+
+    /** Atomic write: write to tmp file then rename to prevent data corruption on crash. */
+    private fun atomicWriteJson(json: String) {
+        tmpFile.writeText(json)
+        if (!tmpFile.renameTo(dataFile)) {
+            // renameTo can fail on some Android filesystems; fall back to direct write
+            dataFile.writeText(json)
+            tmpFile.delete()
         }
     }
 
@@ -55,7 +68,8 @@ class TodoRepository(private val context: Context) {
     )
 
     val isSyncing = MutableStateFlow(false)
-    var syncStatus = 0 // 0: success/none, 1: syncing, 2: error
+    private val _syncStatus = MutableStateFlow(0) // 0: success/none, 1: syncing, 2: error
+    val syncStatus: kotlinx.coroutines.flow.StateFlow<Int> = _syncStatus.asStateFlow()
 
     init {
         loadFromDisk()
@@ -66,9 +80,23 @@ class TodoRepository(private val context: Context) {
             try {
                 val jsonString = dataFile.readText()
                 val parsed = jsonFormat.decodeFromString<TodoData>(jsonString)
-                _todoData.value = parsed
+
+                // 旧数据迁移：所有 todo 的 order 都为 0.0 时，按 created_at 降序分配递增序号
+                val todos = parsed.todos
+                if (todos.size > 1 && todos.all { it.order == 0.0 }) {
+                    val sorted = todos.sortedByDescending { it.created_at }
+                    sorted.forEachIndexed { index, todo -> todo.order = index.toDouble() }
+                    _todoData.value = parsed.copy(todos = sorted)
+                    // 持久化迁移结果
+                    try { atomicWriteJson(jsonFormat.encodeToString(TodoData.serializer(), _todoData.value)) } catch (_: Exception) {}
+                } else {
+                    _todoData.value = parsed
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(context, "数据加载失败，已使用空列表: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
@@ -105,27 +133,29 @@ class TodoRepository(private val context: Context) {
             ?.map { it.name } ?: emptyList()
     }
 
-    suspend fun restoreFromBackup(filename: String): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val backupFile = File(File(context.filesDir, "backups"), filename)
-            if (backupFile.exists()) {
-                createLocalBackup() // backup the current state before restoring
-                
-                val jsonString = backupFile.readText()
-                val parsed = jsonFormat.decodeFromString<TodoData>(jsonString)
-                _todoData.value = parsed
-                dataFile.writeText(jsonString)
-                
-                initWebDavClient()
-                webDavClient?.uploadFile(configManager.filePath, jsonString)
-                
-                com.todo.app.widget.refreshAllWidgets(context)
-                return@withContext true
+    suspend fun restoreFromBackup(filename: String): Boolean = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            try {
+                val backupFile = File(File(context.filesDir, "backups"), filename)
+                if (backupFile.exists()) {
+                    createLocalBackup() // backup the current state before restoring
+
+                    val jsonString = backupFile.readText()
+                    val parsed = jsonFormat.decodeFromString<TodoData>(jsonString)
+                    _todoData.value = parsed
+                    atomicWriteJson(jsonString)
+
+                    initWebDavClient()
+                    webDavClient?.uploadFile(configManager.filePath, jsonString)
+
+                    com.todo.app.widget.refreshAllWidgets(context)
+                    return@withContext true
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+            return@withContext false
         }
-        return@withContext false
     }
 
     private fun mergeTodoData(local: TodoData, cloud: TodoData): TodoData {
@@ -150,10 +180,10 @@ class TodoRepository(private val context: Context) {
         )
     }
 
-    suspend fun syncWithCloud() = withContext(Dispatchers.IO) {
+    suspend fun syncWithCloud() = mutex.withLock { withContext(Dispatchers.IO) {
         if (isSyncing.value) return@withContext
         isSyncing.value = true
-        syncStatus = 1
+        _syncStatus.value = 1
         com.todo.app.widget.refreshAllWidgets(context)
         try {
             initWebDavClient()
@@ -171,7 +201,7 @@ class TodoRepository(private val context: Context) {
                     if (localChanged) {
                         createLocalBackup()
                         _todoData.value = mergedData
-                        dataFile.writeText(mergedJson)
+                        atomicWriteJson(mergedJson)
                         com.todo.app.widget.refreshAllWidgets(context)
                     }
                     if (cloudChanged || localChanged) {
@@ -184,11 +214,11 @@ class TodoRepository(private val context: Context) {
                 // 当云端不存在该文件，或获取失败时，尝试将本地数据作为初始版本上传
                 client.uploadFile(configManager.filePath, jsonFormat.encodeToString(_todoData.value))
             }
-            syncStatus = 0
+            _syncStatus.value = 0
             com.todo.app.widget.refreshAllWidgets(context)
         } catch (e: Exception) {
             e.printStackTrace()
-            syncStatus = 2
+            _syncStatus.value = 2
             com.todo.app.widget.refreshAllWidgets(context)
             withContext(Dispatchers.Main) {
                 android.widget.Toast.makeText(context, "同步失败: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
@@ -197,8 +227,9 @@ class TodoRepository(private val context: Context) {
             isSyncing.value = false
         }
     }
+    }
 
-    suspend fun forcePullCloud() = withContext(Dispatchers.IO) {
+    suspend fun forcePullCloud() = mutex.withLock { withContext(Dispatchers.IO) {
         try {
             initWebDavClient()
             val client = webDavClient ?: throw Exception("配置信息未填写完整")
@@ -207,7 +238,7 @@ class TodoRepository(private val context: Context) {
                 createLocalBackup()
                 val cloudData = jsonFormat.decodeFromString<TodoData>(cloudJson)
                 _todoData.value = cloudData
-                dataFile.writeText(cloudJson)
+                atomicWriteJson(cloudJson)
                 com.todo.app.widget.refreshAllWidgets(context)
                 withContext(Dispatchers.Main) {
                     android.widget.Toast.makeText(context, "强制拉取成功！", android.widget.Toast.LENGTH_SHORT).show()
@@ -225,6 +256,7 @@ class TodoRepository(private val context: Context) {
             }
         }
     }
+    }
 
     fun getTodoData(): Flow<TodoData> = _todoData.asStateFlow()
     
@@ -232,45 +264,50 @@ class TodoRepository(private val context: Context) {
     fun getCurrentData(): TodoData = _todoData.value
 
     suspend fun saveTodos(todos: List<Todo>) = withContext(Dispatchers.IO) {
+        val previous = _todoData.value
         val updated = TodoData(
-            version = _todoData.value.version,
+            version = previous.version,
             last_updated = nowIso(),
             todos = todos
         )
         _todoData.value = updated
         try {
             val jsonString = jsonFormat.encodeToString(updated)
-            dataFile.writeText(jsonString)
+            atomicWriteJson(jsonString)
             
             // 立即刷新小组件
             com.todo.app.widget.refreshAllWidgets(context)
             
             // 异步后台同步到云端，不阻塞当前流程
             repoScope.launch {
-                syncStatus = 1
+                _syncStatus.value = 1
                 try {
                     initWebDavClient()
                     webDavClient?.uploadFile(configManager.filePath, jsonString)
-                    syncStatus = 0
+                    _syncStatus.value = 0
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    syncStatus = 2
+                    _syncStatus.value = 2
                 }
                 com.todo.app.widget.refreshAllWidgets(context)
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            _todoData.value = previous // rollback on write failure
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(context, "保存失败: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
         }
     }
 
-    suspend fun addTodo(todo: Todo) {
+    suspend fun addTodo(todo: Todo) = mutex.withLock {
         val current = _todoData.value.todos.toMutableList()
         todo.updated_at = nowIso()
         current.add(todo)
         saveTodos(current)
     }
 
-    suspend fun updateTodo(todo: Todo) {
+    suspend fun updateTodo(todo: Todo) = mutex.withLock {
         val current = _todoData.value.todos.toMutableList()
         val index = current.indexOfFirst { it.id == todo.id }
         if (index != -1) {
@@ -280,7 +317,21 @@ class TodoRepository(private val context: Context) {
         }
     }
 
-    suspend fun deleteTodo(id: String) {
+    suspend fun batchUpdateTodos(updatedTodos: List<Todo>) = mutex.withLock {
+        val current = _todoData.value.todos.toMutableList()
+        val indexMap = current.withIndex().associate { (i, t) -> t.id to i }
+        val now = nowIso()
+        for (todo in updatedTodos) {
+            val index = indexMap[todo.id] ?: -1
+            if (index != -1) {
+                todo.updated_at = now
+                current[index] = todo
+            }
+        }
+        saveTodos(current)
+    }
+
+    suspend fun deleteTodo(id: String) = mutex.withLock {
         val current = _todoData.value.todos.toMutableList()
         val index = current.indexOfFirst { it.id == id }
         if (index != -1) {
@@ -293,7 +344,7 @@ class TodoRepository(private val context: Context) {
         }
     }
 
-    suspend fun toggleTodoStatus(id: String) {
+    suspend fun toggleTodoStatus(id: String) = mutex.withLock {
         val current = _todoData.value.todos.toMutableList()
         val index = current.indexOfFirst { it.id == id }
         if (index != -1) {
@@ -311,8 +362,10 @@ class TodoRepository(private val context: Context) {
                 )
                 current.add(clone)
             }
+            val isCompletedNow = !todo.completed
             val updatedTodo = todo.copy(
-                completed = !todo.completed,
+                completed = isCompletedNow,
+                completed_at = if (isCompletedNow) nowInstant() else null,
                 updated_at = nowIso()
             )
             current[index] = updatedTodo

@@ -11,10 +11,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Refresh
@@ -24,11 +27,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.shadow
+import androidx.compose.animation.core.animateDpAsState
+import org.burnoutcrew.reorderable.rememberReorderableLazyListState
+import org.burnoutcrew.reorderable.reorderable
+import org.burnoutcrew.reorderable.ReorderableItem
+import org.burnoutcrew.reorderable.detectReorderAfterLongPress
 import com.todo.app.data.model.Todo
+import com.todo.app.data.model.DateStrings
+import com.todo.app.data.model.TodoComparator
+import com.todo.app.data.model.isOverdue
+import com.todo.app.data.model.groupTodosByDate
+import com.todo.app.data.model.getDateLabel
+import com.todo.app.data.model.getCompletionStatusLabel
+import com.todo.app.data.model.isWeekDate
+import com.todo.app.data.model.isMonthDate
+import com.todo.app.data.model.nowInstant
+import com.todo.app.data.model.nowIso
 import com.todo.app.ui.viewmodel.TodoViewModel
 import java.time.LocalDate
-import java.time.temporal.WeekFields
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,20 +54,76 @@ fun ListView(viewModel: TodoViewModel) {
     val isSyncing by viewModel.isSyncing.collectAsState()
     var selectedTab by remember { mutableStateOf(0) }
     var showEditDialogFor by remember { mutableStateOf<Todo?>(null) }
-    
+
     var expandToday by remember { mutableStateOf(true) }
     var expandWeek by remember { mutableStateOf(false) }
     var expandMonth by remember { mutableStateOf(false) }
-    
-    val todayStr = LocalDate.now().toString()
-    val thisWeekStr = run {
-        val date = LocalDate.now()
-        val week = date.get(WeekFields.of(Locale.getDefault()).weekOfYear())
-        "${date.year}-W${week.toString().padStart(2, '0')}"
+
+    val dates = remember { DateStrings.now() }
+    val todayStr = dates.today
+    val thisWeekStr = dates.thisWeek
+    val thisMonthStr = dates.thisMonth
+
+    val todayTasksOriginal = remember(todos, todayStr) {
+        val filtered = todos.filter {
+            it.date == todayStr || it.isOverdue(todayStr) || it.date == null
+        }
+        val hasDate = filtered.filter { it.date != null }.sortedWith(TodoComparator)
+        val noDate = filtered.filter { it.date == null }.sortedWith(TodoComparator)
+        
+        val list = mutableListOf<Todo>()
+        list.addAll(hasDate)
+        list.add(Todo(id = "SEPARATOR", content = "SEPARATOR", created_at = "", updated_at = ""))
+        list.addAll(noDate)
+        list
     }
-    val thisMonthStr = run {
-        val date = LocalDate.now()
-        "${date.year}-${date.monthValue.toString().padStart(2, '0')}"
+    var reorderableTodayTasks by remember { mutableStateOf(todayTasksOriginal) }
+    
+    val reorderState = rememberReorderableLazyListState(
+        onMove = { from, to ->
+            val fromId = from.key as? String ?: return@rememberReorderableLazyListState
+            val toId = to.key as? String ?: return@rememberReorderableLazyListState
+            val fromIndex = reorderableTodayTasks.indexOfFirst { it.id == fromId }
+            val toIndex = reorderableTodayTasks.indexOfFirst { it.id == toId }
+            if (fromIndex != -1 && toIndex != -1) {
+                if (fromId == "SEPARATOR") return@rememberReorderableLazyListState
+                reorderableTodayTasks = reorderableTodayTasks.toMutableList().apply {
+                    add(toIndex, removeAt(fromIndex))
+                }
+            }
+        },
+        canDragOver = { draggedOver, _ -> 
+            reorderableTodayTasks.any { it.id == draggedOver.key }
+        },
+        onDragEnd = { _, _ ->
+            val sepIndex = reorderableTodayTasks.indexOfFirst { it.id == "SEPARATOR" }
+            val updatedList = mutableListOf<Todo>()
+            reorderableTodayTasks.forEachIndexed { index, todo ->
+                if (todo.id == "SEPARATOR") return@forEachIndexed
+                var newDate = todo.date
+                if (sepIndex != -1) {
+                    if (index < sepIndex && todo.date == null) {
+                        newDate = todayStr
+                    } else if (index > sepIndex && todo.date != null && !isWeekDate(todo.date) && !isMonthDate(todo.date)) {
+                        newDate = null
+                    }
+                }
+                val newOrder = index.toDouble()
+                if (todo.order != newOrder || todo.date != newDate) {
+                    updatedList.add(todo.copy(order = newOrder, date = newDate))
+                }
+            }
+            if (updatedList.isNotEmpty()) {
+                viewModel.batchUpdateTodos(updatedList)
+            }
+        }
+    )
+
+    val isDragging = reorderState.draggingItemKey != null
+    LaunchedEffect(todayTasksOriginal) {
+        if (!isDragging) {
+            reorderableTodayTasks = todayTasksOriginal
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -69,36 +142,139 @@ fun ListView(viewModel: TodoViewModel) {
         }
         
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+            val filtered = remember(todos, todayStr, thisWeekStr, thisMonthStr) {
+                todos.filter {
+                    it.date == todayStr || it.isOverdue(todayStr) || it.date == null || it.date == thisWeekStr || it.date == thisMonthStr
+                }.sortedWith(TodoComparator)
+            }
+
+            val sortedGroups = remember(todos, todayStr) {
+                val groups = groupTodosByDate(todos, todayStr)
+                val dateComparatorAsc = Comparator<Todo> { a, b ->
+                    val dateCmp = (a.date ?: "").compareTo(b.date ?: "")
+                    if (dateCmp != 0) dateCmp else TodoComparator.compare(a, b)
+                }
+                val pastComparator = Comparator<Todo> { a, b ->
+                    if (a.completed != b.completed) return@Comparator if (a.completed) 1 else -1
+                    val dateCmp = (b.date ?: "").compareTo(a.date ?: "")
+                    if (dateCmp != 0) dateCmp else TodoComparator.compare(a, b)
+                }
+                listOf(
+                    groups.today.sortedWith(TodoComparator),
+                    groups.noDate.sortedWith(TodoComparator),
+                    groups.week.sortedWith(TodoComparator),
+                    groups.month.sortedWith(TodoComparator),
+                    groups.future.sortedWith(dateComparatorAsc),
+                    groups.past.sortedWith(pastComparator)
+                )
+            }
+            val sortedToday = sortedGroups[0]
+            val sortedNoDate = sortedGroups[1]
+            val sortedWeek = sortedGroups[2]
+            val sortedMonth = sortedGroups[3]
+            val sortedFuture = sortedGroups[4]
+            val sortedPast = sortedGroups[5]
+
+            LazyColumn(
+                state = reorderState.listState,
+                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp).reorderable(reorderState)
+            ) {
+                val tomorrowStr = dates.tomorrow
+                val todoItem: @Composable (Todo) -> Unit = { todo ->
+                    TodoItemRow(
+                        todo = todo,
+                        viewModel = viewModel,
+                        onEdit = { showEditDialogFor = todo },
+                        onMoveToTomorrow = { viewModel.updateTodo(todo.copy(date = tomorrowStr)) },
+                        todayStr = todayStr,
+                        tomorrowStr = tomorrowStr
+                    )
+                }
+
                 if (selectedTab == 0) {
-                    val filtered = todos.filter {
-                        val isOverdue = it.date != null && it.date!! < todayStr && !it.completed && !it.date!!.contains("-W") && it.date!!.length != 7
-                        it.date == todayStr || isOverdue || it.date == null || it.date == thisWeekStr || it.date == thisMonthStr
-                    }.sortedWith(TodoComparator)
+
                     
                     item { GroupHeader("今日任务", Color(0xFF1890FF), expandToday) { expandToday = !expandToday } }
                     if (expandToday) {
-                        items(filtered.filter { it.date != thisWeekStr && it.date != thisMonthStr }) { 
-                            TodoItemRow(it, viewModel) { showEditDialogFor = it }
+                        items(
+                            items = reorderableTodayTasks,
+                            key = { it.id }
+                        ) { item ->
+                            if (item.id == "SEPARATOR") {
+                                ReorderableItem(reorderState, key = item.id) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 12.dp)
+                                            .height(2.dp)
+                                            .background(Color.LightGray.copy(alpha = 0.5f), RoundedCornerShape(2.dp))
+                                    )
+                                }
+                            } else {
+                                ReorderableItem(reorderState, key = item.id) { isDragging ->
+                                    val elevation by animateDpAsState(if (isDragging) 8.dp else 0.dp)
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .shadow(elevation, RoundedCornerShape(12.dp))
+                                            .detectReorderAfterLongPress(reorderState)
+                                    ) {
+                                        TodoItemRow(
+                                            todo = item,
+                                            viewModel = viewModel,
+                                            onEdit = { showEditDialogFor = item },
+                                            onMoveToTomorrow = {
+                                                viewModel.updateTodo(item.copy(date = dates.tomorrow))
+                                            },
+                                            todayStr = todayStr,
+                                            tomorrowStr = dates.tomorrow
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
+
+
                     item { GroupHeader("本周任务", Color(0xFFFADB14), expandWeek) { expandWeek = !expandWeek } }
                     if (expandWeek) {
-                        items(filtered.filter { it.date == thisWeekStr }) { 
-                            TodoItemRow(it, viewModel) { showEditDialogFor = it }
-                        }
+                        items(
+                            items = filtered.filter { it.date == thisWeekStr },
+                            key = { it.id }
+                        ) { todoItem(it) }
                     }
                     item { GroupHeader("本月任务", Color(0xFFFF7A45), expandMonth) { expandMonth = !expandMonth } }
                     if (expandMonth) {
-                        items(filtered.filter { it.date == thisMonthStr }) { 
-                            TodoItemRow(it, viewModel) { showEditDialogFor = it }
-                        }
+                        items(
+                            items = filtered.filter { it.date == thisMonthStr },
+                            key = { it.id }
+                        ) { todoItem(it) }
                     }
                 } else {
-                    val sorted = todos.sortedWith(TodoComparator)
-                    item { GroupHeader("所有任务", Color.Gray, true, null) }
-                    items(sorted) { 
-                        TodoItemRow(it, viewModel) { showEditDialogFor = it }
+
+                    if (sortedToday.isNotEmpty()) {
+                        item { GroupHeader("今天", MaterialTheme.colorScheme.onSurface, true, null) }
+                        items(items = sortedToday, key = { it.id }) { todoItem(it) }
+                    }
+                    if (sortedNoDate.isNotEmpty()) {
+                        item { GroupHeader("无日期", Color.Gray, true, null) }
+                        items(items = sortedNoDate, key = { it.id }) { todoItem(it) }
+                    }
+                    if (sortedWeek.isNotEmpty()) {
+                        item { GroupHeader("周任务", Color(0xFFFADB14), true, null) }
+                        items(items = sortedWeek, key = { it.id }) { todoItem(it) }
+                    }
+                    if (sortedMonth.isNotEmpty()) {
+                        item { GroupHeader("月任务", Color(0xFFFADB14), true, null) }
+                        items(items = sortedMonth, key = { it.id }) { todoItem(it) }
+                    }
+                    if (sortedFuture.isNotEmpty()) {
+                        item { GroupHeader("未来计划", MaterialTheme.colorScheme.onSurface, true, null) }
+                        items(items = sortedFuture, key = { it.id }) { todoItem(it) }
+                    }
+                    if (sortedPast.isNotEmpty()) {
+                        item { GroupHeader("过往记忆", Color.Gray, true, null) }
+                        items(items = sortedPast, key = { it.id }) { todoItem(it) }
                     }
                 }
             }
@@ -130,9 +306,9 @@ fun ListView(viewModel: TodoViewModel) {
         EditTodoDialog(
             todo = todo,
             onDismiss = { showEditDialogFor = null },
-            onSave = { updated -> 
+            onAutoSave = { updated -> 
                 viewModel.updateTodo(updated)
-                showEditDialogFor = null 
+                showEditDialogFor = updated
             },
             onDelete = {
                 viewModel.deleteTodo(todo.id)
@@ -140,14 +316,6 @@ fun ListView(viewModel: TodoViewModel) {
             }
         )
     }
-}
-
-val TodoComparator = Comparator<Todo> { a, b ->
-    if (a.completed != b.completed) return@Comparator if (a.completed) 1 else -1
-    val scoreA = a.importance + a.urgency
-    val scoreB = b.importance + b.urgency
-    if (scoreA != scoreB) return@Comparator scoreB - scoreA
-    b.created_at.compareTo(a.created_at)
 }
 
 @Composable
@@ -183,27 +351,42 @@ fun GroupHeader(title: String, color: Color, isExpanded: Boolean = true, onClick
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TodoItemRow(todo: Todo, viewModel: TodoViewModel, onClick: () -> Unit) {
+fun TodoItemRow(
+    todo: Todo,
+    viewModel: TodoViewModel,
+    onEdit: () -> Unit,
+    onMoveToTomorrow: () -> Unit,
+    todayStr: String = "",
+    tomorrowStr: String = ""
+) {
     val coroutineScope = rememberCoroutineScope()
     val offsetX = remember { Animatable(0f) }
     val density = androidx.compose.ui.platform.LocalDensity.current.density
-    val maxSwipePx = -80f * density
+    val maxSwipePx = -60f * density
+    var expanded by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp)
-            .background(Color.Red, RoundedCornerShape(12.dp))
+            .background(Color.Transparent)
     ) {
-        Box(
+        Row(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
-                .width(80.dp)
-                .clickable { viewModel.deleteTodo(todo.id) },
-            contentAlignment = Alignment.Center
+                .padding(end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Filled.Delete, contentDescription = "删除", tint = Color.White)
+            IconButton(
+                onClick = { 
+                    coroutineScope.launch { offsetX.animateTo(0f) }
+                    onEdit() 
+                },
+                modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+            ) {
+                Icon(Icons.Filled.Edit, contentDescription = "修改", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+            }
         }
 
         Card(
@@ -214,7 +397,8 @@ fun TodoItemRow(todo: Todo, viewModel: TodoViewModel, onClick: () -> Unit) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
                             coroutineScope.launch {
-                                if (offsetX.value < maxSwipePx / 2) {
+                                // 降低触发阈值，用户只要滑动 20% 即可自动弹开
+                                if (offsetX.value < maxSwipePx / 5) {
                                     offsetX.animateTo(maxSwipePx)
                                 } else {
                                     offsetX.animateTo(0f)
@@ -228,44 +412,74 @@ fun TodoItemRow(todo: Todo, viewModel: TodoViewModel, onClick: () -> Unit) {
                             offsetX.snapTo(newValue)
                         }
                     }
-                }
-                .clickable {
-                    if (offsetX.value < -5f) {
-                        coroutineScope.launch { offsetX.animateTo(0f) }
-                    } else {
-                        onClick()
-                    }
                 },
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
-            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = todo.completed, onCheckedChange = { viewModel.toggleTodoStatus(todo.id) })
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = todo.content, 
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (todo.completed) Color.Gray else MaterialTheme.colorScheme.onSurface,
-                    textDecoration = if (todo.completed) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
-                )
-                val meta = mutableListOf<String>()
-                todo.date?.let { meta.add("📅 $it") }
-                if (todo.recurring != "none") meta.add("🔄")
-                if (todo.subtasks.isNotEmpty()) meta.add("📋 ${todo.subtasks.count { it.completed }}/${todo.subtasks.size}")
-                if (meta.isNotEmpty()) {
-                    Text(text = meta.joinToString(" | "), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Column {
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = todo.completed, onCheckedChange = { viewModel.toggleTodoStatus(todo.id) })
+                    Column(modifier = Modifier.weight(1f).clickable { 
+                        if (todo.subtasks.isNotEmpty()) expanded = !expanded
+                    }) {
+                        Text(
+                            text = todo.content, 
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (todo.completed) Color.Gray else MaterialTheme.colorScheme.onSurface,
+                            textDecoration = if (todo.completed) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
+                        )
+                        val meta = mutableListOf<String>()
+                        todo.date?.let {
+                            val dateLabel = todo.getDateLabel(todayStr, tomorrowStr)
+                            val statusLabel = todo.getCompletionStatusLabel()
+                            val label = if (statusLabel != null) "📅 $dateLabel ($statusLabel)" else "📅 $dateLabel"
+                            meta.add(label)
+                        }
+                        if (todo.recurring != "none") meta.add("🔄")
+                        if (todo.subtasks.isNotEmpty()) meta.add("📋 ${todo.subtasks.count { it.completed }}/${todo.subtasks.size}")
+                        if (meta.isNotEmpty()) {
+                            Text(text = meta.joinToString(" | "), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                        }
+                    }
+                }
+                
+                if (expanded && todo.subtasks.isNotEmpty()) {
+                    Divider(modifier = Modifier.padding(horizontal = 12.dp))
+                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        todo.subtasks.forEachIndexed { index, sub ->
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                                Checkbox(
+                                    checked = sub.completed,
+                                    onCheckedChange = { isChecked ->
+                                        val newSubs = todo.subtasks.toMutableList()
+                                        newSubs[index] = sub.copy(completed = isChecked)
+                                        
+                                        val allCompleted = newSubs.isNotEmpty() && newSubs.all { s -> s.completed }
+                                        val parentCompleted = if (allCompleted && !todo.completed) true else todo.completed
+                                        val parentCompletedAt = if (allCompleted && !todo.completed) nowInstant() else todo.completed_at
+
+                                        viewModel.updateTodo(todo.copy(
+                                            subtasks = newSubs,
+                                            completed = parentCompleted,
+                                            completed_at = parentCompletedAt,
+                                            updated_at = nowIso()
+                                        ))
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = sub.content,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (sub.completed) Color.Gray else MaterialTheme.colorScheme.onSurface,
+                                    textDecoration = if (sub.completed) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
+                                )
+                            }
+                        }
+                    }
                 }
             }
-            val severityColor = when (todo.importance + todo.urgency) {
-                6 -> Color(0xFFF5222D) // 高重要高紧急
-                5 -> Color(0xFFFA8C16)
-                4 -> Color(0xFFFADB14)
-                3 -> Color(0xFF52C41A)
-                else -> Color.Gray
-            }
-            Surface(modifier = Modifier.size(12.dp), shape = androidx.compose.foundation.shape.CircleShape, color = severityColor) {}
         }
-    }
     }
 }

@@ -48,7 +48,9 @@ class WidgetAddActivity : ComponentActivity() {
                             // 延迟一小段时间，确保组件已挂载再获取焦点
                             kotlinx.coroutines.delay(100)
                             focusRequester.requestFocus()
-                        } catch (e: Exception) {}
+                        } catch (e: Exception) {
+                            android.util.Log.d("WidgetAdd", "焦点请求失败", e)
+                        }
                     }
 
                     Surface(
@@ -86,29 +88,25 @@ class WidgetAddActivity : ComponentActivity() {
         }
     }
 
-    private fun saveAndExit(content: String) {
-        val trimmed = content.trim()
+    private fun saveAndExit(rawContent: String) {
+        val trimmed = rawContent.trim()
         if (trimmed.isNotBlank()) {
+            val (content, taskDate) = com.todo.app.data.model.parseDateSyntax(trimmed)
+
+            if (content.isBlank()) {
+                finish()
+                return
+            }
+
             val repository = TodoApplication.instance.repository
-            // 在主线程之外执行IO操作：使用 lifecycleScope 确保与 Activity 生命周期绑定
             lifecycleScope.launch {
                 try {
-                    val newTodo = com.todo.app.data.model.Todo(
-                        id = java.util.UUID.randomUUID().toString(),
-                        content = trimmed,
-                        date = java.time.LocalDate.now().toString(),
-                        time = null,
-                        importance = 2,
-                        urgency = 2,
-                        completed = false,
-                        created_at = java.time.OffsetDateTime.now().format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME),
-                        recurring = "none",
-                        subtasks = emptyList()
-                    )
-                    // addTodo() 会正确更新内存StateFlow + 写文件 + 刷新小组件
+                    val newTodo = com.todo.app.data.model.Todo.create(content, taskDate)
                     repository.addTodo(newTodo)
+                    
+                    com.todo.app.widget.refreshAllWidgets(applicationContext)
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    android.util.Log.e("WidgetAdd", "保存待办失败", e)
                 }
                 finish()
             }

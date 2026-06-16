@@ -1,22 +1,16 @@
 :root {
   --bg-color: rgba(20, 20, 24, 0.65);
+  --bg-secondary: rgba(255, 255, 255, 0.05);
   --glass-border: rgba(255, 255, 255, 0.15);
+  --border-color: rgba(255, 255, 255, 0.12);
   --text-primary: rgba(255, 255, 255, 0.98);
   --text-secondary: rgba(255, 255, 255, 0.75);
+  --text-color: rgba(255, 255, 255, 0.98);
   --accent-color: #7b61ff;
   --accent-hover: #907af7;
-  
-  /* Severity Colors */
-  --urgency-high: #ff4d4f;
-  --urgency-med: #faad14;
   --urgency-low: #52c41a;
-
-  /* Severity Colors (Based on Sum 2-6) */
-  --level-2: #90a4ae; /* 极低: 灰蓝色/冷灰色 */
-  --level-3: #52c41a; /* 较低: 绿色 */
-  --level-4: #fadb14; /* 中等: 亮黄色 */
-  --level-5: #ff7a45; /* 较高: 橙黄色 */
-  --level-6: #ff4d4f; /* 极高: 红色 */
+  --urgency-med: #faad14;
+  --urgency-high: #ff4d4f;
 }
 
 * {
@@ -27,30 +21,27 @@
 
 body {
   margin: 0;
-  padding: 10px; /* Leaves space for drop shadow */
+  padding: 0;
   height: 100vh;
   width: 100vw;
-  background-color: transparent;
+  background-color: var(--bg-color);
+  backdrop-filter: blur(36px) saturate(220%);
+  -webkit-backdrop-filter: blur(36px) saturate(220%);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   overflow: hidden;
   display: flex;
   justify-content: center;
   align-items: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .glass-panel {
   width: 100%;
   height: 100%;
-  background: var(--bg-color);
-  backdrop-filter: blur(36px) saturate(220%);
-  -webkit-backdrop-filter: blur(36px) saturate(220%);
-  border-radius: 20px;
-  border: 1px solid var(--glass-border);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  background: transparent;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 /* Header draggable region for frameless window */
@@ -140,6 +131,8 @@ main::-webkit-scrollbar-thumb {
   transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s;
   cursor: pointer;
   gap: 14px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .todo-item:hover {
@@ -156,6 +149,33 @@ main::-webkit-scrollbar-thumb {
 .todo-item.completed .todo-content {
   text-decoration: line-through;
   color: var(--text-secondary);
+}
+
+/* Drag and drop states */
+.drag-over {
+  opacity: 0.3 !important;
+  background: rgba(255, 255, 255, 0.02) !important;
+  border: 1px dashed var(--text-secondary) !important;
+  transform: scale(0.98) !important;
+}
+
+.drag-chosen {
+  opacity: 1 !important;
+  background: rgba(123, 97, 255, 0.15) !important;
+  border-color: var(--accent-color) !important;
+  box-shadow: 0 8px 24px rgba(123, 97, 255, 0.3) !important;
+  transform: scale(1.02) translateY(-2px) !important;
+  z-index: 100;
+}
+
+.drag-fallback {
+  opacity: 0.95 !important;
+  background: var(--bg-color) !important;
+  border: 1px solid var(--accent-color) !important;
+  box-shadow: 0 12px 32px rgba(123, 97, 255, 0.4) !important;
+  transform: scale(1.04) rotate(1deg) !important;
+  z-index: 9999 !important;
+  cursor: grabbing !important;
 }
 
 /* Checkbox styling */
@@ -226,19 +246,6 @@ main::-webkit-scrollbar-thumb {
   font-weight: 600;
 }
 
-/* Severity dot */
-.severity-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-top: 2px; /* 居中微调 */
-}
-.severity-dot.level-2 { background: var(--level-2); }
-.severity-dot.level-3 { background: var(--level-3); }
-.severity-dot.level-4 { background: var(--level-4); }
-.severity-dot.level-5 { background: var(--level-5); }
-.severity-dot.level-6 { background: var(--level-6); box-shadow: 0 0 6px var(--level-6); }
-
 /* Edit button styling */
 .edit-btn {
   background: none;
@@ -253,6 +260,23 @@ main::-webkit-scrollbar-thumb {
   opacity: 0;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   margin-left: 2px;
+}
+
+.subtask-item .subtask-actions {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.subtask-item:hover .subtask-actions {
+  opacity: 1 !important;
+}
+.subtask-item .icon-btn-small {
+  opacity: 0.7;
+}
+.subtask-item .icon-btn-small:hover {
+  opacity: 1;
+}
+.subtask-item .subtask-actions .delete-subtask:hover {
+  color: #ff4d4f;
 }
 
 .todo-item:hover .edit-btn {
@@ -341,108 +365,6 @@ footer {
 }
 
 
-/* View Switch Control */
-#main-content.list-view #todo-list {
-  display: flex;
-}
-#main-content.list-view #matrix-container {
-  display: none;
-}
-#main-content.matrix-view #todo-list {
-  display: none;
-}
-#main-content.matrix-view #matrix-container {
-  display: grid;
-}
-
-/* Matrix View (Four Quadrants) */
-#matrix-container {
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
-  gap: 10px;
-  height: 100%;
-  animation: fadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.quadrant {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
-  padding: 10px 8px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.quadrant-header {
-  font-size: 0.72rem;
-  font-weight: 600;
-  padding-bottom: 6px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  text-align: center;
-  letter-spacing: 0.5px;
-}
-
-.quadrant-1 .quadrant-header { color: var(--urgency-high); }
-.quadrant-2 .quadrant-header { color: var(--urgency-med); }
-.quadrant-3 .quadrant-header { color: var(--accent-color); }
-.quadrant-4 .quadrant-header { color: var(--text-secondary); }
-
-.quadrant-list {
-  list-style: none;
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.quadrant-list::-webkit-scrollbar {
-  width: 4px;
-}
-.quadrant-list::-webkit-scrollbar-thumb {
-  background: var(--glass-border);
-  border-radius: 2px;
-}
-
-/* Specific styling for todo-items in quadrants to fit small spaces */
-.quadrant-list .todo-item {
-  padding: 8px 10px;
-  gap: 8px;
-  border-radius: 8px;
-}
-
-.quadrant-list .todo-content {
-  font-size: 0.8rem;
-  line-height: 1.25;
-}
-
-.quadrant-list .checkbox {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-}
-
-.quadrant-list .checkbox svg {
-  width: 11px;
-  height: 11px;
-}
-
-.quadrant-list .severity-dot {
-  display: none; /* 网格本身已代表紧急度，省出横向空间 */
-}
-
-.quadrant-list .edit-btn {
-  padding: 4px;
-  border-radius: 6px;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 /* Modal Overlay */
 .modal-overlay {
   position: fixed;
@@ -468,7 +390,7 @@ footer {
 }
 
 .modal-content {
-  width: 320px;
+  width: 370px;
   padding: 22px;
   background: rgba(30, 30, 35, 0.85);
   backdrop-filter: blur(25px) saturate(180%);
@@ -764,72 +686,6 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   color: #fff;
 }
 
-/* Subtasks */
-.subtasks-container {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.subtasks-container label {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-.subtasks-list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 120px;
-  overflow-y: auto;
-}
-.subtasks-list::-webkit-scrollbar {
-  width: 4px;
-}
-.subtasks-list::-webkit-scrollbar-thumb {
-  background: var(--glass-border);
-  border-radius: 2px;
-}
-.subtask-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  padding: 6px 8px;
-  border-radius: 6px;
-}
-.subtask-item.completed span {
-  text-decoration: line-through;
-  color: var(--text-secondary);
-}
-.subtask-item span {
-  flex: 1;
-  font-size: 0.8rem;
-  color: var(--text-primary);
-}
-.subtask-checkbox {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  border: 1px solid var(--text-secondary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.subtask-item.completed .subtask-checkbox {
-  background: var(--accent-color);
-  border-color: var(--accent-color);
-}
-.subtask-item.completed .subtask-checkbox::after {
-  content: '';
-  width: 3px;
-  height: 6px;
-  border: solid white;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-  margin-bottom: 2px;
-}
 .icon-btn-small {
   background: none;
   border: none;
@@ -1170,3 +1026,133 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   background: var(--glass-border);
   border-radius: 3px;
 }
+
+/* Subtasks Modal Styling */
+.subtasks-container {
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 10px;
+}
+.subtasks-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 10px 0;
+  max-height: 250px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.subtasks-list::-webkit-scrollbar {
+  width: 4px;
+}
+.subtasks-list::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+}
+.subtask-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.subtask-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.add-subtask-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.add-subtask-row input {
+  flex-grow: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--text-color);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.add-subtask-row input:focus {
+  border-color: var(--accent-color);
+}
+.copy-btn {
+  background: var(--accent-color) !important;
+  color: white !important;
+  border: none !important;
+  padding: 4px 10px !important;
+  border-radius: 6px !important;
+  font-weight: 500;
+  transition: filter 0.2s;
+}
+.copy-btn:hover {
+  filter: brightness(1.1);
+}
+
+.modal-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-color);
+  font-size: 0.9rem;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.modal-back-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateX(-2px);
+}
+.modal-back-btn svg {
+  opacity: 0.8;
+}
+
+/* Delete Confirmation Modal Styles */
+.delete-confirm-content {
+  width: 300px !important;
+  height: auto !important;
+  max-height: 250px !important;
+  padding: 20px !important;
+  gap: 16px !important;
+  border-radius: 14px !important;
+  background: rgba(30, 30, 35, 0.95) !important;
+  backdrop-filter: blur(25px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(25px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5) !important;
+}
+
+.delete-confirm-content .modal-footer {
+  margin-top: 4px !important;
+  padding-top: 0 !important;
+  border-top: none !important;
+}
+
+.btn-danger-filled {
+  background: #ff4d4f !important;
+  color: white !important;
+  border: none !important;
+  box-shadow: 0 4px 12px rgba(255, 77, 79, 0.3) !important;
+}
+
+.btn-danger-filled:hover {
+  background: #ff7875 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(255, 77, 79, 0.4) !important;
+}
+
+.btn-danger-filled:active {
+  transform: translateY(0);
+}
+

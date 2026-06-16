@@ -29,7 +29,6 @@ import androidx.navigation.compose.rememberNavController
 import com.todo.app.data.ConfigManager
 import com.todo.app.ui.theme.TodoAppTheme
 import com.todo.app.ui.view.ListView
-import com.todo.app.ui.view.MatrixView
 import com.todo.app.ui.view.SettingsView
 import com.todo.app.ui.view.StatsView
 import com.todo.app.ui.viewmodel.TodoViewModel
@@ -57,12 +56,11 @@ class MainActivity : ComponentActivity() {
 
 sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     object List : Screen("list", "列表", Icons.Filled.List)
-    object Matrix : Screen("matrix", "四象限", Icons.Filled.Star)
     object Stats : Screen("stats", "统计", Icons.Filled.DateRange)
     object Settings : Screen("settings", "设置", Icons.Filled.Settings)
 }
 
-val items = listOf(Screen.List, Screen.Matrix, Screen.Stats, Screen.Settings)
+val items = listOf(Screen.List, Screen.Stats, Screen.Settings)
 
 @Composable
 fun TodoApp(viewModel: TodoViewModel) {
@@ -94,7 +92,6 @@ fun TodoApp(viewModel: TodoViewModel) {
     ) { innerPadding ->
         NavHost(navController, startDestination = Screen.List.route, Modifier.padding(innerPadding)) {
             composable(Screen.List.route) { ListView(viewModel) }
-            composable(Screen.Matrix.route) { MatrixView(viewModel) }
             composable(Screen.Stats.route) { StatsView(viewModel) }
             composable(Screen.Settings.route) { SettingsView(viewModel) }
         }

@@ -31,15 +31,13 @@
           "time": {
             "type": ["string", "null"]
           },
-          "importance": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 3
+          "completed_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
           },
-          "urgency": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 3
+          "order": {
+            "type": "number",
+            "default": 0
           },
           "completed": {
             "type": "boolean"
@@ -47,6 +45,16 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last modification timestamp, used for cloud sync conflict resolution"
+          },
+          "deleted": {
+            "type": "boolean",
+            "default": false,
+            "description": "Soft-delete flag"
           },
           "recurring": {
             "type": "string",
@@ -76,8 +84,6 @@
         "required": [
           "id",
           "content",
-          "importance",
-          "urgency",
           "completed",
           "created_at"
         ]

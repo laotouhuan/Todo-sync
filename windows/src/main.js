@@ -1,6 +1,14 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
+import {
+    formatDate, getISOWeekString,
+    getTodayString, getTomorrowString, getThisWeekString, getLastWeekString,
+    getThisMonthString, getLastMonthString,
+    isWeekDate, isMonthDate, isOverdue, getDateLabel, getCompletionStatusLabel,
+    sortFunc, getNextRecurringDate, parseInputSyntax, createTodo, groupTodosByDate
+} from './dateUtils.js';
+
 // ====== State ======
 let todoData = {
     version: 1,
@@ -8,8 +16,8 @@ let todoData = {
     todos: []
 };
 
-let saving = false; // guard against self-triggered file watcher reloads
-let currentView = 'list'; // 'list' | 'matrix' | 'stats'
+let saveVersion = 0; // 递增版本号，防止自身写入触发的文件变更重载
+let currentView = 'list'; // 'list' | 'stats'
 let appConfig = {};
 let isPinned = false;
 let statsPeriod = 'day'; // 'day' | 'week' | 'month'
@@ -19,21 +27,26 @@ let todayCollapsed = false;
 let weekCollapsed = true;
 let monthCollapsed = true;
 let currentEditingTodo = null;
-let editImportance = 2;
-let editUrgency = 2;
 let dateFilter = 'today'; // 'today' | 'all'
 let currentEditingSubtasks = [];
 let currentImportType = null;
 let currentImportCandidates = [];
+let expandedTaskIds = new Set();
 
 // SVG Icons
 const ICON_VIEW_LIST = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18"><path d="M4 6H20V8H4V6ZM4 11H20V13H4V11ZM4 16H20V18H4V16Z" fill="currentColor"/></svg>`;
-const ICON_VIEW_MATRIX = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18"><path d="M4 4H10V10H4V4ZM14 4H20V10H14V4ZM4 14H10V20H4V14ZM14 14H20V20H14V14Z" fill="currentColor"/></svg>`;
 
 // DOM Elements (initialized in DOMContentLoaded)
 let listEl, formEl, inputEl, statusEl;
 
 // ====== Utility Functions ======
+/** 将用户数据转义为安全 HTML，防止 XSS */
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 const SyncState = { IDLE: 'idle', SYNCING: 'syncing', ERROR: 'error' };
 
 function setSyncStatus(state) {
@@ -42,106 +55,6 @@ function setSyncStatus(state) {
         if (state === SyncState.SYNCING) statusEl.classList.add('syncing');
         else if (state === SyncState.ERROR) statusEl.classList.add('error');
     }
-}
-
-function formatDate(d) {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
-
-function getISOWeekString(d) {
-    const date = new Date(d.getTime());
-    date.setHours(0, 0, 0, 0);
-    date.setDate(date.getDate() + 3 - (date.getDay() + 6) % 7);
-    const week1 = new Date(date.getFullYear(), 0, 4);
-    const week = 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
-    return `${date.getFullYear()}-W${String(week).padStart(2, '0')}`;
-}
-
-function getThisWeekString() { return getISOWeekString(new Date()); }
-function getLastWeekString() { const d = new Date(); d.setDate(d.getDate() - 7); return getISOWeekString(d); }
-function getThisMonthString() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
-function getLastMonthString() { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
-function getTodayString() { return formatDate(new Date()); }
-function getTomorrowString() { const d = new Date(); d.setDate(d.getDate() + 1); return formatDate(d); }
-
-function sortFunc(a, b) {
-    if (a.completed !== b.completed) return a.completed ? 1 : -1;
-    const scoreA = Number(a.importance || 2) + Number(a.urgency || 2);
-    const scoreB = Number(b.importance || 2) + Number(b.urgency || 2);
-    if (scoreA !== scoreB) return scoreB - scoreA;
-    return new Date(b.created_at) - new Date(a.created_at);
-}
-
-function getSeverityClass(importance, urgency) {
-    const sum = Number(importance || 2) + Number(urgency || 2);
-    return `level-${sum}`;
-}
-
-function getNextRecurringDate(baseDateStr, rule) {
-    const d = new Date(baseDateStr);
-    if (isNaN(d.getTime())) return baseDateStr;
-    if (rule === 'daily') d.setDate(d.getDate() + 1);
-    else if (rule === 'weekly') d.setDate(d.getDate() + 7);
-    else if (rule === 'monthly') d.setMonth(d.getMonth() + 1);
-    return formatDate(d);
-}
-
-function setActiveRatingBtn(groupId, value) {
-    document.querySelectorAll(`#${groupId} .rate-btn`).forEach(btn => {
-        btn.classList.toggle('active', parseInt(btn.getAttribute('data-value'), 10) === value);
-    });
-}
-
-function createTodo(content, date, importance = 2, urgency = 2) {
-    return {
-        id: crypto.randomUUID(),
-        content,
-        date,
-        time: null,
-        importance,
-        urgency,
-        completed: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        deleted: false,
-        recurring: 'none',
-        subtasks: []
-    };
-}
-
-function parseInputSyntax(rawContent) {
-    const syntaxRegex = /(?:\s+|^)!([1-3])([1-3])?$/;
-    const dateRegex = /(?:\s+|^)@(today|tomorrow|week|month|\d{4}-\d{2}-\d{2}|\d{2}-\d{2})$/i;
-
-    let content = rawContent.trim();
-    let importance = 2, urgency = 2;
-    let taskDate = getTodayString();
-
-    // Two passes to handle either order: "!12 @today" or "@today !12"
-    for (let pass = 0; pass < 2; pass++) {
-        const scoreMatch = content.match(syntaxRegex);
-        if (scoreMatch) {
-            importance = parseInt(scoreMatch[1], 10);
-            if (scoreMatch[2]) urgency = parseInt(scoreMatch[2], 10);
-            content = content.replace(syntaxRegex, '').trim();
-        }
-        const dateMatch = content.match(dateRegex);
-        if (dateMatch) {
-            const v = dateMatch[1].toLowerCase();
-            if (v === 'today') taskDate = getTodayString();
-            else if (v === 'tomorrow') taskDate = getTomorrowString();
-            else if (v === 'week') taskDate = getThisWeekString();
-            else if (v === 'month') taskDate = getThisMonthString();
-            else if (/^\d{4}-\d{2}-\d{2}$/.test(v)) taskDate = v;
-            else if (/^\d{2}-\d{2}$/.test(v)) taskDate = `${new Date().getFullYear()}-${v}`;
-            content = content.replace(dateRegex, '').trim();
-        }
-    }
-
-    return { content, importance, urgency, taskDate };
 }
 
 function mergeTodoData(localData, cloudData) {
@@ -172,7 +85,7 @@ function mergeTodoData(localData, cloudData) {
             last_updated: new Date().toISOString(),
             todos: mergedTodos
         },
-        changed
+        changed: changed || mergedTodos.length !== (localData.todos ? localData.todos.length : 0)
     };
 }
 
@@ -195,7 +108,7 @@ async function loadData() {
                 todoData = mergedData;
                 render();
 
-                if (changed) {
+                if (changed || JSON.stringify(mergedData.todos) !== JSON.stringify(localData.todos)) {
                     await saveData();
                 }
             } catch (e) {
@@ -222,17 +135,22 @@ async function loadData() {
     }
 }
 
+let _savingPromise = null;
+
 async function saveData() {
+    // Promise 锁：防止多个 saveData 并发执行
+    if (_savingPromise) await _savingPromise;
+    _savingPromise = _doSaveData();
+    try { await _savingPromise; } finally { _savingPromise = null; }
+}
+
+async function _doSaveData() {
     try {
         setSyncStatus(SyncState.SYNCING);
         todoData.last_updated = new Date().toISOString();
         const jsonStr = JSON.stringify(todoData, null, 2);
-        saving = true;
-        try {
-            await invoke("write_todo_data", { data: jsonStr });
-        } finally {
-            saving = false;
-        }
+        saveVersion++;
+        await invoke("write_todo_data", { data: jsonStr });
 
         if (appConfig.sync_mode === 'webdav') {
             try {
@@ -256,19 +174,21 @@ async function saveData() {
 function getMetaHtml(todo, todayStr, tomorrowStr) {
     let html = '';
     if (todo.date) {
-        let dateLabel;
-        if (todo.date === todayStr) dateLabel = '今天';
-        else if (todo.date === tomorrowStr) dateLabel = '明天';
-        else if (todo.date.includes('-W')) dateLabel = '周任务';
-        else if (todo.date.length === 7) dateLabel = '月任务';
-        else dateLabel = todo.date ? todo.date.substring(5) : '';
+        const dateLabel = getDateLabel(todo.date, todayStr, tomorrowStr);
+        const overdue = isOverdue(todo, todayStr);
+        const dateClass = (overdue && dateFilter === 'today') ? 'overdue' : '';
+        const statusLabel = getCompletionStatusLabel(todo);
 
-        const isOverdue = todo.date < todayStr && !todo.completed;
-        const dateClass = isOverdue ? 'overdue' : '';
-        html += `<span class="meta-item date ${dateClass}">📅 ${dateLabel}</span>`;
+        if (dateFilter !== 'all' && statusLabel) {
+            const colorStyle = statusLabel === '提前完成' ? ' style="color: #52c41a"' : '';
+            const extraClass = statusLabel === '逾期完成' ? ' overdue' : '';
+            html += `<span class="meta-item date${extraClass}"${colorStyle}>📅 ${dateLabel} (${statusLabel})</span>`;
+        } else {
+            html += `<span class="meta-item date ${dateClass}">📅 ${dateLabel}</span>`;
+        }
     }
     if (todo.time) {
-        html += `<span class="meta-item time">🕐 ${todo.time}</span>`;
+        html += `<span class="meta-item time">🕐 ${escapeHtml(todo.time)}</span>`;
     }
     if (todo.recurring && todo.recurring !== 'none') {
         const recurringLabels = { daily: '每天', weekly: '每周', monthly: '每月' };
@@ -285,6 +205,7 @@ function getMetaHtml(todo, todayStr, tomorrowStr) {
 function createTodoItemElement(todo, todayStr, tomorrowStr) {
     const li = document.createElement('li');
     li.className = `todo-item ${todo.completed ? 'completed' : ''}`;
+    li.dataset.id = todo.id;
     li.innerHTML = `
         <div class="checkbox">
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -294,8 +215,8 @@ function createTodoItemElement(todo, todayStr, tomorrowStr) {
         <div class="todo-info">
             <span class="todo-content"></span>
             <div class="todo-meta">${getMetaHtml(todo, todayStr, tomorrowStr)}</div>
+            <ul class="inline-subtasks-list" style="display: ${expandedTaskIds.has(todo.id) ? 'block' : 'none'}; padding-left: 0; list-style: none; margin-top: 8px; width: 100%;"></ul>
         </div>
-        <div class="severity-dot ${getSeverityClass(todo.importance, todo.urgency)}"></div>
         <button class="edit-btn" aria-label="修改">
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
                 <path d="M3 17.25V21H6.75L17.81 9.94L14.06 6.19L3 17.25ZM20.71 7.04C21.1 6.65 21.1 6.02 20.71 5.63L18.37 3.29C17.98 2.9 17.35 2.9 16.96 3.29L15.13 5.12L18.88 8.87L20.71 7.04Z" fill="currentColor"/>
@@ -305,8 +226,37 @@ function createTodoItemElement(todo, todayStr, tomorrowStr) {
     // 用 textContent 设置待办内容，防止 HTML 注入
     li.querySelector('.todo-content').textContent = todo.content;
 
-    li.addEventListener('click', async (e) => {
-        if (e.target.closest('.edit-btn')) return;
+    const subtasksList = li.querySelector('.inline-subtasks-list');
+    if (todo.subtasks && todo.subtasks.length > 0) {
+        todo.subtasks.forEach((sub, idx) => {
+            const subLi = document.createElement('li');
+            subLi.className = `subtask-item ${sub.completed ? 'completed' : ''}`;
+            subLi.style.cssText = "display: flex; align-items: center; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px; padding: 4px 0;";
+            subLi.innerHTML = `
+                <div class="subtask-checkbox" style="width: 14px; height: 14px; margin-right: 8px;"></div>
+                <span></span>
+            `;
+            subLi.querySelector('span').textContent = sub.content;
+            subLi.querySelector('.subtask-checkbox').addEventListener('click', async (e) => {
+                e.stopPropagation();
+                sub.completed = !sub.completed;
+                todo.updated_at = new Date().toISOString();
+                
+                const allCompleted = todo.subtasks.length > 0 && todo.subtasks.every(s => s.completed);
+                if (allCompleted && !todo.completed) {
+                    todo.completed = true;
+                    todo.completed_at = new Date().toISOString();
+                }
+
+                render();
+                saveData(); // 不再 await，避免与防抖的 autoSave 产生双重保存
+            });
+            subtasksList.appendChild(subLi);
+        });
+    }
+
+    li.querySelector('.checkbox').addEventListener('click', async (e) => {
+        e.stopPropagation();
         const index = todoData.todos.findIndex(t => t.id === todo.id);
         if (index !== -1) {
             const t = todoData.todos[index];
@@ -318,14 +268,37 @@ function createTodoItemElement(todo, todayStr, tomorrowStr) {
                     date: nextDate,
                     completed: false,
                     created_at: new Date().toISOString(),
+                    completed_at: null,
                     subtasks: t.subtasks ? JSON.parse(JSON.stringify(t.subtasks)).map(s => { s.completed = false; return s; }) : []
                 };
                 todoData.todos.push(clone);
             }
             t.completed = !t.completed;
+            if (t.completed) {
+                t.completed_at = new Date().toISOString();
+                if (t.subtasks && t.subtasks.length > 0) {
+                    t.subtasks.forEach(s => s.completed = true);
+                }
+            } else {
+                t.completed_at = null;
+                // 不联动取消子代办
+            }
             t.updated_at = new Date().toISOString();
             render();
             await saveData();
+        }
+    });
+
+    li.querySelector('.todo-info').addEventListener('click', (e) => {
+        if (e.target.closest('.subtask-item')) return; // let subtask clicks bubble or be handled
+        if (todo.subtasks && todo.subtasks.length > 0) {
+            if (subtasksList.style.display === 'none') {
+                subtasksList.style.display = 'block';
+                expandedTaskIds.add(todo.id);
+            } else {
+                subtasksList.style.display = 'none';
+                expandedTaskIds.delete(todo.id);
+            }
         }
     });
 
@@ -334,6 +307,10 @@ function createTodoItemElement(todo, todayStr, tomorrowStr) {
         e.stopPropagation();
         openEditModal(todo);
     });
+
+    if (dateFilter === 'today') {
+        li.dataset.id = todo.id;
+    }
 
     return li;
 }
@@ -347,32 +324,148 @@ function renderEditSubtasks() {
         const li = document.createElement('li');
         li.className = `subtask-item ${sub.completed ? 'completed' : ''}`;
         li.innerHTML = `
-            <div class="subtask-checkbox"></div>
-            <span></span>
-            <button type="button" class="icon-btn-small delete-subtask">
-                <svg viewBox="0 0 24 24" fill="none" width="14" height="14">
-                    <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <div class="subtask-checkbox" style="width: 16px; height: 16px; margin-right: 12px; flex-shrink: 0; cursor: pointer; border: 1.5px solid ${sub.completed ? 'var(--accent-color)' : 'var(--text-secondary)'}; background: ${sub.completed ? 'var(--accent-color)' : 'transparent'}; border-radius: 4px; display: flex; justify-content: center; align-items: center; transition: all 0.2s;">
+                <svg viewBox="0 0 24 24" fill="none" width="12" height="12" style="opacity: ${sub.completed ? '1' : '0'}; transition: opacity 0.2s;">
+                    <path d="M5 13L9 17L19 7" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-            </button>
+            </div>
+            <div class="subtask-text-container" style="flex: 1; display: flex; align-items: center; overflow: hidden; min-height: 20px;">
+                <span class="subtask-content-span" style="color: ${sub.completed ? 'var(--text-secondary)' : 'var(--text-primary)'}; text-decoration: ${sub.completed ? 'line-through' : 'none'}; font-size: 0.95rem; white-space: pre-wrap; word-break: break-word; transition: color 0.2s;"></span>
+                <textarea class="subtask-inline-edit" rows="1" style="flex: 1; background: transparent; border: none; outline: none; color: var(--text-primary); font-family: inherit; font-size: 0.95rem; margin: 0; padding: 0; resize: none; overflow: hidden; word-break: break-word; display: none;"></textarea>
+            </div>
+            <div class="subtask-actions" style="display: flex; flex-direction: column; gap: 4px; opacity: 0; transition: all 0.2s; margin-left: 8px;">
+                <button type="button" class="icon-btn-small edit-subtask">
+                    <svg viewBox="0 0 24 24" fill="none" width="14" height="14">
+                        <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <button type="button" class="icon-btn-small delete-subtask">
+                    <svg viewBox="0 0 24 24" fill="none" width="14" height="14">
+                        <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
         `;
-        li.querySelector('span').textContent = sub.content;
-        li.querySelector('.subtask-checkbox').addEventListener('click', () => {
+
+        const checkbox = li.querySelector('.subtask-checkbox');
+        const svg = checkbox.querySelector('svg');
+        const span = li.querySelector('.subtask-content-span');
+        span.textContent = sub.content; // 使用 textContent 防止 XSS
+        const textarea = li.querySelector('.subtask-inline-edit');
+        const editBtn = li.querySelector('.edit-subtask');
+        const deleteBtn = li.querySelector('.delete-subtask');
+        const actions = li.querySelector('.subtask-actions');
+
+        checkbox.addEventListener('click', () => {
             sub.completed = !sub.completed;
-            renderEditSubtasks();
+            if (sub.completed) {
+                li.classList.add('completed');
+                checkbox.style.background = 'var(--accent-color)';
+                checkbox.style.borderColor = 'var(--accent-color)';
+                svg.style.opacity = '1';
+                span.style.color = 'var(--text-secondary)';
+                span.style.textDecoration = 'line-through';
+            } else {
+                li.classList.remove('completed');
+                checkbox.style.background = 'transparent';
+                checkbox.style.borderColor = 'var(--text-secondary)';
+                svg.style.opacity = '0';
+                span.style.color = 'var(--text-primary)';
+                span.style.textDecoration = 'none';
+            }
+            autoSaveEdit();
         });
-        li.querySelector('.delete-subtask').addEventListener('click', () => {
+
+        const resizeTextarea = () => {
+            textarea.style.height = 'auto';
+            textarea.style.height = textarea.scrollHeight + 'px';
+        };
+
+        editBtn.addEventListener('click', () => {
+            span.style.display = 'none';
+            textarea.style.display = 'block';
+            textarea.value = sub.content;
+            resizeTextarea();
+            textarea.focus();
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        });
+
+        textarea.addEventListener('input', resizeTextarea);
+
+        const saveSubtaskEdit = () => {
+            if (textarea.style.display === 'block') {
+                const newText = textarea.value.trim();
+                if (newText) {
+                    sub.content = newText;
+                    span.textContent = newText;
+                }
+                textarea.style.display = 'none';
+                span.style.display = 'block';
+                autoSaveEdit();
+            }
+        };
+
+        textarea.addEventListener('blur', saveSubtaskEdit);
+        textarea.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                textarea.blur();
+            }
+        });
+
+        deleteBtn.addEventListener('click', () => {
             currentEditingSubtasks.splice(idx, 1);
             renderEditSubtasks();
+            autoSaveEdit();
         });
+
         listEl.appendChild(li);
     });
 }
 
-// ====== Edit Modal ======
+let _autoSaveTimer = null;
+
+async function _doAutoSave() {
+    if (!currentEditingTodo) return;
+    const newContent = document.getElementById('edit-content').value.trim();
+    // 空内容时不更新 content 字段，但仍允许保存其他字段（date、time、subtasks 等）
+    const hasContent = !!newContent;
+
+    const index = todoData.todos.findIndex(t => t.id === currentEditingTodo.id);
+    if (index !== -1) {
+        if (hasContent) todoData.todos[index].content = newContent;
+        todoData.todos[index].date = document.getElementById('edit-date').value || null;
+        todoData.todos[index].time = document.getElementById('edit-time').value || null;
+        const recurringSelect = document.getElementById('edit-recurring');
+        todoData.todos[index].recurring = recurringSelect ? recurringSelect.value : 'none';
+        todoData.todos[index].subtasks = JSON.parse(JSON.stringify(currentEditingSubtasks));
+        todoData.todos[index].updated_at = new Date().toISOString();
+
+        const allCompleted = todoData.todos[index].subtasks.length > 0 && todoData.todos[index].subtasks.every(s => s.completed);
+        if (allCompleted && !todoData.todos[index].completed) {
+            todoData.todos[index].completed = true;
+            todoData.todos[index].completed_at = new Date().toISOString();
+        }
+
+        render();
+        await saveData();
+    }
+}
+
+/** Debounced auto-save (300ms). Coalesces rapid edits into a single save. */
+function autoSaveEdit() {
+    if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+    _autoSaveTimer = setTimeout(() => { _doAutoSave(); _autoSaveTimer = null; }, 300);
+}
+
+/** Immediate auto-save — used by closeEditModal to ensure data is persisted before the modal closes. */
+async function autoSaveEditImmediate() {
+    if (_autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
+    await _doAutoSave();
+}
+
 function openEditModal(todo) {
     currentEditingTodo = todo;
-    editImportance = todo.importance || 2;
-    editUrgency = todo.urgency || 2;
 
     const modal = document.getElementById('edit-modal');
     const input = document.getElementById('edit-content');
@@ -380,9 +473,6 @@ function openEditModal(todo) {
 
     document.getElementById('edit-date').value = todo.date || '';
     document.getElementById('edit-time').value = todo.time || '';
-
-    setActiveRatingBtn('edit-importance-options', editImportance);
-    setActiveRatingBtn('edit-urgency-options', editUrgency);
 
     const recurringSelect = document.getElementById('edit-recurring');
     if (recurringSelect) recurringSelect.value = todo.recurring || 'none';
@@ -395,8 +485,10 @@ function openEditModal(todo) {
 }
 
 function closeEditModal() {
-    document.getElementById('edit-modal').classList.remove('active');
-    currentEditingTodo = null;
+    autoSaveEditImmediate().finally(() => {
+        document.getElementById('edit-modal').classList.remove('active');
+        currentEditingTodo = null;
+    });
 }
 
 // ====== Render Stats ======
@@ -440,7 +532,7 @@ function renderStats(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     const totalCount = periodTodos.length;
     const completedCount = periodTodos.filter(t => t.completed).length;
     const progress = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
-    const overdueCount = periodTodos.filter(t => t.date && t.date < todayStr && !t.completed && !t.date.includes('-W') && t.date.length !== 7).length;
+    const overdueCount = periodTodos.filter(t => isOverdue(t, todayStr)).length;
 
     document.getElementById('stats-summary-text').textContent = `共 ${totalCount} 项，已完成 ${completedCount} 项，其中逾期 ${overdueCount} 项`;
     document.getElementById('stats-progress-fill').style.width = `${progress}%`;
@@ -471,9 +563,13 @@ function renderGroup(group, label, headerStyle = {}, todayStr, tomorrowStr) {
     header.textContent = label;
     Object.assign(header.style, headerStyle);
     listEl.appendChild(header);
+    const container = document.createElement('ul');
+    container.className = 'group-sortable-container';
+    container.style.cssText = 'list-style:none;padding:0;margin:0;';
     group.forEach(todo => {
-        listEl.appendChild(createTodoItemElement(todo, todayStr, tomorrowStr));
+        container.appendChild(createTodoItemElement(todo, todayStr, tomorrowStr));
     });
+    listEl.appendChild(container);
 }
 
 // ====== Render Collapsible Group (for "today" filter) ======
@@ -501,7 +597,19 @@ function renderCollapsibleGroup(group, label, isCollapsed, type, themeColor, tod
     content.className = 'collapsible-content';
 
     if (!isCollapsed) {
-        if (group.length > 0) {
+        if (type === 'today') {
+            const hasDate = group.filter(t => t.date);
+            const noDate = group.filter(t => !t.date);
+            hasDate.forEach(todo => content.appendChild(createTodoItemElement(todo, todayStr, tomorrowStr)));
+            const separator = document.createElement('div');
+            separator.className = 'list-separator';
+            separator.style.cssText = 'height: 2px; background: var(--border-color); margin: 8px 12px; border-radius: 2px;';
+            if (hasDate.length === 0 || noDate.length === 0) {
+                separator.style.opacity = '0.5';
+            }
+            content.appendChild(separator);
+            noDate.forEach(todo => content.appendChild(createTodoItemElement(todo, todayStr, tomorrowStr)));
+        } else {
             group.forEach(todo => {
                 content.appendChild(createTodoItemElement(todo, todayStr, tomorrowStr));
             });
@@ -524,8 +632,7 @@ function render() {
     let filteredTodos = [...todoData.todos].filter(t => !t.deleted);
     if (dateFilter === 'today') {
         filteredTodos = filteredTodos.filter(t => {
-            const isOverdue = t.date && t.date < todayStr && !t.completed && !t.date.includes('-W') && t.date.length !== 7;
-            return t.date === todayStr || isOverdue || !t.date || t.date === thisWeekStr || t.date === thisMonthStr;
+            return t.date === todayStr || isOverdue(t, todayStr) || !t.date || t.date === thisWeekStr || t.date === thisMonthStr;
         });
     }
 
@@ -546,54 +653,97 @@ function render() {
             renderCollapsibleGroup(weekGroup, '本周任务', weekCollapsed, 'weekly', '#fadb14', todayStr, tomorrowStr);
             renderCollapsibleGroup(monthGroup, '本月任务', monthCollapsed, 'monthly', '#ff7a45', todayStr, tomorrowStr);
         } else {
-            const groups = { overdue: [], today: [], tomorrow: [], weekMonth: [], inboxAndFuture: [] };
-            filteredTodos.forEach(todo => {
-                if (todo.date) {
-                    if (todo.date.includes('-W') || todo.date.length === 7) {
-                        groups.weekMonth.push(todo);
-                    } else if (todo.date < todayStr) {
-                        groups.overdue.push(todo);
-                    } else if (todo.date === todayStr) {
-                        groups.today.push(todo);
-                    } else if (todo.date === tomorrowStr) {
-                        groups.tomorrow.push(todo);
-                    } else {
-                        groups.inboxAndFuture.push(todo);
-                    }
-                } else {
-                    groups.inboxAndFuture.push(todo);
+            const groups = groupTodosByDate(filteredTodos, todayStr);
+            const { todayGroup, noDateGroup, weekGroup, monthGroup, futureGroup, pastGroup } = groups;
+
+            todayGroup.sort(sortFunc);
+            noDateGroup.sort(sortFunc);
+            weekGroup.sort(sortFunc);
+            monthGroup.sort(sortFunc);
+
+            futureGroup.sort((a, b) => {
+                if (a.date !== b.date) return a.date.localeCompare(b.date);
+                return sortFunc(a, b);
+            });
+
+            pastGroup.sort((a, b) => {
+                if (a.date !== b.date) return b.date.localeCompare(a.date);
+                return sortFunc(a, b);
+            });
+
+            if (todayGroup.length > 0) renderGroup(todayGroup, '今天', { color: 'var(--text-primary)' }, todayStr, tomorrowStr);
+            if (noDateGroup.length > 0) renderGroup(noDateGroup, '无日期', {}, todayStr, tomorrowStr);
+            if (weekGroup.length > 0) renderGroup(weekGroup, '周任务', { color: '#fadb14', borderLeftColor: '#fadb14' }, todayStr, tomorrowStr);
+            if (monthGroup.length > 0) renderGroup(monthGroup, '月任务', { color: '#fadb14', borderLeftColor: '#fadb14' }, todayStr, tomorrowStr);
+            if (futureGroup.length > 0) renderGroup(futureGroup, '未来计划', { color: 'var(--text-primary)' }, todayStr, tomorrowStr);
+            if (pastGroup.length > 0) renderGroup(pastGroup, '过往记忆', { color: 'var(--text-secondary)', borderLeftColor: 'var(--border-color)' }, todayStr, tomorrowStr);
+        }
+        
+        // Initialize SortableJS — 仅对"今天聚焦"启用拖动排序
+        if (dateFilter === 'today' && window.Sortable) {
+            // 销毁旧 Sortable 实例，防止内存泄漏
+            document.querySelectorAll('.collapsible-content').forEach(el => {
+                if (el._sortableInstance) {
+                    el._sortableInstance.destroy();
+                    el._sortableInstance = null;
                 }
             });
-            Object.values(groups).forEach(group => group.sort(sortFunc));
-            renderGroup(groups.overdue, '逾期', { color: '#ff4d4f', borderLeftColor: '#ff4d4f' }, todayStr, tomorrowStr);
-            renderGroup(groups.today, '今天', {}, todayStr, tomorrowStr);
-            renderGroup(groups.tomorrow, '明天', {}, todayStr, tomorrowStr);
-            renderGroup(groups.weekMonth, '周/月目标', { color: '#fadb14', borderLeftColor: '#fadb14' }, todayStr, tomorrowStr);
-            renderGroup(groups.inboxAndFuture, '未来与待安排', {}, todayStr, tomorrowStr);
+            document.querySelectorAll('.collapsible-content').forEach(container => {
+                container._sortableInstance = new Sortable(container, {
+                    animation: 150,
+                    ghostClass: 'drag-over',
+                    chosenClass: 'drag-chosen',
+                    dragClass: 'drag-active',
+                    filter: '.checkbox, .todo-content, .todo-meta, .inline-subtasks-list, .edit-btn',
+                    preventOnFilter: false,
+                    delay: 200,
+                    delayOnTouchOnly: false,
+                    fallbackTolerance: 5,
+                    forceFallback: true,
+                    fallbackClass: 'drag-fallback',
+                    fallbackOnBody: true,
+                    onEnd: async function(evt) {
+                        const allNodes = Array.from(evt.to.children);
+                        const separatorIndex = allNodes.findIndex(n => n.classList.contains('list-separator'));
+                        let stateChanged = false;
+                        
+                        const items = Array.from(evt.to.querySelectorAll('.todo-item'));
+                        items.forEach((el, index) => {
+                            const id = el.dataset.id;
+                            const t = todoData.todos.find(td => td.id === id);
+                            if (t) {
+                                if (t.order !== index) {
+                                    t.order = index;
+                                    t.updated_at = new Date().toISOString();
+                                    stateChanged = true;
+                                }
+                                
+                                if (separatorIndex !== -1) {
+                                    const nodeIndex = allNodes.indexOf(el);
+                                    if (nodeIndex < separatorIndex) {
+                                        // 拖到了上半区，赋予今天日期
+                                        if (!t.date) {
+                                            t.date = getTodayString();
+                                            stateChanged = true;
+                                        }
+                                    } else {
+                                        // 拖到了下半区，如果原本是明确日期（非周期）则清除日期
+                                        if (t.date && !isWeekDate(t.date) && !isMonthDate(t.date)) {
+                                            t.date = '';
+                                            stateChanged = true;
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                        if (stateChanged) {
+                            render();
+                            await saveData();
+                        }
+                    }
+                });
+            });
         }
-    } else if (currentView === 'matrix') {
-        const quadrants = [
-            document.getElementById('quadrant-list-1'),
-            document.getElementById('quadrant-list-2'),
-            document.getElementById('quadrant-list-3'),
-            document.getElementById('quadrant-list-4')
-        ];
-        quadrants.forEach(q => q.innerHTML = '');
-
-        const sortedTodos = filteredTodos.sort((a, b) => {
-            if (a.completed !== b.completed) return a.completed ? 1 : -1;
-            return new Date(b.created_at) - new Date(a.created_at);
-        });
-
-        sortedTodos.forEach(todo => {
-            const imp = todo.importance || 2;
-            const urg = todo.urgency || 2;
-            const el = createTodoItemElement(todo, todayStr, tomorrowStr);
-            if (imp >= 2 && urg >= 2) quadrants[0].appendChild(el);
-            else if (imp >= 2 && urg < 2) quadrants[1].appendChild(el);
-            else if (imp < 2 && urg >= 2) quadrants[2].appendChild(el);
-            else quadrants[3].appendChild(el);
-        });
     }
 }
 
@@ -828,7 +978,6 @@ window.addEventListener("DOMContentLoaded", () => {
     }
 
     // 视图切换按钮
-    const viewToggleBtn = document.getElementById('view-toggle-btn');
     const mainContentEl = document.getElementById('main-content');
     const tabsContainerEl = document.querySelector('.tabs-container');
     const appFooterEl = document.getElementById('app-footer');
@@ -844,7 +993,6 @@ window.addEventListener("DOMContentLoaded", () => {
             if (appFooterEl) appFooterEl.classList.add('hidden');
             statsContainerEl.classList.remove('hidden');
             statsBtn.classList.add('active');
-            viewToggleBtn.classList.remove('active');
         } else {
             currentView = 'list';
             mainContentEl.classList.remove('hidden');
@@ -853,8 +1001,6 @@ window.addEventListener("DOMContentLoaded", () => {
             if (appFooterEl) appFooterEl.classList.remove('hidden');
             statsContainerEl.classList.add('hidden');
             statsBtn.classList.remove('active');
-            viewToggleBtn.title = '切换四象限视图';
-            viewToggleBtn.innerHTML = ICON_VIEW_MATRIX;
         }
         render();
     };
@@ -864,27 +1010,6 @@ window.addEventListener("DOMContentLoaded", () => {
             toggleStatsView(currentView !== 'stats');
         });
     }
-
-    viewToggleBtn.addEventListener('click', () => {
-        if (currentView === 'stats') {
-            toggleStatsView(false);
-            return;
-        }
-        if (currentView === 'list') {
-            currentView = 'matrix';
-            mainContentEl.classList.remove('list-view');
-            mainContentEl.classList.add('matrix-view');
-            viewToggleBtn.title = '切换列表视图';
-            viewToggleBtn.innerHTML = ICON_VIEW_LIST;
-        } else {
-            currentView = 'list';
-            mainContentEl.classList.remove('matrix-view');
-            mainContentEl.classList.add('list-view');
-            viewToggleBtn.title = '切换四象限视图';
-            viewToggleBtn.innerHTML = ICON_VIEW_MATRIX;
-        }
-        render();
-    });
 
     // 统计周期切换
     const periodDayBtn = document.getElementById('stats-period-day');
@@ -955,21 +1080,6 @@ window.addEventListener("DOMContentLoaded", () => {
         render();
     });
 
-    // 编辑模态框内部评分按钮
-    document.querySelectorAll('#edit-importance-options .rate-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            editImportance = parseInt(btn.getAttribute('data-value'), 10);
-            setActiveRatingBtn('edit-importance-options', editImportance);
-        });
-    });
-
-    document.querySelectorAll('#edit-urgency-options .rate-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            editUrgency = parseInt(btn.getAttribute('data-value'), 10);
-            setActiveRatingBtn('edit-urgency-options', editUrgency);
-        });
-    });
-
     // 添加子步骤
     document.getElementById('add-subtask-btn').addEventListener('click', () => {
         const input = document.getElementById('add-subtask-input');
@@ -979,6 +1089,7 @@ window.addEventListener("DOMContentLoaded", () => {
             currentEditingSubtasks.push({ id: crypto.randomUUID(), content, completed: false });
             input.value = '';
             renderEditSubtasks();
+            autoSaveEdit();
         }
     });
 
@@ -1002,7 +1113,7 @@ window.addEventListener("DOMContentLoaded", () => {
         listItems.forEach((li, idx) => {
             if (li.getAttribute('data-selected') === 'true') {
                 const orig = currentImportCandidates[idx];
-                const newTodo = createTodo(orig.content, targetDateStr, orig.importance, orig.urgency);
+                const newTodo = createTodo(orig.content, targetDateStr);
                 newTodo.time = orig.time || null;
                 newTodo.recurring = orig.recurring || 'none';
                 newTodo.subtasks = orig.subtasks ? JSON.parse(JSON.stringify(orig.subtasks)).map(s => { s.completed = false; return s; }) : [];
@@ -1017,14 +1128,39 @@ window.addEventListener("DOMContentLoaded", () => {
         closeImportModal();
     });
 
-    // 编辑模态框按钮
-    document.getElementById('modal-cancel-btn').addEventListener('click', closeEditModal);
+    // 绑定编辑模态框自动保存
+    ['edit-content', 'edit-date', 'edit-time', 'edit-recurring'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('change', autoSaveEdit);
+            el.addEventListener('blur', autoSaveEdit);
+        }
+    });
 
     document.getElementById('edit-modal').addEventListener('click', (e) => {
         if (e.target.id === 'edit-modal') closeEditModal();
     });
 
-    document.getElementById('modal-delete-btn').addEventListener('click', async () => {
+    document.getElementById('delete-confirm-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'delete-confirm-modal') {
+            document.getElementById('delete-confirm-modal').classList.remove('active');
+        }
+    });
+
+    document.getElementById('modal-delete-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!currentEditingTodo) return;
+        const confirmModal = document.getElementById('delete-confirm-modal');
+        confirmModal.classList.add('active');
+    });
+
+    document.getElementById('delete-cancel-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.getElementById('delete-confirm-modal').classList.remove('active');
+    });
+
+    document.getElementById('delete-confirm-btn').addEventListener('click', async (e) => {
+        e.stopPropagation();
         if (!currentEditingTodo) return;
         const index = todoData.todos.findIndex(t => t.id === currentEditingTodo.id);
         if (index !== -1) {
@@ -1033,39 +1169,71 @@ window.addEventListener("DOMContentLoaded", () => {
             render();
             await saveData();
         }
+        document.getElementById('delete-confirm-modal').classList.remove('active');
         closeEditModal();
     });
 
-    document.getElementById('modal-save-btn').addEventListener('click', async () => {
+    document.getElementById('modal-tomorrow-btn').addEventListener('click', async () => {
         if (!currentEditingTodo) return;
-        const newContent = document.getElementById('edit-content').value.trim();
-        if (!newContent) return;
-
-        const index = todoData.todos.findIndex(t => t.id === currentEditingTodo.id);
-        if (index !== -1) {
-            todoData.todos[index].content = newContent;
-            todoData.todos[index].importance = editImportance;
-            todoData.todos[index].urgency = editUrgency;
-            todoData.todos[index].date = document.getElementById('edit-date').value || null;
-            todoData.todos[index].time = document.getElementById('edit-time').value || null;
-            const recurringSelect = document.getElementById('edit-recurring');
-            todoData.todos[index].recurring = recurringSelect ? recurringSelect.value : 'none';
-            todoData.todos[index].subtasks = JSON.parse(JSON.stringify(currentEditingSubtasks));
-            todoData.todos[index].updated_at = new Date().toISOString();
-            render();
-            await saveData();
-        }
+        document.getElementById('edit-date').value = getTomorrowString();
+        await autoSaveEdit();
         closeEditModal();
+    });
+
+    // Back button
+    document.getElementById('modal-back-btn').addEventListener('click', () => {
+        closeEditModal();
+    });
+
+    // 复制子步骤逻辑
+    const copyModal = document.getElementById('copy-modal');
+    document.getElementById('copy-subtasks-btn').addEventListener('click', () => {
+        if (!currentEditingSubtasks || currentEditingSubtasks.length === 0) {
+            alert('没有子步骤可复制');
+            return;
+        }
+        copyModal.style.display = 'flex';
+        // Force reflow
+        void copyModal.offsetWidth;
+        copyModal.classList.add('active');
+    });
+
+    const performCopy = async (format) => {
+        let textToCopy = '';
+        currentEditingSubtasks.forEach((sub, i) => {
+            if (format === '2') {
+                textToCopy += '- ' + sub.content + '\n';
+            } else if (format === '3') {
+                textToCopy += (i + 1) + '. ' + sub.content + '\n';
+            } else {
+                textToCopy += sub.content + '\n';
+            }
+        });
+        try {
+            await navigator.clipboard.writeText(textToCopy.trim());
+        } catch (e) {
+            console.error('Clipboard error', e);
+        }
+        copyModal.classList.remove('active');
+        setTimeout(() => copyModal.style.display = 'none', 200);
+    };
+
+    document.getElementById('copy-opt-1').addEventListener('click', () => performCopy('1'));
+    document.getElementById('copy-opt-2').addEventListener('click', () => performCopy('2'));
+    document.getElementById('copy-opt-3').addEventListener('click', () => performCopy('3'));
+    document.getElementById('copy-opt-cancel').addEventListener('click', () => {
+        copyModal.classList.remove('active');
+        setTimeout(() => copyModal.style.display = 'none', 200);
     });
 
     // 添加新待办表单
     formEl.addEventListener("submit", async (e) => {
         e.preventDefault();
         const raw = inputEl.value;
-        const { content, importance, urgency, taskDate } = parseInputSyntax(raw);
+        const { content, taskDate } = parseInputSyntax(raw);
         if (!content) return;
 
-        todoData.todos.push(createTodo(content, taskDate, importance, urgency));
+        todoData.todos.push(createTodo(content, taskDate));
         inputEl.value = '';
         render();
         await saveData();
@@ -1073,9 +1241,11 @@ window.addEventListener("DOMContentLoaded", () => {
 
     // Watch file changes
     listen("todo_data_changed", () => {
-        if (saving || appConfig.sync_mode === 'webdav') {
-            return; // 避免自身写入触发重载，或 WebDAV 模式下死循环
+        if (saveVersion > 0) {
+            saveVersion--; // 消耗掉自身写入产生的文件变更事件
+            return;
         }
+        if (appConfig.sync_mode === 'webdav') return; // WebDAV 模式下避免死循环
         loadData();
     });
 
