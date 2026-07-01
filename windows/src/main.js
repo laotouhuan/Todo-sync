@@ -1781,6 +1781,24 @@ window.addEventListener("DOMContentLoaded", () => {
             await loadData();
         });
     }
+    // 版本号比较函数 (例如比较 "1.0.1" 和 "1.0.0")
+    function compareVersions(v1, v2) {
+        // 防御性检查：任意一个无效则视为相等
+        if (v1 == null || v2 == null || typeof v1 === 'object' || typeof v2 === 'object') return 0;
+        const parts1 = String(v1).trim().split('.').map(s => parseInt(s, 10) || 0);
+        const parts2 = String(v2).trim().split('.').map(s => parseInt(s, 10) || 0);
+        for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+            const p1 = parts1[i] || 0;
+            const p2 = parts2[i] || 0;
+            if (p1 > p2) return 1;
+            if (p1 < p2) return -1;
+        }
+        return 0;
+    }
+
+    // GitHub API 地址常量（提取为常量，方便日后维护）
+    const GITHUB_RELEASE_API = 'https://api.github.com/repos/laotouhuan/Todo-sync/releases/latest';
+
     // 检查更新按钮事件
     const checkUpdateBtn = document.getElementById('check-update-btn');
     if (checkUpdateBtn) {
@@ -1789,31 +1807,49 @@ window.addEventListener("DOMContentLoaded", () => {
             checkUpdateBtn.textContent = '正在检查更新...';
             checkUpdateBtn.disabled = true;
             try {
-                if (!window.__TAURI__ || !window.__TAURI__.updater) {
-                    alert('检查更新失败：更新模块未加载。');
-                    return;
+                // 1. 获取当前程序版本号
+                const currentVersion = await invoke('get_app_version');
+
+                // 2. 请求 GitHub API 获取最新发布版本（网络层错误由 fetch 抛出）
+                let response;
+                try {
+                    response = await fetch(GITHUB_RELEASE_API);
+                } catch (networkErr) {
+                    throw new Error('网络连接失败，请确认是否可以访问 GitHub。');
                 }
-                const { check } = window.__TAURI__.updater;
-                const update = await check();
-                if (update) {
-                    const userConfirmed = confirm(`发现新版本 v${update.version}！\n\n更新内容：\n${update.body || '无'}\n\n是否立即下载并安装？安装后应用将自动重启。`);
+
+                // 处理 HTTP 错误，对速率限制单独提示
+                if (!response.ok) {
+                    if (response.status === 403 || response.status === 429) {
+                        throw new Error('GitHub API 请求过于频繁，请稍后再试（未认证限制：60次/小时）。');
+                    }
+                    throw new Error(`无法获取 GitHub 更新数据 (HTTP ${response.status})`);
+                }
+
+                // 3. 解析 JSON（单独捕获，避免因响应体异常向用户暴露技术细节）
+                let release;
+                try {
+                    release = await response.json();
+                } catch {
+                    throw new Error('服务器返回的数据格式异常，请稍后重试。');
+                }
+
+                const latestTagName = release.tag_name || '';
+                const latestVersion = latestTagName.startsWith('v') ? latestTagName.substring(1) : latestTagName;
+
+                // 4. 对比版本
+                if (compareVersions(latestVersion, currentVersion) > 0) {
+                    const userConfirmed = confirm(`发现新版本 v${latestVersion}！\n\n更新日志：\n${release.body || '无'}\n\n是否立即前往下载页面下载最新安装包？`);
                     if (userConfirmed) {
-                        checkUpdateBtn.textContent = '正在下载并安装...';
-                        await update.downloadAndInstall();
-                        await invoke('restart_app');
+                        // 使用 Tauri 官方的 opener 插件在浏览器中打开链接
+                        await invoke('plugin:opener|open', { path: release.html_url });
                     }
                 } else {
                     alert('当前已是最新版本！');
                 }
             } catch (err) {
                 console.error('检查更新失败:', err);
-                let msg = '检查更新失败，请稍后重试。\n\n';
-                if (String(err).includes('fetch a valid release JSON')) {
-                    msg += '提示：无法从服务器获取更新配置文件。请确认您的 GitHub 仓库已发布 Release 并且上传了 latest.json 描述文件，或者检查您的网络是否可以正常连接到 GitHub。';
-                } else {
-                    msg += '原因：' + err;
-                }
-                alert(msg);
+                alert(`检查更新失败。\n\n${err.message || '未知错误，请稍后重试。'}`);
             } finally {
                 checkUpdateBtn.textContent = oldText;
                 checkUpdateBtn.disabled = false;

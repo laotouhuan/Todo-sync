@@ -39,6 +39,11 @@ fn restart_app(app: tauri::AppHandle) {
     app.restart();
 }
 
+#[tauri::command]
+fn get_app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 fn watch_file(app: AppHandle) {
     let app_clone = app.clone();
     
@@ -136,6 +141,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_app_version,
             start_drag,
             set_always_on_top,
             restart_app,
