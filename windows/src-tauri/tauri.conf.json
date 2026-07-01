@@ -38,7 +38,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "RWSVhPda3ZGCRFqHte4o01+Yo7+CGuPWwig8Gdaho5d0G9JLkKziF4OL",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ0ODI5MURENUFGNzg0OTUKUldTVmhQZGEzWkdDUkZxSHRlNG8wMStZbzcrQ0d1UFd3aWc4R2RhaG81ZDBHOUpMa0t6aUY0T0wK",
       "endpoints": [
         "https://github.com/laotouhuan/Todo-sync/releases/latest/download/latest.json"
       ],
