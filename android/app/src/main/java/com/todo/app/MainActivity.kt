@@ -13,10 +13,12 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -33,22 +35,55 @@ import com.todo.app.ui.view.SettingsView
 import com.todo.app.ui.view.StatsView
 import com.todo.app.ui.viewmodel.TodoViewModel
 import com.todo.app.ui.viewmodel.TodoViewModelFactory
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private lateinit var viewModel: TodoViewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
-        // 获取全局唯一的单例仓库
         val repository = TodoApplication.instance.repository
         val configManager = ConfigManager(applicationContext)
 
         setContent {
+            val vm: TodoViewModel = viewModel(
+                factory = TodoViewModelFactory(repository, configManager)
+            )
+            viewModel = vm
             TodoAppTheme {
-                val viewModel: TodoViewModel = viewModel(
-                    factory = TodoViewModelFactory(repository, configManager)
-                )
-                TodoApp(viewModel)
+                TodoApp(vm)
+            }
+        }
+
+        startMidnightRefreshJob()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::viewModel.isInitialized) {
+            viewModel.refreshTodayDate()
+        }
+    }
+
+    private fun startMidnightRefreshJob() {
+        lifecycleScope.launch {
+            while (isActive) {
+                val now = java.time.LocalDateTime.now()
+                val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay()
+                val delayMs = java.time.Duration.between(now, nextMidnight).toMillis() + 100
+                delay(delayMs)
+                if (::viewModel.isInitialized) {
+                    if (!viewModel.isEditingDialogShowing.value) {
+                        viewModel.refreshTodayDate()
+                    } else {
+                        viewModel.pendingMidnightRefresh = true
+                    }
+                }
             }
         }
     }
@@ -65,10 +100,11 @@ val items = listOf(Screen.List, Screen.Stats, Screen.Settings)
 @Composable
 fun TodoApp(viewModel: TodoViewModel) {
     val navController = rememberNavController()
-    
     Scaffold(
         bottomBar = {
-            NavigationBar {
+            NavigationBar(
+                containerColor = NavigationBarDefaults.containerColor
+            ) {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentDestination = navBackStackEntry?.destination
                 items.forEach { screen ->

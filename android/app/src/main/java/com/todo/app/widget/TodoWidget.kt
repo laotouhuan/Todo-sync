@@ -41,6 +41,12 @@ import java.util.Locale
 // 全局唯一的 Key 常量，保证 actionRunCallback 绑定时和 ToggleActionCallback 取值时用同一个实例
 val TodoIdKey = ActionParameters.Key<String>("todoId")
 
+/** Widget 渲染模型：区分真实 Todo 和 UI 分隔线，避免污染领域模型 */
+sealed class WidgetItem {
+    data class TodoItem(val todo: Todo) : WidgetItem()
+    data class Separator(val id: String) : WidgetItem()
+}
+
 // Glance 状态版本号 key，每次数据变更递增，用于触发 Compose recomposition
 private val VERSION_KEY = intPreferencesKey("widget_data_version")
 val EXPANDED_TODOS_KEY = stringSetPreferencesKey("expanded_todos")
@@ -65,24 +71,41 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
 
             // 从内存中同步读取最新数据
             val repository = TodoApplication.instance.repository
-            val currentData = repository.getCurrentData()
+            val currentData = try {
+                repository.getCurrentData()
+            } catch (e: Exception) {
+                android.util.Log.e("TodoWidget", "Widget getCurrentData 失败: ${e.message}", e)
+                com.todo.app.data.model.TodoData(version = 1, last_updated = "", todos = emptyList())
+            }
             val expandedTodos = prefs[EXPANDED_TODOS_KEY] ?: emptySet()
 
             val dates = DateStrings.now()
             val todayStr = dates.today
 
             val todayFocus = run {
+                // Widget 仅展示今日/逾期/无日期任务，不包含周/月打卡和今日已完成任务
+                // 使用与旧版一致的过滤逻辑，确保 widget 始终聚焦最可操作的任务
                 val filtered = currentData.todos.filter { t ->
                     !t.deleted && (t.date == todayStr || t.isOverdue(todayStr) || t.date == null)
                 }
+                val todayTasks = filtered.filter { it.date != null }.sortedWith(TodoComparator)
+                val noDateTasks = filtered.filter { it.date == null }.sortedWith(TodoComparator)
+                val weekTasks = emptyList<Todo>()
+                val monthTasks = emptyList<Todo>()
 
-                val hasDate = filtered.filter { it.date != null }.sortedWith(TodoComparator)
-                val noDate = filtered.filter { it.date == null }.sortedWith(TodoComparator)
-                
-                val list = mutableListOf<Todo>()
-                list.addAll(hasDate)
-                list.add(Todo(id = "SEPARATOR", content = "SEPARATOR", created_at = "", updated_at = ""))
-                list.addAll(noDate)
+                val list = mutableListOf<WidgetItem>()
+
+                fun addGroup(todos: List<Todo>, separatorId: String) {
+                    if (todos.isEmpty()) return
+                    if (list.isNotEmpty()) list.add(WidgetItem.Separator(separatorId))
+                    list.addAll(todos.map { WidgetItem.TodoItem(it) })
+                }
+
+                addGroup(todayTasks, "SEPARATOR_NODATE")
+                addGroup(noDateTasks, "SEPARATOR_NODATE")
+                addGroup(weekTasks, "SEPARATOR_WEEK")
+                addGroup(monthTasks, "SEPARATOR_MONTH")
+
                 list.take(maxItems)
             }
 
@@ -197,18 +220,26 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                     LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
                         items(
                             items = todayFocus,
-                            itemId = { todo -> todo.id.hashCode().toLong() }
-                        ) { todo ->
-                            if (todo.id == "SEPARATOR") {
-                                Box(
-                                    modifier = GlanceModifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 8.dp)
-                                        .height(2.dp)
-                                        .background(ColorProvider(Color(0x80DDDDDD)))
-                                ) {}
-                            } else {
-                                TodoItemWidget(todo, surfaceColor, textColor, textVariantColor, expandedTodos.contains(todo.id))
+                            itemId = { item -> when (item) {
+                                is WidgetItem.Separator -> item.id.hashCode().toLong()
+                                is WidgetItem.TodoItem -> item.todo.id.hashCode().toLong()
+                            }}
+                        ) { item ->
+                            when (item) {
+                                is WidgetItem.Separator -> {
+                                    Column(modifier = GlanceModifier.fillMaxWidth()) {
+                                        Box(
+                                            modifier = GlanceModifier
+                                                .fillMaxWidth()
+                                                .height(1.dp)
+                                                .background(ColorProvider(Color(0x33FFFFFF)))
+                                        ) {}
+                                        Spacer(modifier = GlanceModifier.height(8.dp))
+                                    }
+                                }
+                                is WidgetItem.TodoItem -> {
+                                    TodoItemWidget(item.todo, surfaceColor, textColor, textVariantColor, expandedTodos.contains(item.todo.id))
+                                }
                             }
                         }
                     }
@@ -282,58 +313,82 @@ class TodoNormalWidget : BaseTodoWidget(maxItems = 20, showHeader = true)
 
 class ToggleActionCallback : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        val todoId = parameters[TodoIdKey] ?: return
-        TodoApplication.instance.repository.toggleTodoStatus(todoId)
-        refreshAllWidgets(context)
+        try {
+            val todoId = parameters[TodoIdKey] ?: return
+            TodoApplication.instance.repository.toggleTodoStatus(todoId)
+            refreshAllWidgets(context)
+        } catch (e: Exception) {
+            android.util.Log.e("TodoWidget", "ToggleActionCallback onAction 失败: ${e.message}", e)
+        }
     }
 }
 
 class ExpandActionCallback : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        val todoId = parameters[TodoIdKey] ?: return
-        updateAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId) { prefs ->
-            prefs.toMutablePreferences().apply {
-                val currentSet = this[EXPANDED_TODOS_KEY]?.toMutableSet() ?: mutableSetOf()
-                if (currentSet.contains(todoId)) {
-                    currentSet.remove(todoId)
-                } else {
-                    currentSet.add(todoId)
+        try {
+            val todoId = parameters[TodoIdKey] ?: return
+            updateAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId) { prefs ->
+                prefs.toMutablePreferences().apply {
+                    val currentSet = this[EXPANDED_TODOS_KEY]?.toMutableSet() ?: mutableSetOf()
+                    if (currentSet.contains(todoId)) {
+                        currentSet.remove(todoId)
+                    } else {
+                        currentSet.add(todoId)
+                    }
+                    this[EXPANDED_TODOS_KEY] = currentSet
                 }
-                this[EXPANDED_TODOS_KEY] = currentSet
             }
+            try { TodoNormalWidget().update(context, glanceId) } catch (_: Exception) {}
+            try { TodoCompactWidget().update(context, glanceId) } catch (_: Exception) {}
+        } catch (e: Exception) {
+            android.util.Log.e("TodoWidget", "ExpandActionCallback onAction 失败: ${e.message}", e)
         }
-        TodoNormalWidget().update(context, glanceId)
-        TodoCompactWidget().update(context, glanceId)
     }
 }
 
 class SyncActionCallback : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        TodoApplication.instance.repository.syncWithCloud()
-        refreshAllWidgets(context)
+        try {
+            TodoApplication.instance.repository.syncWithCloud()
+            refreshAllWidgets(context)
+        } catch (e: Exception) {
+            android.util.Log.e("TodoWidget", "SyncActionCallback onAction 失败: ${e.message}", e)
+        }
     }
 }
 
 /** 递增所有小组件的版本号并触发刷新，供 ToggleActionCallback 和 TodoRepository 共用 */
 suspend fun refreshAllWidgets(context: Context) {
-    val manager = GlanceAppWidgetManager(context)
+    try {
+        val manager = GlanceAppWidgetManager(context)
 
-    for (id in manager.getGlanceIds(TodoCompactWidget::class.java)) {
-        updateAppWidgetState(context, PreferencesGlanceStateDefinition, id) { prefs ->
-            prefs.toMutablePreferences().apply {
-                this[VERSION_KEY] = (prefs[VERSION_KEY] ?: 0) + 1
+        for (id in manager.getGlanceIds(TodoCompactWidget::class.java)) {
+            try {
+                updateAppWidgetState(context, PreferencesGlanceStateDefinition, id) { prefs ->
+                    prefs.toMutablePreferences().apply {
+                        this[VERSION_KEY] = (prefs[VERSION_KEY] ?: 0) + 1
+                    }
+                }
+                TodoCompactWidget().update(context, id)
+            } catch (e: Exception) {
+                android.util.Log.e("TodoWidget", "刷新 CompactWidget 失败: ${e.message}", e)
             }
         }
-        TodoCompactWidget().update(context, id)
-    }
 
-    for (id in manager.getGlanceIds(TodoNormalWidget::class.java)) {
-        updateAppWidgetState(context, PreferencesGlanceStateDefinition, id) { prefs ->
-            prefs.toMutablePreferences().apply {
-                this[VERSION_KEY] = (prefs[VERSION_KEY] ?: 0) + 1
+        for (id in manager.getGlanceIds(TodoNormalWidget::class.java)) {
+            try {
+                updateAppWidgetState(context, PreferencesGlanceStateDefinition, id) { prefs ->
+                    prefs.toMutablePreferences().apply {
+                        this[VERSION_KEY] = (prefs[VERSION_KEY] ?: 0) + 1
+                    }
+                }
+                TodoNormalWidget().update(context, id)
+            } catch (e: Exception) {
+                android.util.Log.e("TodoWidget", "刷新 NormalWidget 失败: ${e.message}", e)
             }
         }
-        TodoNormalWidget().update(context, id)
+    } catch (e: Exception) {
+        android.util.Log.e("TodoWidget", "refreshAllWidgets 失败: ${e.message}", e)
     }
 }
 

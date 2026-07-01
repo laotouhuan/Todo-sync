@@ -109,9 +109,12 @@ to-do list/
       "updated_at": "ISO 8601",   // ★ 冲突解决依据
       "order": 0.0,               // 排序权重（数字）
       "deleted": false,           // 软删除标记
-      "recurring": "none",        // 循环类型：none | daily | weekly | monthly
+      "recurring": "none",        // 每日重复（兼容遗留字段）：none | daily_repeat
+      "task_type": "normal",      // 任务类型：normal | weekly_checkin | monthly_checkin
+      "completed_dates": [],      // 已打卡的日期数组（如 ["2026-07-01", ...]）
+      "target_count": null,       // 目标打卡次数（整数或 null）
       "subtasks": [               // 子任务列表
-        { "id": "UUID", "content": "string", "completed": false }
+        { "id": "UUID", "content": "string", "completed": false, "completed_at": "ISO 8601 | null" }
       ]
     }
   ]
@@ -219,3 +222,36 @@ Windows 端使用以下机制保证文件安全：
 3. **WebDAV 默认地址**为坚果云（`https://dav.jianguoyun.com/dav/`），路径中的中文会被 URL 编码。
 4. **备份文件**命名格式为 `todo_data_{unix_timestamp}.json`，存放在 Tauri 的 `app_data_dir/backups/` 目录下。
 5. **Android 使用阿里云 Maven 镜像**，在国内网络环境下构建更快，不要移除。
+
+---
+
+## 9. 自动化测试
+
+### 9.1 测试架构
+
+项目使用三层测试体系，所有测试位于 `windows/tests/` 目录：
+
+| 层级 | 文件 | 作用 | 命令 |
+|------|------|------|------|
+| **构建门禁** | `check-build.mjs` | JS 语法检查 + import/export 一致性 + import 位置 | `npm run check` |
+| **单元测试** | `test-dateUtils.mjs` | dateUtils.js 所有纯函数 | `npm run test:unit` |
+| **数据逻辑** | `test-dataLogic.mjs` | 合并策略 + 数据迁移 + Schema 校验 | `npm run test:data` |
+
+### 9.2 测试铁律
+
+1. **修改代码后必须运行测试**：执行 `npm run check && npm run test`，全部通过后才可提交或打包。
+2. **新增工具函数必须补测试**：在 `dateUtils.js` 中新增的每个 `export function` 都必须在 `test-dateUtils.mjs` 中有对应的测试用例。
+3. **修改合并/迁移逻辑必须补测试**：修改 `mergeTodoData()` 或 `migrateAndNormalize()` 后，必须在 `test-dataLogic.mjs` 中添加对应的边界测试。
+4. **修改 Schema 必须验证**：更新 `todo_data.schema.json` 后，必须确保 `createTodo()` 的输出仍然包含 Schema 定义的所有属性。
+
+---
+
+## 10. ⚠️ ES Module 铁律（血泪教训）
+
+以下规则针对 Windows 前端（纯 Vanilla JS + ES Module）的开发，**绝对不可违反**：
+
+1. **`import` 语句必须在文件最顶部**：严禁在 `import` 之前放置任何 `const`、`let`、`var` 或函数调用。违反此规则将导致整个脚本静默崩溃，界面完全空白。
+2. **禁止导入不存在的名称**：`import { foo } from './bar.js'` 中的 `foo` 必须在 `bar.js` 中有对应的 `export`。ES 模块在链接阶段会检查所有命名导出，缺失的导入将导致致命错误。
+3. **禁止重复声明 export**：同一个文件中不可出现两个同名的 `export function`（如重复的 `getLastWeekString`），否则触发 `SyntaxError`。
+4. **提取/移动函数时必须同步清理**：将函数从 `main.js` 提取到 `dateUtils.js` 时，必须同时更新 `main.js` 的 import 列表，删除已不存在的引用，添加新的引用。
+

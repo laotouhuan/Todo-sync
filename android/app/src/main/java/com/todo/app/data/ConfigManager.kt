@@ -22,6 +22,9 @@ class ConfigManager(context: Context) {
         get() = prefs.getString("file_path", "我的坚果云/to-do/todo_data.json") ?: "我的坚果云/to-do/todo_data.json"
         set(value) = prefs.edit().putString("file_path", value).apply()
 
+
+
+
     fun isConfigured(): Boolean {
         return username.isNotEmpty() && appPassword.isNotEmpty()
     }

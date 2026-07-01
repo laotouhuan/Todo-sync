@@ -2,6 +2,8 @@ package com.todo.app.ui.view
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,11 +26,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.todo.app.ui.viewmodel.TodoViewModel
+import com.todo.app.utils.AppUpdater
+import com.todo.app.utils.UpdateInfo
 import kotlinx.coroutines.launch
 
 @Composable
@@ -40,9 +46,42 @@ fun SettingsView(viewModel: TodoViewModel) {
     var filePath by remember { mutableStateOf(configManager.filePath) }
     var showBackupDialog by remember { mutableStateOf(false) }
     var backupsList by remember { mutableStateOf<List<String>>(emptyList()) }
+    var showConfirmForcePull by remember { mutableStateOf(false) }
 
+    var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    var isDownloading by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableStateOf(0) }
+    var downloadJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val versionName = remember(context) {
+        try {
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            packageInfo.versionName ?: "1.0.0"
+        } catch (e: Exception) {
+            "1.0.0"
+        }
+    }
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+
+    val startDownloadUpdate = { apkUrl: String ->
+        isDownloading = true
+        downloadProgress = 0
+        downloadJob = coroutineScope.launch {
+            val file = AppUpdater.downloadApk(context, apkUrl) { progress ->
+                downloadProgress = progress
+            }
+            isDownloading = false
+            if (file != null) {
+                AppUpdater.installApk(context, file)
+                showUpdateDialog = false
+            } else {
+                snackbarHostState.showSnackbar("下载更新失败")
+            }
+        }
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) }
@@ -126,10 +165,7 @@ fun SettingsView(viewModel: TodoViewModel) {
             Spacer(modifier = Modifier.height(16.dp))
             Button(
                 onClick = {
-                    viewModel.forcePullCloud()
-                    coroutineScope.launch {
-                        snackbarHostState.showSnackbar("强制拉取已触发，请稍后回首页查看")
-                    }
+                    showConfirmForcePull = true
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
@@ -140,7 +176,29 @@ fun SettingsView(viewModel: TodoViewModel) {
                 Text("强制从云端恢复到手机 (覆盖本地)")
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            if (showConfirmForcePull) {
+                AlertDialog(
+                    onDismissRequest = { showConfirmForcePull = false },
+                    title = { Text("强制覆盖本地数据") },
+                    text = { Text("此操作将下载云端数据并直接覆盖您手机上的本地待办列表！本地未同步的改动将会丢失。确认执行？") },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showConfirmForcePull = false
+                                viewModel.forcePullCloud()
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("强制拉取已触发，请稍后回首页查看")
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) { Text("确认覆盖") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showConfirmForcePull = false }) { Text("取消") }
+                    }
+                )
+            }
+
             Text("高级与维护", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(bottom = 16.dp))
             ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -192,6 +250,92 @@ fun SettingsView(viewModel: TodoViewModel) {
                     confirmButton = {
                         TextButton(onClick = { showBackupDialog = false }) {
                             Text("关闭")
+                        }
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text("关于与更新", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(bottom = 16.dp))
+            ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("当前版本: v$versionName", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(16.dp))
+                    var checkingForUpdate by remember { mutableStateOf(false) }
+                    Button(
+                        onClick = {
+                            checkingForUpdate = true
+                            coroutineScope.launch {
+                                val info = AppUpdater.checkForUpdates(versionName)
+                                checkingForUpdate = false
+                                if (info != null) {
+                                    updateInfo = info
+                                    showUpdateDialog = true
+                                } else {
+                                    snackbarHostState.showSnackbar("当前已是最新版本")
+                                }
+                            }
+                        },
+                        enabled = !checkingForUpdate,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                    ) {
+                        Text(if (checkingForUpdate) "正在检查更新..." else "检查更新")
+                    }
+                }
+            }
+
+            if (showUpdateDialog && updateInfo != null) {
+                AlertDialog(
+                    onDismissRequest = {
+                        if (!isDownloading) {
+                            showUpdateDialog = false
+                            updateInfo = null
+                        }
+                    },
+                    title = { Text("发现新版本 v${updateInfo!!.version}") },
+                    text = {
+                        Column {
+                            if (updateInfo!!.notes.isNotEmpty()) {
+                                Text("更新日志：", style = MaterialTheme.typography.titleSmall)
+                                Text(updateInfo!!.notes, style = MaterialTheme.typography.bodyMedium)
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
+                            if (isDownloading) {
+                                Text("正在下载: $downloadProgress%")
+                                LinearProgressIndicator(
+                                    progress = { downloadProgress / 100f },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                                )
+                            } else {
+                                Text("确认开始下载并安装更新？")
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        if (!isDownloading) {
+                            Button(onClick = { startDownloadUpdate(updateInfo!!.apkUrl) }) {
+                                Text("立即更新")
+                            }
+                        } else {
+                            TextButton(onClick = {
+                                downloadJob?.cancel()
+                                isDownloading = false
+                                downloadProgress = 0
+                            }) {
+                                Text("取消下载")
+                            }
+                        }
+                    },
+                    dismissButton = {
+                        if (!isDownloading) {
+                            TextButton(onClick = {
+                                showUpdateDialog = false
+                                updateInfo = null
+                            }) {
+                                Text("稍后再说")
+                            }
                         }
                     }
                 )

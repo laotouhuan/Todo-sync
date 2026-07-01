@@ -58,7 +58,24 @@
           },
           "recurring": {
             "type": "string",
+            "enum": ["none", "daily_repeat"],
             "default": "none"
+          },
+          "task_type": {
+            "type": "string",
+            "enum": ["normal", "weekly_checkin", "monthly_checkin"],
+            "default": "normal"
+          },
+          "completed_dates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "target_count": {
+            "type": ["integer", "null"],
+            "default": null
           },
           "subtasks": {
             "type": "array",
@@ -74,6 +91,11 @@
                 },
                 "completed": {
                   "type": "boolean"
+                },
+                "completed_at": {
+                  "type": ["string", "null"],
+                  "format": "date-time",
+                  "default": null
                 }
               },
               "required": ["id", "content", "completed"]

@@ -20,6 +20,12 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import com.todo.app.data.model.nowIso
 import com.todo.app.data.model.nowInstant
+import com.todo.app.data.model.isWeekDate
+import com.todo.app.data.model.isMonthDate
+import com.todo.app.data.model.getWeeklyCompletedCount
+import com.todo.app.data.model.getMonthlyCompletedCount
+import com.todo.app.data.model.TaskType
+import com.todo.app.data.model.RecurringType
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -75,22 +81,82 @@ class TodoRepository(private val context: Context) {
         loadFromDisk()
     }
 
+    private fun migrateTodo(todo: Todo): Todo {
+        var recurring = todo.recurring
+        var taskType = todo.task_type
+        
+        if (recurring == "daily") {
+            recurring = RecurringType.DAILY_REPEAT
+            taskType = if (taskType.isEmpty() || taskType == TaskType.NORMAL) TaskType.NORMAL else taskType
+        } else if (recurring == "weekly") {
+            recurring = RecurringType.NONE
+            taskType = TaskType.WEEKLY_CHECKIN
+        } else if (recurring == "monthly") {
+            recurring = RecurringType.NONE
+            taskType = TaskType.MONTHLY_CHECKIN
+        }
+
+        val dateStr = todo.date
+        if (dateStr != null) {
+            if (isWeekDate(dateStr)) {
+                taskType = TaskType.WEEKLY_CHECKIN
+            } else if (isMonthDate(dateStr)) {
+                taskType = TaskType.MONTHLY_CHECKIN
+            }
+        }
+        
+        val completedDates = todo.completed_dates ?: emptyList()
+
+        return todo.copy(
+            recurring = recurring,
+            task_type = taskType.ifEmpty { TaskType.NORMAL },
+            completed_dates = completedDates,
+            target_count = todo.target_count
+        )
+    }
+
+    private fun normalizeData(data: TodoData): TodoData {
+        val migratedTodos = data.todos.map { migrateTodo(it) }
+        
+        // Remove duplicate IDs (keep the latest updated)
+        val uniqueTodos = migratedTodos.groupBy { it.id }
+            .map { (_, list) -> 
+                if (list.size > 1) {
+                    list.maxByOrNull { try { OffsetDateTime.parse(it.updated_at) } catch (_: Exception) { OffsetDateTime.MIN } } ?: list.first()
+                } else {
+                    list.first()
+                }
+            }
+        
+        // Remove duplicate completed_dates
+        val deduplicatedTodos = uniqueTodos.map { todo ->
+            if (todo.completed_dates.size != todo.completed_dates.toSet().size) {
+                todo.copy(completed_dates = todo.completed_dates.distinct().sorted())
+            } else {
+                todo
+            }
+        }
+        
+        return data.copy(todos = deduplicatedTodos)
+    }
+
     private fun loadFromDisk() {
         if (dataFile.exists()) {
             try {
                 val jsonString = dataFile.readText()
                 val parsed = jsonFormat.decodeFromString<TodoData>(jsonString)
+                val migratedData = normalizeData(parsed)
+                val migratedTodos = migratedData.todos
 
                 // 旧数据迁移：所有 todo 的 order 都为 0.0 时，按 created_at 降序分配递增序号
-                val todos = parsed.todos
-                if (todos.size > 1 && todos.all { it.order == 0.0 }) {
-                    val sorted = todos.sortedByDescending { it.created_at }
+                if (migratedTodos.size > 1 && migratedTodos.all { it.order == 0.0 }) {
+                    val sorted = migratedTodos.sortedByDescending { it.created_at }
                     sorted.forEachIndexed { index, todo -> todo.order = index.toDouble() }
-                    _todoData.value = parsed.copy(todos = sorted)
+                    _todoData.value = migratedData.copy(todos = sorted)
                     // 持久化迁移结果
                     try { atomicWriteJson(jsonFormat.encodeToString(TodoData.serializer(), _todoData.value)) } catch (_: Exception) {}
                 } else {
-                    _todoData.value = parsed
+                    _todoData.value = migratedData
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -159,8 +225,8 @@ class TodoRepository(private val context: Context) {
     }
 
     private fun mergeTodoData(local: TodoData, cloud: TodoData): TodoData {
-        val localTodos = local.todos.associateBy { it.id }
-        val cloudTodos = cloud.todos.associateBy { it.id }
+        val localTodos = normalizeData(local).todos.associateBy { it.id }
+        val cloudTodos = normalizeData(cloud).todos.associateBy { it.id }
         val merged = mutableMapOf<String, Todo>()
         for (id in localTodos.keys + cloudTodos.keys) {
             val l = localTodos[id]
@@ -168,7 +234,11 @@ class TodoRepository(private val context: Context) {
             if (l != null && c != null) {
                 val lTime = try { OffsetDateTime.parse(l.updated_at) } catch (_: Exception) { OffsetDateTime.MIN }
                 val cTime = try { OffsetDateTime.parse(c.updated_at) } catch (_: Exception) { OffsetDateTime.MIN }
-                merged[id] = if (cTime.isAfter(lTime)) c else l
+                val base = if (cTime.isAfter(lTime)) c else l
+                
+                // completed_dates 并集去重并排序
+                val mergedDates = (l.completed_dates + c.completed_dates).distinct().sorted()
+                merged[id] = base.copy(completed_dates = mergedDates)
             } else {
                 merged[id] = l ?: c!!
             }
@@ -203,6 +273,9 @@ class TodoRepository(private val context: Context) {
                         _todoData.value = mergedData
                         atomicWriteJson(mergedJson)
                         com.todo.app.widget.refreshAllWidgets(context)
+                        withContext(Dispatchers.Main) {
+                            android.widget.Toast.makeText(context, "检测到云端更新，已自动同步完成", android.widget.Toast.LENGTH_SHORT).show()
+                        }
                     }
                     if (cloudChanged || localChanged) {
                         client.uploadFile(configManager.filePath, mergedJson)
@@ -237,8 +310,9 @@ class TodoRepository(private val context: Context) {
             if (cloudJson != null) {
                 createLocalBackup()
                 val cloudData = jsonFormat.decodeFromString<TodoData>(cloudJson)
-                _todoData.value = cloudData
-                atomicWriteJson(cloudJson)
+                val migratedData = normalizeData(cloudData)
+                _todoData.value = migratedData
+                atomicWriteJson(jsonFormat.encodeToString(migratedData))
                 com.todo.app.widget.refreshAllWidgets(context)
                 withContext(Dispatchers.Main) {
                     android.widget.Toast.makeText(context, "强制拉取成功！", android.widget.Toast.LENGTH_SHORT).show()
@@ -250,15 +324,31 @@ class TodoRepository(private val context: Context) {
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            val rootContents = try { webDavClient?.listRoot() ?: "" } catch(ex: Exception) { "" }
+            // 不向用户展示服务器错误详情和目录结构，防止信息泄露
             withContext(Dispatchers.Main) {
-                android.widget.Toast.makeText(context, "${e.message}\n$rootContents", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(context, "云端同步失败，请检查网络连接和 WebDAV 配置", android.widget.Toast.LENGTH_LONG).show()
             }
         }
     }
     }
 
     fun getTodoData(): Flow<TodoData> = _todoData.asStateFlow()
+
+    /** 将源 Todo 克隆到新周期，重置完成状态和子任务 */
+    private fun cloneTodoForNewPeriod(source: Todo, targetDateStr: String): Todo {
+        return Todo.create(source.content, targetDateStr).copy(
+            task_type = source.task_type,
+            target_count = source.target_count,
+            completed = false,
+            completed_at = null,
+            completed_dates = emptyList(),
+            subtasks = source.subtasks.map { sub ->
+                sub.copy(id = UUID.randomUUID().toString(), completed = false, completed_at = null)
+            },
+            created_at = nowIso(),
+            updated_at = nowIso()
+        )
+    }
     
     /** 同步获取当前内存中的最新数据（非挂起），供 Glance provideContent 内部使用 */
     fun getCurrentData(): TodoData = _todoData.value
@@ -349,47 +439,160 @@ class TodoRepository(private val context: Context) {
         val index = current.indexOfFirst { it.id == id }
         if (index != -1) {
             val todo = current[index]
-            if (!todo.completed && todo.recurring != "none") {
-                // 如果是重复任务且未完成，克隆出一个新的下周期任务
-                val nextDate = getNextRecurringDate(todo.date, todo.recurring)
-                val clone = todo.copy(
-                    id = UUID.randomUUID().toString(),
-                    date = nextDate,
-                    completed = false,
-                    created_at = nowIso(),
-                    updated_at = nowIso(),
-                    subtasks = todo.subtasks.map { it.copy(id = UUID.randomUUID().toString(), completed = false) }
+
+            // 周/月打卡任务分支
+            if (todo.task_type == TaskType.WEEKLY_CHECKIN || todo.task_type == TaskType.MONTHLY_CHECKIN) {
+                val todayStr = java.time.LocalDate.now().toString()
+                val dates = todo.completed_dates.toMutableList()
+
+                if (todo.completed) {
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(context, "已达到目标次数！如需消卡，请进入编辑弹窗。", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    return@withLock
+                }
+
+                if (dates.contains(todayStr)) {
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(context, "今天已打卡！如需消卡，请进入编辑弹窗。", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    return@withLock
+                }
+
+                dates.add(todayStr)
+                dates.sort()
+
+                val updatedTodoForCount = todo.copy(completed_dates = dates)
+                val completedCount = if (todo.task_type == TaskType.WEEKLY_CHECKIN) {
+                    updatedTodoForCount.getWeeklyCompletedCount()
+                } else {
+                    updatedTodoForCount.getMonthlyCompletedCount()
+                }
+                val isCompletedNow = todo.target_count != null && completedCount >= todo.target_count!!
+                val updatedTodo = todo.copy(
+                    completed_dates = dates,
+                    completed = isCompletedNow,
+                    completed_at = if (isCompletedNow) nowInstant() else null,
+                    updated_at = nowIso()
                 )
-                current.add(clone)
+                current[index] = updatedTodo
+                saveTodos(current)
+                return@withLock
+            }
+
+            if (!todo.completed && todo.recurring == RecurringType.DAILY_REPEAT) {
+                val tomorrowStr = java.time.LocalDate.now().plusDays(1).toString()
+                val existsClone = current.any {
+                    it.content == todo.content && it.date == tomorrowStr
+                    && it.recurring == RecurringType.DAILY_REPEAT && !it.deleted
+                }
+                if (!existsClone) {
+                    val clone = todo.copy(
+                        id = UUID.randomUUID().toString(),
+                        date = tomorrowStr,
+                        completed = false,
+                        completed_at = null,
+                        created_at = nowIso(),
+                        updated_at = nowIso(),
+                        order = -System.currentTimeMillis().toDouble(), // 负数置顶
+                        subtasks = todo.subtasks.map {
+                            it.copy(id = UUID.randomUUID().toString(), completed = false, completed_at = null)
+                        }
+                    )
+                    current.add(clone)
+                }
             }
             val isCompletedNow = !todo.completed
             val updatedTodo = todo.copy(
                 completed = isCompletedNow,
                 completed_at = if (isCompletedNow) nowInstant() else null,
+                subtasks = if (isCompletedNow) {
+                    todo.subtasks.map { s ->
+                        s.copy(completed = true, completed_at = s.completed_at ?: nowIso())
+                    }
+                } else {
+                    todo.subtasks
+                },
                 updated_at = nowIso()
             )
             current[index] = updatedTodo
             saveTodos(current)
         }
     }
-    
-    private fun getNextRecurringDate(baseDate: String?, rule: String): String? {
-        if (baseDate == null) return null
-        try {
-            // 支持简单的 yyyy-MM-dd 解析
-            if (baseDate.length == 10 && baseDate[4] == '-' && baseDate[7] == '-') {
-                val date = java.time.LocalDate.parse(baseDate)
-                val next = when (rule) {
-                    "daily" -> date.plusDays(1)
-                    "weekly" -> date.plusWeeks(1)
-                    "monthly" -> date.plusMonths(1)
-                    else -> date
-                }
-                return next.toString()
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
+
+    suspend fun importSelectedFromLastPeriod(type: String, selectedIds: List<String>, context: android.content.Context) = mutex.withLock { withContext(Dispatchers.IO) {
+        val today = java.time.LocalDate.now()
+        val targetPeriodStr = if (type == "weekly") {
+            com.todo.app.data.model.weekStringOf(today)
+        } else {
+            com.todo.app.data.model.monthStringOf(today)
         }
-        return baseDate
-    }
+
+        val current = _todoData.value.todos.toMutableList()
+        val candidates = current.filter { it.id in selectedIds }
+
+        val existingTitles = current.filter { !it.deleted && it.date == targetPeriodStr }.map { it.content }.toSet()
+
+        var importCount = 0
+        candidates.forEach { src ->
+            if (existingTitles.contains(src.content)) return@forEach
+            current.add(cloneTodoForNewPeriod(src, targetPeriodStr))
+            importCount++
+        }
+
+        if (importCount > 0) {
+            saveTodos(current)
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(context, "成功导入 $importCount 个打卡任务", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }}
+
+    suspend fun importFromLastPeriod(type: String, context: android.content.Context) = mutex.withLock { withContext(Dispatchers.IO) {
+        val today = java.time.LocalDate.now()
+        val sourcePeriodStr = if (type == "weekly") {
+            com.todo.app.data.model.weekStringOf(today.minusWeeks(1))
+        } else {
+            com.todo.app.data.model.monthStringOf(today.minusMonths(1))
+        }
+        val targetPeriodStr = if (type == "weekly") {
+            com.todo.app.data.model.weekStringOf(today)
+        } else {
+            com.todo.app.data.model.monthStringOf(today)
+        }
+
+        val current = _todoData.value.todos.toMutableList()
+        val candidates = current.filter {
+            !it.deleted &&
+            (it.task_type == TaskType.WEEKLY_CHECKIN || it.task_type == TaskType.MONTHLY_CHECKIN) &&
+            it.date == sourcePeriodStr
+        }
+
+        if (candidates.isEmpty()) {
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(context, "上一周期没有打卡任务可供导入", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            return@withContext
+        }
+
+        val existingTitles = current.filter { !it.deleted && it.date == targetPeriodStr }.map { it.content }.toSet()
+
+        var importCount = 0
+        candidates.forEach { src ->
+            if (existingTitles.contains(src.content)) return@forEach
+            current.add(cloneTodoForNewPeriod(src, targetPeriodStr))
+            importCount++
+        }
+
+        if (importCount > 0) {
+            saveTodos(current)
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(context, "成功导入 $importCount 个打卡任务", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            withContext(Dispatchers.Main) {
+                android.widget.Toast.makeText(context, "任务已存在，无需重复导入", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }}
 }

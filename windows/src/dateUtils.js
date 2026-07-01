@@ -26,9 +26,7 @@ export function getISOWeekString(d) {
 export function getTodayString() { return formatDate(new Date()); }
 export function getTomorrowString() { const d = new Date(); d.setDate(d.getDate() + 1); return formatDate(d); }
 export function getThisWeekString() { return getISOWeekString(new Date()); }
-export function getLastWeekString() { const d = new Date(); d.setDate(d.getDate() - 7); return getISOWeekString(d); }
 export function getThisMonthString() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
-export function getLastMonthString() { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
 
 // ====== Date Type Checks ======
 
@@ -89,17 +87,6 @@ export function sortFunc(a, b) {
     return new Date(b.created_at) - new Date(a.created_at);
 }
 
-// ====== Recurring Dates ======
-
-export function getNextRecurringDate(baseDateStr, rule) {
-    const d = new Date(baseDateStr);
-    if (isNaN(d.getTime())) return baseDateStr;
-    if (rule === 'daily') d.setDate(d.getDate() + 1);
-    else if (rule === 'weekly') d.setDate(d.getDate() + 7);
-    else if (rule === 'monthly') d.setMonth(d.getMonth() + 1);
-    return formatDate(d);
-}
-
 // ====== Input Parsing ======
 
 /**
@@ -107,24 +94,41 @@ export function getNextRecurringDate(baseDateStr, rule) {
  * Supports: @today, @tomorrow, @week, @month, @YYYY-MM-DD, @MM-DD
  */
 export function parseInputSyntax(rawContent) {
-    const dateRegex = /(?:\s+|^)@(today|tomorrow|week|month|\d{4}-\d{2}-\d{2}|\d{2}-\d{2})$/i;
+    const dateRegex = /(?:\s+|^)@(today|tomorrow|week|month|day|daily|\d{4}-\d{2}-\d{2}|\d{2}-\d{2})(?:[*/:](\d*))?$/i;
 
     let content = rawContent.trim();
     let taskDate = null;
+    let taskType = 'normal';
+    let targetCount = null;
 
     const dateMatch = content.match(dateRegex);
     if (dateMatch) {
         const v = dateMatch[1].toLowerCase();
+        const countStr = dateMatch[2];
+        
         if (v === 'today') taskDate = getTodayString();
         else if (v === 'tomorrow') taskDate = getTomorrowString();
-        else if (v === 'week') taskDate = getThisWeekString();
-        else if (v === 'month') taskDate = getThisMonthString();
+        else if (v === 'day' || v === 'daily') {
+            taskDate = getTodayString();
+            taskType = 'daily_repeat';
+        }
+        else if (v === 'week') {
+            taskDate = getThisWeekString();
+            taskType = 'weekly_checkin';
+            targetCount = (countStr && countStr !== "") ? parseInt(countStr, 10) : null;
+        }
+        else if (v === 'month') {
+            taskDate = getThisMonthString();
+            taskType = 'monthly_checkin';
+            targetCount = (countStr && countStr !== "") ? parseInt(countStr, 10) : null;
+        }
         else if (/^\d{4}-\d{2}-\d{2}$/.test(v)) taskDate = v;
         else if (/^\d{2}-\d{2}$/.test(v)) taskDate = `${new Date().getFullYear()}-${v}`;
+        
         content = content.replace(dateRegex, '').trim();
     }
 
-    return { content, taskDate };
+    return { content, taskDate, taskType, targetCount };
 }
 
 // ====== Todo Factory ======
@@ -142,6 +146,9 @@ export function createTodo(content, date = null) {
         updated_at: new Date().toISOString(),
         deleted: false,
         recurring: 'none',
+        task_type: 'normal',
+        completed_dates: [],
+        target_count: null,
         subtasks: []
     };
 }
@@ -153,6 +160,10 @@ export function createTodo(content, date = null) {
  * Returns { todayGroup, noDateGroup, weekGroup, monthGroup, futureGroup, pastGroup }
  */
 export function groupTodosByDate(todos, todayStr) {
+    const today = new Date(todayStr + 'T00:00:00');
+    const thisWeekStr = getISOWeekString(today);
+    const thisMonthStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+
     const groups = {
         todayGroup: [],
         noDateGroup: [],
@@ -164,14 +175,28 @@ export function groupTodosByDate(todos, todayStr) {
 
     todos.forEach(todo => {
         const d = todo.date;
-        if (!d) {
+        if (todo.task_type === 'weekly_checkin' || isWeekDate(d)) {
+            const weekVal = d || thisWeekStr;
+            if (weekVal === thisWeekStr) {
+                groups.weekGroup.push(todo);
+            } else if (weekVal < thisWeekStr) {
+                groups.pastGroup.push(todo);
+            } else {
+                groups.futureGroup.push(todo);
+            }
+        } else if (todo.task_type === 'monthly_checkin' || isMonthDate(d)) {
+            const monthVal = d || thisMonthStr;
+            if (monthVal === thisMonthStr) {
+                groups.monthGroup.push(todo);
+            } else if (monthVal < thisMonthStr) {
+                groups.pastGroup.push(todo);
+            } else {
+                groups.futureGroup.push(todo);
+            }
+        } else if (!d) {
             groups.noDateGroup.push(todo);
         } else if (d === todayStr) {
             groups.todayGroup.push(todo);
-        } else if (isWeekDate(d)) {
-            groups.weekGroup.push(todo);
-        } else if (isMonthDate(d)) {
-            groups.monthGroup.push(todo);
         } else if (d > todayStr) {
             groups.futureGroup.push(todo);
         } else {
@@ -180,4 +205,19 @@ export function groupTodosByDate(todos, todayStr) {
     });
 
     return groups;
+}
+
+export function getLastWeekString(date = new Date()) {
+    const target = new Date(date);
+    target.setDate(target.getDate() - 7);
+    return getISOWeekString(target);
+}
+
+export function getLastMonthString(date = new Date()) {
+    const year = date.getFullYear();
+    const month = date.getMonth(); // 0-11
+    if (month === 0) {
+        return `${year - 1}-12`;
+    }
+    return `${year}-${String(month).padStart(2, '0')}`;
 }

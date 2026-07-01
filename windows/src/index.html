@@ -19,6 +19,11 @@
         <div class="status-indicator" id="sync-status"></div>
       </div>
       <div class="header-right">
+        <button id="search-btn" class="icon-btn" title="搜索待办">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
+            <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" fill="currentColor"/>
+          </svg>
+        </button>
         <button id="manual-sync-btn" class="icon-btn" title="云同步">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
             <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="currentColor"/>
@@ -29,7 +34,7 @@
             <path d="M3 3V21H21V19H5V3H3ZM7 17H10V10H7V17ZM12 17H15V6H12V17ZM17 17H20V13H17V17Z" fill="currentColor"/>
           </svg>
         </button>
-        <button id="settings-btn" class="icon-btn" title="设置同步目录">
+        <button id="settings-btn" class="icon-btn" title="设置">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
             <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22l-1.92 3.32c-.12.21-.07.47.12.61l2.03 1.58c-.05.3-.09.62-.09.94s.04.64.09.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.03-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" fill="currentColor"/>
           </svg>
@@ -48,6 +53,20 @@
       <button class="tab-btn" id="tab-all">全部待办</button>
     </div>
 
+    <!-- Search Bar -->
+    <div class="search-bar-container" id="search-bar" style="display: none;">
+      <div class="search-input-wrapper">
+        <input type="text" id="search-input" placeholder="🔍 搜索待办任务名称..." />
+        <span id="clear-search-btn" class="clear-search-btn" style="display: none;">&times;</span>
+      </div>
+    </div>
+
+    <!-- Sub Tabs for All Todos -->
+    <div class="sub-tabs-container" id="all-sub-tabs" style="display: none;">
+      <button class="sub-tab-btn active" id="sub-tab-uncompleted">待完成</button>
+      <button class="sub-tab-btn" id="sub-tab-completed">已完成</button>
+    </div>
+
 
 
     <!-- Todo List & Matrix -->
@@ -61,9 +80,9 @@
     <div id="stats-container" class="hidden">
       <div class="stats-header">
         <div class="tabs-container stats-period-tabs">
-          <button class="tab-btn active" id="stats-period-day">日</button>
-          <button class="tab-btn" id="stats-period-week">周</button>
-          <button class="tab-btn" id="stats-period-month">月</button>
+          <button class="tab-btn active" id="stats-period-day" data-period="day">日</button>
+          <button class="tab-btn" id="stats-period-week" data-period="week">周</button>
+          <button class="tab-btn" id="stats-period-month" data-period="month">月</button>
         </div>
         <div class="stats-date-nav">
           <button id="stats-prev-btn" class="icon-btn-small">
@@ -77,7 +96,7 @@
         <div class="stats-filter-container">
           <button class="pill-btn stats-filter-btn active" data-filter="all">全部</button>
           <button class="pill-btn stats-filter-btn" data-filter="completed">已完成</button>
-          <button class="pill-btn stats-filter-btn" data-filter="uncompleted">未完成</button>
+          <button class="pill-btn stats-filter-btn" data-filter="uncompleted">待完成</button>
         </div>
       </div>
       <div class="stats-summary-bar">
@@ -118,27 +137,42 @@
         <label for="edit-content">待办内容</label>
         <input type="text" id="edit-content" placeholder="输入待办内容..." autocomplete="off" />
         
-        <!-- 日期与时间选择器 -->
-        <div class="date-time-row">
-          <div class="input-group">
+        <!-- 任务类型 (四种) -->
+        <div class="input-group" style="margin-bottom: 12px; margin-top: 12px;">
+          <label for="edit-task-type">任务类型</label>
+          <select id="edit-task-type" class="custom-select">
+            <option value="normal">普通任务</option>
+            <option value="daily_repeat">每天重复</option>
+            <option value="weekly_checkin">周打卡</option>
+            <option value="monthly_checkin">月打卡</option>
+          </select>
+        </div>
+        
+        <!-- 截止日期与时间行 (仅普通任务显示) -->
+        <div class="date-time-row" id="edit-date-time-row" style="margin-bottom: 12px;">
+          <div class="input-group" style="flex: 2;">
             <label for="edit-date">截止日期</label>
-            <input type="date" id="edit-date" />
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="date" id="edit-date" style="flex: 1;" />
+              <button type="button" id="edit-date-type-btn" class="icon-btn-small" style="padding: 8px 12px; font-size: 0.8rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: var(--text-secondary); cursor: pointer; white-space: nowrap; height: 38px;">文本格式</button>
+            </div>
           </div>
-          <div class="input-group">
+          <div class="input-group" style="flex: 1;">
             <label for="edit-time">提醒时间</label>
             <input type="time" id="edit-time" />
           </div>
         </div>
 
-        <!-- 循环规则 -->
-        <div class="input-group">
-          <label for="edit-recurring">重复规则</label>
-          <select id="edit-recurring" class="custom-select">
-            <option value="none">不重复</option>
-            <option value="daily">每天</option>
-            <option value="weekly">每周</option>
-            <option value="monthly">每月</option>
-          </select>
+        <!-- 目标次数 -->
+        <div class="input-group" id="target-count-group" style="display: none; margin-bottom: 12px;">
+          <label for="edit-target-count">目标次数 (不填为纯打卡)</label>
+          <input type="number" id="edit-target-count" min="1" placeholder="留空则不设目标" style="width: 100%; box-sizing: border-box;" />
+        </div>
+
+        <!-- 编辑弹窗内的打卡补卡网格 -->
+        <div class="input-group" id="edit-checkin-grid-group" style="display: none; margin-bottom: 12px;">
+          <label id="edit-checkin-grid-label">打卡记录 (点击补卡/消卡)</label>
+          <div id="edit-checkin-grid" style="margin-top: 4px;"></div>
         </div>
 
         <!-- 子任务区域 -->
@@ -229,7 +263,7 @@
   <!-- Settings Modal -->
   <div id="settings-modal" class="modal-overlay">
     <div class="modal-content glass-panel" style="max-width: 450px;">
-      <h3>同步设置</h3>
+      <h3>设置</h3>
       <div class="modal-body">
         <div class="input-group">
           <label>同步模式</label>
@@ -269,6 +303,11 @@
         <div style="border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 10px;">
           <label>数据恢复</label>
           <button type="button" id="backup-btn" class="modal-btn secondary" style="width: 100%; margin-top: 8px;">从历史备份恢复</button>
+        </div>
+
+        <div style="border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 10px;">
+          <label>软件更新</label>
+          <button type="button" id="check-update-btn" class="modal-btn secondary" style="width: 100%; margin-top: 8px;">手动检查更新</button>
         </div>
       </div>
       <div class="modal-footer">

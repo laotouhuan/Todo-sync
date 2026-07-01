@@ -34,6 +34,11 @@ fn set_always_on_top(window: tauri::Window, always_on_top: bool) -> Result<(), S
     window.set_always_on_top(always_on_top).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
 fn watch_file(app: AppHandle) {
     let app_clone = app.clone();
     
@@ -41,7 +46,7 @@ fn watch_file(app: AppHandle) {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut watcher = notify::recommended_watcher(tx).unwrap();
         
-        let mut current_path = todo_store::get_data_path(&app_clone);
+        let mut current_path = todo_store::get_data_path(&app_clone).unwrap_or_default();
         if let Some(parent) = current_path.parent() {
             let _ = watcher.watch(parent, RecursiveMode::NonRecursive);
         }
@@ -54,7 +59,7 @@ fn watch_file(app: AppHandle) {
                 }
             }
             
-            let new_path = todo_store::get_data_path(&app_clone);
+            let new_path = todo_store::get_data_path(&app_clone).unwrap_or_default();
             if new_path != current_path {
                 if let Some(parent) = current_path.parent() {
                     let _ = watcher.unwatch(parent);
@@ -75,6 +80,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_shortcuts(["ctrl+shift+space", "ctrl+shift+t"])
@@ -132,6 +138,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_drag,
             set_always_on_top,
+            restart_app,
             todo_store::pick_sync_folder,
             todo_store::get_sync_path,
             todo_store::set_sync_path,

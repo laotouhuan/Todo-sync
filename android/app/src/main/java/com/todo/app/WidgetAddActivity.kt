@@ -91,9 +91,9 @@ class WidgetAddActivity : ComponentActivity() {
     private fun saveAndExit(rawContent: String) {
         val trimmed = rawContent.trim()
         if (trimmed.isNotBlank()) {
-            val (content, taskDate) = com.todo.app.data.model.parseDateSyntax(trimmed)
+            val parsed = com.todo.app.data.model.parseDateSyntax(trimmed)
 
-            if (content.isBlank()) {
+            if (parsed.content.isBlank()) {
                 finish()
                 return
             }
@@ -101,7 +101,11 @@ class WidgetAddActivity : ComponentActivity() {
             val repository = TodoApplication.instance.repository
             lifecycleScope.launch {
                 try {
-                    val newTodo = com.todo.app.data.model.Todo.create(content, taskDate)
+                    val newTodo = com.todo.app.data.model.Todo.create(parsed.content, parsed.date).copy(
+                        task_type = parsed.taskType,
+                        target_count = parsed.targetCount,
+                        recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none"
+                    )
                     repository.addTodo(newTodo)
                     
                     com.todo.app.widget.refreshAllWidgets(applicationContext)

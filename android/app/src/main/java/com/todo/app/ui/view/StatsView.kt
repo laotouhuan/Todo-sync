@@ -20,7 +20,7 @@ import com.todo.app.data.model.isOverdue
 import com.todo.app.data.model.weekStringOf
 import com.todo.app.data.model.monthStringOf
 import java.time.LocalDate
-import java.time.temporal.WeekFields
+import java.time.temporal.IsoFields
 import java.util.Locale
 
 @Composable
@@ -39,7 +39,8 @@ fun StatsView(viewModel: TodoViewModel) {
         "week" -> todos.filter { t ->
             val dateStr = t.date
             dateStr == targetWeekStr || (dateStr?.length == 10 && dateStr.startsWith(targetWeekStr.substring(0,4)) && 
-                LocalDate.parse(dateStr).get(WeekFields.of(Locale.getDefault()).weekOfYear()) == targetDate.get(WeekFields.of(Locale.getDefault()).weekOfYear()))
+                LocalDate.parse(dateStr).get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) &&
+                LocalDate.parse(dateStr).get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR))
         }
         else -> todos.filter { t ->
             val dateStr = t.date
@@ -47,12 +48,51 @@ fun StatsView(viewModel: TodoViewModel) {
         }
     }
 
-    val total = periodTodos.size
-    val completedCount = periodTodos.count { it.completed }
-    val progress = if (total == 0) 0f else completedCount.toFloat() / total
+    var totalDouble = 0.0
+    var completedDouble = 0.0
+    var overdueCount = 0
+
+    periodTodos.forEach { t ->
+        totalDouble += 1.0
+        
+        if (t.task_type == "weekly_checkin" || t.task_type == "monthly_checkin") {
+            var periodCheckinCount = 0
+            t.completed_dates.forEach { dStr ->
+                when (period) {
+                    "day" -> {
+                        if (dStr == targetDate.toString()) periodCheckinCount++
+                    }
+                    "week" -> {
+                        try {
+                            val checkDate = LocalDate.parse(dStr)
+                            if (checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
+                                checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)) {
+                                periodCheckinCount++
+                            }
+                        } catch (e: Exception) {}
+                    }
+                    else -> {
+                        if (dStr.startsWith(targetMonthStr)) periodCheckinCount++
+                    }
+                }
+            }
+
+            if (t.target_count != null) {
+                completedDouble += Math.min(1.0, periodCheckinCount.toDouble() / t.target_count!!.toDouble())
+            } else {
+                completedDouble += if (periodCheckinCount >= 1) 1.0 else 0.0
+            }
+        } else {
+            if (t.completed) completedDouble += 1.0
+            if (t.isOverdue(LocalDate.now().toString())) overdueCount++
+        }
+    }
+
+    val progress = if (totalDouble == 0.0) 0f else (completedDouble / totalDouble).toFloat()
     
-    val todayStr = LocalDate.now().toString()
-    val overdueCount = periodTodos.count { it.isOverdue(todayStr) }
+    fun formatVal(valDouble: Double): String {
+        return if (valDouble % 1.0 == 0.0) valDouble.toInt().toString() else String.format(Locale.US, "%.1f", valDouble)
+    }
 
     val displayTodos = when (filterStatus) {
         "completed" -> periodTodos.filter { it.completed }
@@ -83,7 +123,7 @@ fun StatsView(viewModel: TodoViewModel) {
             
             val label = when (period) {
                 "day" -> targetDate.toString()
-                "week" -> "${targetDate.year}年 第${targetDate.get(WeekFields.of(Locale.getDefault()).weekOfYear())}周"
+                "week" -> "${targetDate.get(IsoFields.WEEK_BASED_YEAR)}年 第${targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)}周"
                 else -> "${targetDate.year}年 ${targetDate.monthValue}月"
             }
             Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
@@ -99,7 +139,7 @@ fun StatsView(viewModel: TodoViewModel) {
 
         // Filter Status
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            SegmentedButton(listOf("全部", "已完成", "未完成"), when (filterStatus) {
+            SegmentedButton(listOf("全部", "已完成", "待完成"), when (filterStatus) {
                 "completed" -> 1
                 "uncompleted" -> 2
                 else -> 0
@@ -121,7 +161,7 @@ fun StatsView(viewModel: TodoViewModel) {
             elevation = CardDefaults.elevatedCardElevation(defaultElevation = 6.dp)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Text("共 $total 项，已完成 $completedCount 项，其中逾期 $overdueCount 项", style = MaterialTheme.typography.titleMedium)
+                Text("共 ${formatVal(totalDouble)} 项，已完成 ${formatVal(completedDouble)} 项，其中逾期 $overdueCount 项", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     LinearProgressIndicator(
@@ -138,6 +178,7 @@ fun StatsView(viewModel: TodoViewModel) {
         }
 
         // List
+        val todayStr = LocalDate.now().toString()
         val tomorrowStr = LocalDate.now().plusDays(1).toString()
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(displayTodos) { todo ->

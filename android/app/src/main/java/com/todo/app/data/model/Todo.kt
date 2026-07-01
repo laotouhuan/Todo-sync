@@ -7,7 +7,8 @@ import java.util.UUID
 data class Subtask(
     val id: String,
     var content: String,
-    var completed: Boolean
+    var completed: Boolean,
+    var completed_at: String? = null
 )
 
 @Serializable
@@ -22,7 +23,10 @@ data class Todo(
     var order: Double = 0.0,
     var updated_at: String = created_at,
     var deleted: Boolean = false,
-    var recurring: String = "none", // none, daily, weekly, monthly
+    var recurring: String = "none", // none, daily_repeat
+    var task_type: String = "normal", // normal, weekly_checkin, monthly_checkin
+    var completed_dates: List<String> = emptyList(),
+    var target_count: Int? = null,
     var subtasks: List<Subtask> = emptyList()
 ) {
     companion object {
@@ -37,16 +41,12 @@ data class Todo(
                 id = UUID.randomUUID().toString(),
                 content = content,
                 date = date,
-                time = null,
-                completed = false,
                 created_at = now,
-                completed_at = null,
                 order = System.currentTimeMillis().toDouble(),
-                updated_at = now,
-                deleted = false,
-                recurring = "none",
-                subtasks = emptyList()
+                updated_at = now
             )
         }
     }
 }
+
+

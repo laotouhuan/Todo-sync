@@ -1,16 +1,20 @@
 {
   "name": "todo",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "check": "node tests/check-build.mjs",
+    "test": "node --test tests/test-*.mjs",
+    "test:unit": "node --test tests/test-dateUtils.mjs",
+    "test:data": "node --test tests/test-dataLogic.mjs",
+    "prebuild": "npm run check && npm run test",
     "tauri": "tauri"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
   },
   "dependencies": {
-    "acorn": "^8.16.0",
-    "esprima": "^4.0.1"
+    "acorn": "^8.16.0"
   }
 }

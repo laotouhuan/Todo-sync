@@ -10,9 +10,23 @@ import com.todo.app.data.repository.TodoRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class TodoViewModel(val repository: TodoRepository, val configManager: ConfigManager) : ViewModel() {
+    
+    private val _todayDate = MutableStateFlow(java.time.LocalDate.now().toString())
+    val todayDate = _todayDate.asStateFlow()
+
+
+    val isEditingDialogShowing = MutableStateFlow(false)
+
+    var pendingMidnightRefresh = false
+
+    fun refreshTodayDate() {
+        _todayDate.value = java.time.LocalDate.now().toString()
+    }
     
     val todos = repository.getTodoData().map { data -> 
         data.todos.filter { !it.deleted }
@@ -56,18 +70,35 @@ class TodoViewModel(val repository: TodoRepository, val configManager: ConfigMan
     fun addTodoSmart(rawContent: String) {
         if (rawContent.isBlank()) return
 
-        val (content, taskDate) = parseDateSyntax(rawContent)
+        val parsed = parseDateSyntax(rawContent)
 
-        if (content.isBlank()) return
+        if (parsed.content.isBlank()) return
 
         viewModelScope.launch {
-            repository.addTodo(Todo.create(content, taskDate))
+            val todo = Todo.create(parsed.content, parsed.date).copy(
+                task_type = parsed.taskType,
+                target_count = parsed.targetCount,
+                recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none"
+            )
+            repository.addTodo(todo)
         }
     }
 
     fun syncWithCloud() {
         viewModelScope.launch {
             repository.syncWithCloud()
+        }
+    }
+
+    fun importSelectedFromLastPeriod(type: String, selectedIds: List<String>, context: android.content.Context) {
+        viewModelScope.launch {
+            repository.importSelectedFromLastPeriod(type, selectedIds, context)
+        }
+    }
+
+    fun importFromLastPeriod(type: String, context: android.content.Context) {
+        viewModelScope.launch {
+            repository.importFromLastPeriod(type, context)
         }
     }
 
