@@ -255,3 +255,24 @@ Windows 端使用以下机制保证文件安全：
 3. **禁止重复声明 export**：同一个文件中不可出现两个同名的 `export function`（如重复的 `getLastWeekString`），否则触发 `SyntaxError`。
 4. **提取/移动函数时必须同步清理**：将函数从 `main.js` 提取到 `dateUtils.js` 时，必须同时更新 `main.js` 的 import 列表，删除已不存在的引用，添加新的引用。
 
+---
+
+## 11. ⚠️ 发布打包铁律（血泪教训）
+
+以下规则针对 Windows 端 NSIS 安装包的发布流程，**绝对不可违反**：
+
+### 背景
+
+v1.0 安装包（`Todo-1.0.0-windows-x64-setup.exe`）发布后，用户反馈双击安装后的 `Todo.exe` 完全无反应——没有进程、没有报错、没有托盘图标。根本原因是：**安装包内打包的 exe 与 `target\release\Todo.exe` 来自不同时间的两次编译**，安装包内的旧版本在 `watch_file()` 中调用了已变更签名的 `get_data_path()`，导致启动时静默 panic 崩溃。
+
+### 铁律
+
+1. **同一次 `cargo tauri build` 出包**：打包命令执行完毕后，NSIS 安装包（`target\release\bundle\nsis\*.exe`）和裸 exe（`target\release\Todo.exe`）必须来自同一次构建，**严禁**先编译 exe、修改代码后再单独打包安装程序。
+2. **打包后必须本机验证**：每次生成安装包后，必须在本机**双击安装包安装**，然后**双击安装目录下的 `Todo.exe`**，确认能正常启动（出现托盘图标）后，才可对外分发。
+3. **打包前必须通过全部测试**：执行 `npm run check && npm run test`，全部通过后再执行 `cargo tauri build`。
+4. **发布前对比文件大小**：用以下命令确认安装后的 exe 与 `target\release\Todo.exe` 大小一致，不一致说明版本不同：
+   ```powershell
+   (Get-Item "安装目录\Todo.exe").Length
+   (Get-Item "target\release\Todo.exe").Length
+   ```
+

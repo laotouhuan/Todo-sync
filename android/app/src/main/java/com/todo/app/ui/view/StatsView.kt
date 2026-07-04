@@ -35,16 +35,39 @@ fun StatsView(viewModel: TodoViewModel) {
     val targetMonthStr = monthStringOf(targetDate)
 
     val periodTodos = when (period) {
-        "day" -> todos.filter { it.date == targetDate.toString() }
+        "day" -> todos.filter { t ->
+            val dateStr = t.date
+            if (!dateStr.isNullOrEmpty()) {
+                dateStr == targetDate.toString()
+            } else {
+                t.completed && t.completed_at?.take(10) == targetDate.toString()
+            }
+        }
         "week" -> todos.filter { t ->
             val dateStr = t.date
-            dateStr == targetWeekStr || (dateStr?.length == 10 && dateStr.startsWith(targetWeekStr.substring(0,4)) && 
-                LocalDate.parse(dateStr).get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) &&
-                LocalDate.parse(dateStr).get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR))
+            if (!dateStr.isNullOrEmpty()) {
+                dateStr == targetWeekStr || (dateStr.length == 10 && dateStr.startsWith(targetWeekStr.substring(0,4)) && 
+                    LocalDate.parse(dateStr).get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) &&
+                    LocalDate.parse(dateStr).get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR))
+            } else {
+                t.completed && t.completed_at?.take(10)?.let { completedDateStr ->
+                    try {
+                        val checkDate = LocalDate.parse(completedDateStr)
+                        checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
+                        checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
+                    } catch (e: Exception) {
+                        false
+                    }
+                } ?: false
+            }
         }
         else -> todos.filter { t ->
             val dateStr = t.date
-            dateStr == targetMonthStr || (dateStr?.length == 10 && dateStr.startsWith(targetMonthStr))
+            if (!dateStr.isNullOrEmpty()) {
+                dateStr == targetMonthStr || (dateStr.length == 10 && dateStr.startsWith(targetMonthStr))
+            } else {
+                t.completed && t.completed_at?.take(7) == targetMonthStr
+            }
         }
     }
 

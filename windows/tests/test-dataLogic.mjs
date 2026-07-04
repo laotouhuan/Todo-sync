@@ -13,9 +13,24 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { isWeekDate, isMonthDate } from '../src/dateUtils.js';
+import { isWeekDate, isMonthDate, getISOWeekString } from '../src/dateUtils.js';
 
 // ====== 从 main.js 提取的纯逻辑函数（无 DOM/Tauri 依赖） ======
+
+function getWeeklyCompletedCount(todo) {
+    if (!todo.completed_dates || !todo.date) return 0;
+    return todo.completed_dates.filter(dStr => {
+        const parts = dStr.split('-');
+        if (parts.length !== 3) return false;
+        const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        return getISOWeekString(date) === todo.date;
+    }).length;
+}
+
+function getMonthlyCompletedCount(todo) {
+    if (!todo.completed_dates || !todo.date) return 0;
+    return todo.completed_dates.filter(dStr => dStr.startsWith(todo.date)).length;
+}
 
 function migrateAndNormalize(todo) {
     if (!todo) return todo;
@@ -88,7 +103,22 @@ function mergeTodoData(localData, cloudData) {
             ])].sort();
             if (JSON.stringify(merged.completed_dates) !== JSON.stringify(mergedDates)) {
                 merged.completed_dates = mergedDates;
+                merged.updated_at = new Date().toISOString();
                 changed = true;
+            }
+
+            // 重新计算周/月打卡任务完成状态
+            if (merged.task_type === 'weekly_checkin' || merged.task_type === 'monthly_checkin') {
+                const currentPeriodCount = merged.task_type === 'weekly_checkin'
+                    ? getWeeklyCompletedCount(merged)
+                    : getMonthlyCompletedCount(merged);
+                const shouldBeCompleted = merged.target_count && currentPeriodCount >= merged.target_count;
+                if (merged.completed !== shouldBeCompleted) {
+                    merged.completed = shouldBeCompleted;
+                    merged.completed_at = shouldBeCompleted ? (merged.completed_at || new Date().toISOString()) : null;
+                    merged.updated_at = new Date().toISOString();
+                    changed = true;
+                }
             }
             mergedTodos.push(merged);
         } else {
@@ -259,6 +289,63 @@ describe('mergeTodoData', () => {
         const result = mergeTodoData(local, makeData([]));
         assert.equal(result.data.todos[0].content, '新任务');
         assert.equal(result.data.todos[1].content, '旧任务');
+    });
+
+    it('合并周/月打卡任务时重新计算完成状态（达到目标）', () => {
+        const localTodo = makeTodo({
+            id: 'checkin-1',
+            task_type: 'weekly_checkin',
+            date: '2026-W27', // Target week
+            target_count: 3,
+            completed: false,
+            completed_dates: ['2026-07-01', '2026-07-02'],
+            updated_at: '2026-07-04T12:00:00Z'
+        });
+        const cloudTodo = makeTodo({
+            id: 'checkin-1',
+            task_type: 'weekly_checkin',
+            date: '2026-W27',
+            target_count: 3,
+            completed: false,
+            completed_dates: ['2026-07-02', '2026-07-03'],
+            updated_at: '2026-07-04T12:01:00Z'
+        });
+
+        const result = mergeTodoData(makeData([localTodo]), makeData([cloudTodo]));
+        const merged = result.data.todos[0];
+        // completed_dates 并集应为 ['2026-07-01', '2026-07-02', '2026-07-03'] (3次)，达到目标
+        assert.deepEqual(merged.completed_dates, ['2026-07-01', '2026-07-02', '2026-07-03']);
+        assert.equal(merged.completed, true);
+        assert.ok(merged.completed_at);
+        assert.ok(result.changed);
+    });
+
+    it('合并周/月打卡任务时重新联算状态（未达到目标）', () => {
+        const localTodo = makeTodo({
+            id: 'checkin-2',
+            task_type: 'weekly_checkin',
+            date: '2026-W27',
+            target_count: 3,
+            completed: false,
+            completed_dates: ['2026-07-01'],
+            updated_at: '2026-07-04T12:00:00Z'
+        });
+        const cloudTodo = makeTodo({
+            id: 'checkin-2',
+            task_type: 'weekly_checkin',
+            date: '2026-W27',
+            target_count: 3,
+            completed: false,
+            completed_dates: ['2026-07-02'],
+            updated_at: '2026-07-04T12:01:00Z'
+        });
+
+        const result = mergeTodoData(makeData([localTodo]), makeData([cloudTodo]));
+        const merged = result.data.todos[0];
+        // completed_dates 并集为 ['2026-07-01', '2026-07-02'] (2次)，未达到目标
+        assert.deepEqual(merged.completed_dates, ['2026-07-01', '2026-07-02']);
+        assert.equal(merged.completed, false);
+        assert.equal(merged.completed_at, null);
     });
 
     it('两端都为空不崩溃', () => {

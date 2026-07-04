@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
@@ -77,8 +79,16 @@ class TodoRepository(private val context: Context) {
     private val _syncStatus = MutableStateFlow(0) // 0: success/none, 1: syncing, 2: error
     val syncStatus: kotlinx.coroutines.flow.StateFlow<Int> = _syncStatus.asStateFlow()
 
+    private val uploadChannel = Channel<Unit>(Channel.CONFLATED)
+
     init {
         loadFromDisk()
+        repoScope.launch {
+            for (item in uploadChannel) {
+                delay(500) // debounce
+                performBackgroundUpload()
+            }
+        }
     }
 
     private fun migrateTodo(todo: Todo): Todo {
@@ -238,7 +248,28 @@ class TodoRepository(private val context: Context) {
                 
                 // completed_dates 并集去重并排序
                 val mergedDates = (l.completed_dates + c.completed_dates).distinct().sorted()
-                merged[id] = base.copy(completed_dates = mergedDates)
+                var updatedTodo = base.copy(completed_dates = mergedDates)
+                if (mergedDates != base.completed_dates) {
+                    updatedTodo = updatedTodo.copy(updated_at = nowIso())
+                }
+
+                // 重新计算周/月打卡任务完成状态
+                if (updatedTodo.task_type == TaskType.WEEKLY_CHECKIN || updatedTodo.task_type == TaskType.MONTHLY_CHECKIN) {
+                    val completedCount = if (updatedTodo.task_type == TaskType.WEEKLY_CHECKIN) {
+                        updatedTodo.getWeeklyCompletedCount()
+                    } else {
+                        updatedTodo.getMonthlyCompletedCount()
+                    }
+                    val shouldBeCompleted = updatedTodo.target_count != null && completedCount >= updatedTodo.target_count!!
+                    if (updatedTodo.completed != shouldBeCompleted) {
+                        updatedTodo = updatedTodo.copy(
+                            completed = shouldBeCompleted,
+                            completed_at = if (shouldBeCompleted) (updatedTodo.completed_at ?: nowIso()) else null,
+                            updated_at = nowIso()
+                        )
+                    }
+                }
+                merged[id] = updatedTodo
             } else {
                 merged[id] = l ?: c!!
             }
@@ -368,19 +399,8 @@ class TodoRepository(private val context: Context) {
             // 立即刷新小组件
             com.todo.app.widget.refreshAllWidgets(context)
             
-            // 异步后台同步到云端，不阻塞当前流程
-            repoScope.launch {
-                _syncStatus.value = 1
-                try {
-                    initWebDavClient()
-                    webDavClient?.uploadFile(configManager.filePath, jsonString)
-                    _syncStatus.value = 0
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    _syncStatus.value = 2
-                }
-                com.todo.app.widget.refreshAllWidgets(context)
-            }
+            // 触发后台同步
+            uploadChannel.trySend(Unit)
         } catch (e: Exception) {
             e.printStackTrace()
             _todoData.value = previous // rollback on write failure
@@ -388,6 +408,29 @@ class TodoRepository(private val context: Context) {
                 android.widget.Toast.makeText(context, "保存失败: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    private suspend fun performBackgroundUpload() {
+        if (!configManager.isConfigured()) return
+        val jsonString = try {
+            val currentData = _todoData.value
+            jsonFormat.encodeToString(currentData)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return
+        }
+
+        _syncStatus.value = 1
+        com.todo.app.widget.refreshAllWidgets(context)
+        try {
+            initWebDavClient()
+            webDavClient?.uploadFile(configManager.filePath, jsonString)
+            _syncStatus.value = 0
+        } catch (e: Exception) {
+            e.printStackTrace()
+            _syncStatus.value = 2
+        }
+        com.todo.app.widget.refreshAllWidgets(context)
     }
 
     suspend fun addTodo(todo: Todo) = mutex.withLock {

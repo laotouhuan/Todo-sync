@@ -33,6 +33,7 @@ import com.todo.app.TodoApplication
 import com.todo.app.WidgetAddActivity
 import com.todo.app.data.model.Todo
 import com.todo.app.data.model.DateStrings
+import com.todo.app.data.model.classifyForTodayFocus
 import com.todo.app.data.model.TodoComparator
 import com.todo.app.data.model.isOverdue
 import java.time.LocalDate
@@ -83,15 +84,10 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
             val todayStr = dates.today
 
             val todayFocus = run {
-                // Widget 仅展示今日/逾期/无日期任务，不包含周/月打卡和今日已完成任务
-                // 使用与旧版一致的过滤逻辑，确保 widget 始终聚焦最可操作的任务
-                val filtered = currentData.todos.filter { t ->
-                    !t.deleted && (t.date == todayStr || t.isOverdue(todayStr) || t.date == null)
-                }
-                val todayTasks = filtered.filter { it.date != null }.sortedWith(TodoComparator)
-                val noDateTasks = filtered.filter { it.date == null }.sortedWith(TodoComparator)
-                val weekTasks = emptyList<Todo>()
-                val monthTasks = emptyList<Todo>()
+                val focusGroups = classifyForTodayFocus(currentData.todos, dates.today, dates.thisWeek, dates.thisMonth)
+                val todayTasks = focusGroups.todayTasks
+                val weekTasks = focusGroups.weekTasks
+                val monthTasks = focusGroups.monthTasks
 
                 val list = mutableListOf<WidgetItem>()
 
@@ -101,10 +97,9 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                     list.addAll(todos.map { WidgetItem.TodoItem(it) })
                 }
 
-                addGroup(todayTasks, "SEPARATOR_NODATE")
-                addGroup(noDateTasks, "SEPARATOR_NODATE")
-                addGroup(weekTasks, "SEPARATOR_WEEK")
-                addGroup(monthTasks, "SEPARATOR_MONTH")
+                addGroup(todayTasks, "SEPARATOR_WEEK")
+                addGroup(weekTasks, "SEPARATOR_MONTH")
+                addGroup(monthTasks, "SEPARATOR_END")
 
                 list.take(maxItems)
             }

@@ -780,9 +780,14 @@ fun TodoItemRow(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column {
+                val isVisualCompleted = if (checkinDate != null) {
+                    true
+                } else {
+                    todo.completed || ((todo.task_type == "weekly_checkin" || todo.task_type == "monthly_checkin") && todo.completed_dates.contains(todayStr))
+                }
                 Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(
-                        checked = if (checkinDate != null) true else todo.completed,
+                        checked = isVisualCompleted,
                         onCheckedChange = {
                             if (checkinDate != null) {
                                 viewModel.updateTodo(todo.withToggledCheckinDate(checkinDate))
@@ -802,8 +807,8 @@ fun TodoItemRow(
                             Text(
                                 text = todo.content, 
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = if (todo.completed) Color.Gray else MaterialTheme.colorScheme.onSurface,
-                                textDecoration = if (todo.completed) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                                color = if (isVisualCompleted) Color.Gray else MaterialTheme.colorScheme.onSurface,
+                                textDecoration = if (isVisualCompleted) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
                                 modifier = Modifier.weight(1f, fill = false)
                             )
                             if (todo.recurring == "daily_repeat") {

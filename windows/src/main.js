@@ -165,7 +165,22 @@ function mergeTodoData(localData, cloudData) {
             ])].sort();
             if (JSON.stringify(merged.completed_dates) !== JSON.stringify(mergedDates)) {
                 merged.completed_dates = mergedDates;
+                merged.updated_at = new Date().toISOString();
                 changed = true;
+            }
+
+            // 重新计算周/月打卡任务完成状态
+            if (merged.task_type === 'weekly_checkin' || merged.task_type === 'monthly_checkin') {
+                const currentPeriodCount = merged.task_type === 'weekly_checkin'
+                    ? getWeeklyCompletedCount(merged)
+                    : getMonthlyCompletedCount(merged);
+                const shouldBeCompleted = merged.target_count && currentPeriodCount >= merged.target_count;
+                if (merged.completed !== shouldBeCompleted) {
+                    merged.completed = shouldBeCompleted;
+                    merged.completed_at = shouldBeCompleted ? (merged.completed_at || new Date().toISOString()) : null;
+                    merged.updated_at = new Date().toISOString();
+                    changed = true;
+                }
             }
             mergedTodos.push(merged);
         } else {
@@ -310,7 +325,7 @@ function getMetaHtml(todo, todayStr, tomorrowStr) {
         const dateClass = (overdue && dateFilter === 'today') ? 'overdue' : '';
 
         // 已完成和未完成任务都显示截止日期，确保已完成历史中保留原始截止信息
-        html += `<span class=”meta-item date ${dateClass}”>📅 ${escapeHtml(dateLabel)}</span>`;
+        html += `<span class="meta-item date ${dateClass}">📅 ${escapeHtml(dateLabel)}</span>`;
     }
     if (todo.time) {
         html += `<span class="meta-item time">🕐 ${escapeHtml(todo.time)}</span>`;
@@ -336,7 +351,6 @@ function getMetaHtml(todo, todayStr, tomorrowStr) {
 function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) {
     const li = document.createElement('li');
     const isCheckinCompletedToday = (todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin')
-        && !todo.target_count
         && todo.completed_dates && todo.completed_dates.includes(todayStr);
     const isVisualCompleted = checkinDate !== null ? true : (todo.completed || isCheckinCompletedToday);
     li.className = `todo-item ${isVisualCompleted ? 'completed' : ''}`;
@@ -1094,12 +1108,26 @@ function renderStats(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     let periodTodos = [];
     if (statsPeriod === 'day') {
         labelEl.textContent = targetDayStr;
-        periodTodos = activeTodos.filter(t => t.date === targetDayStr);
+        periodTodos = activeTodos.filter(t => {
+            if (t.date === targetDayStr) return true;
+            if (!t.date && t.completed && t.completed_at) {
+                return t.completed_at.substring(0, 10) === targetDayStr;
+            }
+            return false;
+        });
     } else if (statsPeriod === 'week') {
         const parts = targetWeekStr.split('-W');
         labelEl.textContent = `${parts[0]}年 第${parts[1]}周`;
         periodTodos = activeTodos.filter(t => {
-            if (!t.date) return false;
+            if (!t.date) {
+                if (t.completed && t.completed_at) {
+                    const compDate = new Date(t.completed_at);
+                    if (!isNaN(compDate.getTime())) {
+                        return getISOWeekString(compDate) === targetWeekStr;
+                    }
+                }
+                return false;
+            }
             if (t.date === targetWeekStr) return true;
             if (t.date.length === 10) {
                 const checkDate = new Date(t.date);
@@ -1112,7 +1140,12 @@ function renderStats(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         const parts = targetMonthStr.split('-');
         labelEl.textContent = `${parts[0]}年 ${parts[1]}月`;
         periodTodos = activeTodos.filter(t => {
-            if (!t.date) return false;
+            if (!t.date) {
+                if (t.completed && t.completed_at) {
+                    return t.completed_at.substring(0, 7) === targetMonthStr;
+                }
+                return false;
+            }
             if (t.date === targetMonthStr) return true;
             if (t.date.length === 10) return t.date.startsWith(targetMonthStr);
             return false;
