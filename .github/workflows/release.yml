@@ -53,6 +53,29 @@ jobs:
         run: |
           mv -f windows/src-tauri/target/release/bundle/nsis/Todo_${{ steps.get_version.outputs.version }}_x64-setup.exe windows/src-tauri/target/release/bundle/nsis/Todo-${{ steps.get_version.outputs.version }}-windows-x64-setup.exe
 
+      - name: Generate latest.json
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const version = require('./windows/src-tauri/tauri.conf.json').version;
+            const data = {
+              version: version,
+              notes: 'Todo-sync v' + version + ' Release',
+              pub_date: new Date().toISOString(),
+              platforms: {
+                'android-arm64': {
+                  url: 'https://github.com/laotouhuan/Todo-sync/releases/download/v' + version + '/Todo-' + version + '-android.apk'
+                },
+                'windows-x86_64': {
+                  signature: '',
+                  url: 'https://github.com/laotouhuan/Todo-sync/releases/download/v' + version + '/Todo-' + version + '-windows-x64-setup.exe'
+                }
+              }
+            };
+            fs.writeFileSync('latest.json', JSON.stringify(data, null, 2));
+          "
+
       - name: Create Release and Upload Windows Setup
         uses: softprops/action-gh-release@v2
         with:
@@ -62,7 +85,9 @@ jobs:
           draft: true
           # workflow_dispatch 手动触发时若 tag 不存在则自动创建
           make_latest: 'true'
-          files: windows/src-tauri/target/release/bundle/nsis/Todo-${{ steps.get_version.outputs.version }}-windows-x64-setup.exe
+          files: |
+            windows/src-tauri/target/release/bundle/nsis/Todo-${{ steps.get_version.outputs.version }}-windows-x64-setup.exe
+            latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
