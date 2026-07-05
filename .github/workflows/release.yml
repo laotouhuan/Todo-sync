@@ -39,6 +39,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         with:
           projectPath: "./windows"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Extract Version from Tauri Config
         id: get_version
@@ -52,6 +56,13 @@ jobs:
         shell: bash
         run: |
           mv -f windows/src-tauri/target/release/bundle/nsis/Todo_${{ steps.get_version.outputs.version }}_x64-setup.exe windows/src-tauri/target/release/bundle/nsis/Todo-${{ steps.get_version.outputs.version }}-windows-x64-setup.exe
+          if [ -f "windows/src-tauri/target/release/bundle/nsis/Todo_${{ steps.get_version.outputs.version }}_x64-setup.exe.sig" ]; then
+            mv -f windows/src-tauri/target/release/bundle/nsis/Todo_${{ steps.get_version.outputs.version }}_x64-setup.exe.sig windows/src-tauri/target/release/bundle/nsis/Todo-${{ steps.get_version.outputs.version }}-windows-x64-setup.exe.sig
+          fi
+          if [ -f "windows/src-tauri/target/release/bundle/nsis/Todo_${{ steps.get_version.outputs.version }}_x64-setup.nsis.zip" ]; then
+            mv -f windows/src-tauri/target/release/bundle/nsis/Todo_${{ steps.get_version.outputs.version }}_x64-setup.nsis.zip windows/src-tauri/target/release/bundle/nsis/Todo-${{ steps.get_version.outputs.version }}-windows-x64-setup.nsis.zip
+            mv -f windows/src-tauri/target/release/bundle/nsis/Todo_${{ steps.get_version.outputs.version }}_x64-setup.nsis.zip.sig windows/src-tauri/target/release/bundle/nsis/Todo-${{ steps.get_version.outputs.version }}-windows-x64-setup.nsis.zip.sig
+          fi
 
       - name: Generate latest.json
         shell: bash
@@ -59,6 +70,20 @@ jobs:
           node -e "
             const fs = require('fs');
             const version = require('./windows/src-tauri/tauri.conf.json').version;
+            
+            let signature = '';
+            let updateUrl = 'https://github.com/laotouhuan/Todo-sync/releases/download/v' + version + '/Todo-' + version + '-windows-x64-setup.exe';
+            
+            const exeSigPath = 'windows/src-tauri/target/release/bundle/nsis/Todo-' + version + '-windows-x64-setup.exe.sig';
+            const zipSigPath = 'windows/src-tauri/target/release/bundle/nsis/Todo-' + version + '-windows-x64-setup.nsis.zip.sig';
+            
+            if (fs.existsSync(zipSigPath)) {
+              signature = fs.readFileSync(zipSigPath, 'utf8').trim();
+              updateUrl = 'https://github.com/laotouhuan/Todo-sync/releases/download/v' + version + '/Todo-' + version + '-windows-x64-setup.nsis.zip';
+            } else if (fs.existsSync(exeSigPath)) {
+              signature = fs.readFileSync(exeSigPath, 'utf8').trim();
+            }
+            
             const data = {
               version: version,
               notes: 'Todo-sync v' + version + ' Release',
@@ -68,8 +93,8 @@ jobs:
                   url: 'https://github.com/laotouhuan/Todo-sync/releases/download/v' + version + '/Todo-' + version + '-android.apk'
                 },
                 'windows-x86_64': {
-                  signature: '',
-                  url: 'https://github.com/laotouhuan/Todo-sync/releases/download/v' + version + '/Todo-' + version + '-windows-x64-setup.exe'
+                  signature: signature,
+                  url: updateUrl
                 }
               }
             };
@@ -82,11 +107,11 @@ jobs:
           tag_name: ${{ steps.get_version.outputs.tag_name }}
           name: 'Todo-sync ${{ steps.get_version.outputs.tag_name }}'
           body: 'Todo-sync ${{ steps.get_version.outputs.tag_name }} Release.'
-          draft: true
+          draft: false
           # workflow_dispatch 手动触发时若 tag 不存在则自动创建
           make_latest: 'true'
           files: |
-            windows/src-tauri/target/release/bundle/nsis/Todo-${{ steps.get_version.outputs.version }}-windows-x64-setup.exe
+            windows/src-tauri/target/release/bundle/nsis/Todo-${{ steps.get_version.outputs.version }}-windows-x64-setup*
             latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -136,7 +161,7 @@ jobs:
         with:
           tag_name: ${{ steps.get_version.outputs.tag_name }}
           files: android/app/build/outputs/apk/debug/Todo-${{ steps.get_version.outputs.version }}-android.apk
-          draft: true
+          draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
