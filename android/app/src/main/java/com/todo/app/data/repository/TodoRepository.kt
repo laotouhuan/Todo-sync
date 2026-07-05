@@ -57,6 +57,10 @@ class TodoRepository(private val context: Context) {
         }
     }
 
+    fun resetWebDavClient() {
+        webDavClient = null
+    }
+
     /** Atomic write: write to tmp file then rename to prevent data corruption on crash. */
     private fun atomicWriteJson(json: String) {
         tmpFile.writeText(json)

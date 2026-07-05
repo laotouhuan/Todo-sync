@@ -135,6 +135,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                     configManager.username = username
                     configManager.appPassword = appPassword
                     configManager.filePath = filePath
+                    viewModel.resetWebDavClient()
                     coroutineScope.launch {
                         snackbarHostState.showSnackbar("配置已保存")
                     }

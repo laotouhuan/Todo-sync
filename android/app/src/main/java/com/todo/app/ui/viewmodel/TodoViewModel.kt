@@ -108,6 +108,10 @@ class TodoViewModel(val repository: TodoRepository, val configManager: ConfigMan
         }
     }
 
+    fun resetWebDavClient() {
+        repository.resetWebDavClient()
+    }
+
     fun listBackups(): List<String> {
         return repository.listBackups()
     }
