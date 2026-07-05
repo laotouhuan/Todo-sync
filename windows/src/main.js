@@ -1895,7 +1895,12 @@ window.addEventListener("DOMContentLoaded", () => {
             checkUpdateBtn.disabled = true;
             try {
                 // 1. 获取当前程序版本号
-                const currentVersion = await invoke('get_app_version');
+                let currentVersion;
+                try {
+                    currentVersion = await invoke('get_app_version');
+                } catch (e) {
+                    throw new Error("获取当前应用版本失败(get_app_version): " + String(e));
+                }
 
                 // 2. 请求 GitHub API 获取最新发布版本
                 let releaseJson;
@@ -1906,15 +1911,15 @@ window.addEventListener("DOMContentLoaded", () => {
                     if (errMsg.includes("403") || errMsg.includes("429")) {
                         throw new Error('GitHub API 请求过于频繁，请稍后再试（未认证限制：60次/小时）。');
                     }
-                    throw new Error('网络连接失败，请确认是否可以访问 GitHub。');
+                    throw new Error('网络连接失败或拉取失败(get_latest_release): ' + errMsg);
                 }
 
                 // 3. 解析 JSON
                 let release;
                 try {
                     release = JSON.parse(releaseJson);
-                } catch {
-                    throw new Error('服务器返回的数据格式异常，请稍后重试。');
+                } catch (e) {
+                    throw new Error('服务器返回的数据格式异常(JSON.parse): ' + String(e));
                 }
 
                 const latestTagName = release.tag_name || '';
@@ -1922,17 +1927,34 @@ window.addEventListener("DOMContentLoaded", () => {
 
                 // 4. 对比版本
                 if (compareVersions(latestVersion, currentVersion) > 0) {
-                    const userConfirmed = confirm(`发现新版本 v${latestVersion}！\n\n更新日志：\n${release.body || '无'}\n\n是否立即前往下载页面下载最新安装包？`);
+                    let userConfirmed = false;
+                    try {
+                        userConfirmed = confirm(`发现新版本 v${latestVersion}！\n\n更新日志：\n${release.body || '无'}\n\n是否立即前往下载页面下载最新安装包？`);
+                    } catch (confirmErr) {
+                        // 兼容 WebView2 在透明无边框模式下可能导致的 confirm 崩溃
+                        alert(`发现新版本 v${latestVersion}！\n由于系统限制无法弹出确认框，即将尝试直接打开下载页面。\n如未自动打开，请手动访问: ${release.html_url}`);
+                        userConfirmed = true;
+                    }
+
                     if (userConfirmed) {
-                        // 使用 Tauri 官方的 opener 插件在浏览器中打开链接
-                        await invoke('plugin:opener|open', { path: release.html_url });
+                        try {
+                            // 尝试 payload 是 path
+                            await invoke('plugin:opener|open', { path: release.html_url });
+                        } catch (openErr) {
+                            try {
+                                // 尝试 payload 是 url (Tauri v1/v2 变动兼容)
+                                await invoke('plugin:opener|open', { url: release.html_url });
+                            } catch (openErr2) {
+                                throw new Error(`系统浏览器拉起失败 (plugin:opener|open)。\n原始报错: ${String(openErr)}\n\n请手动访问此链接下载最新版: \n${release.html_url}`);
+                            }
+                        }
                     }
                 } else {
                     alert('当前已是最新版本！');
                 }
             } catch (err) {
                 console.error('检查更新失败:', err);
-                alert(`检查更新失败。\n\n${err.message || '未知错误，请稍后重试。'}`);
+                alert(`检查更新失败。\n\n${err.message || String(err) || '未知错误，请稍后重试。'}`);
             } finally {
                 checkUpdateBtn.textContent = oldText;
                 checkUpdateBtn.disabled = false;
