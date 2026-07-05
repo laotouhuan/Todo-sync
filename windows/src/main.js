@@ -116,6 +116,7 @@ function migrateAndNormalize(todo) {
     todo.task_type = todo.task_type || 'normal';
     todo.completed_dates = todo.completed_dates || [];
     todo.target_count = todo.target_count ?? null;
+    if (todo.completed === null) todo.completed = false;
     if (todo.subtasks) {
         todo.subtasks.forEach(s => {
             s.completed_at = s.completed_at || null;
@@ -174,7 +175,7 @@ function mergeTodoData(localData, cloudData) {
                 const currentPeriodCount = merged.task_type === 'weekly_checkin'
                     ? getWeeklyCompletedCount(merged)
                     : getMonthlyCompletedCount(merged);
-                const shouldBeCompleted = merged.target_count && currentPeriodCount >= merged.target_count;
+                const shouldBeCompleted = Boolean(merged.target_count && currentPeriodCount >= merged.target_count);
                 if (merged.completed !== shouldBeCompleted) {
                     merged.completed = shouldBeCompleted;
                     merged.completed_at = shouldBeCompleted ? (merged.completed_at || new Date().toISOString()) : null;
