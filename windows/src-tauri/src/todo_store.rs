@@ -299,3 +299,23 @@ pub fn write_todo_data(app: AppHandle, data: String) -> Result<(), String> {
 
     atomic_write(&path, &data)
 }
+
+#[tauri::command]
+pub async fn get_latest_release() -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client.get("https://api.github.com/repos/laotouhuan/Todo-sync/releases/latest")
+        .header("User-Agent", "Todo-App-Tauri")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if resp.status().is_success() {
+        resp.text().await.map_err(|e| e.to_string())
+    } else {
+        Err(format!("GitHub API Error: {}", resp.status()))
+    }
+}

@@ -1830,8 +1830,6 @@ window.addEventListener("DOMContentLoaded", () => {
         return 0;
     }
 
-    // GitHub API 地址常量（提取为常量，方便日后维护）
-    const GITHUB_RELEASE_API = 'https://api.github.com/repos/laotouhuan/Todo-sync/releases/latest';
 
     // 检查更新按钮事件
     const checkUpdateBtn = document.getElementById('check-update-btn');
@@ -1844,26 +1842,22 @@ window.addEventListener("DOMContentLoaded", () => {
                 // 1. 获取当前程序版本号
                 const currentVersion = await invoke('get_app_version');
 
-                // 2. 请求 GitHub API 获取最新发布版本（网络层错误由 fetch 抛出）
-                let response;
+                // 2. 请求 GitHub API 获取最新发布版本
+                let releaseJson;
                 try {
-                    response = await fetch(GITHUB_RELEASE_API);
+                    releaseJson = await invoke('get_latest_release');
                 } catch (networkErr) {
+                    const errMsg = String(networkErr);
+                    if (errMsg.includes("403") || errMsg.includes("429")) {
+                        throw new Error('GitHub API 请求过于频繁，请稍后再试（未认证限制：60次/小时）。');
+                    }
                     throw new Error('网络连接失败，请确认是否可以访问 GitHub。');
                 }
 
-                // 处理 HTTP 错误，对速率限制单独提示
-                if (!response.ok) {
-                    if (response.status === 403 || response.status === 429) {
-                        throw new Error('GitHub API 请求过于频繁，请稍后再试（未认证限制：60次/小时）。');
-                    }
-                    throw new Error(`无法获取 GitHub 更新数据 (HTTP ${response.status})`);
-                }
-
-                // 3. 解析 JSON（单独捕获，避免因响应体异常向用户暴露技术细节）
+                // 3. 解析 JSON
                 let release;
                 try {
-                    release = await response.json();
+                    release = JSON.parse(releaseJson);
                 } catch {
                     throw new Error('服务器返回的数据格式异常，请稍后重试。');
                 }
