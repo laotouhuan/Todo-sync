@@ -72,15 +72,9 @@ jobs:
             const version = require('./windows/src-tauri/tauri.conf.json').version;
             
             let signature = '';
-            let updateUrl = 'https://github.com/laotouhuan/Todo-sync/releases/download/v' + version + '/Todo-' + version + '-windows-x64-setup.exe';
-            
             const exeSigPath = 'windows/src-tauri/target/release/bundle/nsis/Todo-' + version + '-windows-x64-setup.exe.sig';
-            const zipSigPath = 'windows/src-tauri/target/release/bundle/nsis/Todo-' + version + '-windows-x64-setup.nsis.zip.sig';
             
-            if (fs.existsSync(zipSigPath)) {
-              signature = fs.readFileSync(zipSigPath, 'utf8').trim();
-              updateUrl = 'https://github.com/laotouhuan/Todo-sync/releases/download/v' + version + '/Todo-' + version + '-windows-x64-setup.nsis.zip';
-            } else if (fs.existsSync(exeSigPath)) {
+            if (fs.existsSync(exeSigPath)) {
               signature = fs.readFileSync(exeSigPath, 'utf8').trim();
             }
             
@@ -94,7 +88,7 @@ jobs:
                 },
                 'windows-x86_64': {
                   signature: signature,
-                  url: updateUrl
+                  url: 'https://github.com/laotouhuan/Todo-sync/releases/download/v' + version + '/Todo-' + version + '-windows-x64-setup.exe'
                 }
               }
             };
@@ -111,7 +105,7 @@ jobs:
           # workflow_dispatch 手动触发时若 tag 不存在则自动创建
           make_latest: 'true'
           files: |
-            windows/src-tauri/target/release/bundle/nsis/Todo-${{ steps.get_version.outputs.version }}-windows-x64-setup*
+            windows/src-tauri/target/release/bundle/nsis/Todo-${{ steps.get_version.outputs.version }}-windows-x64-setup.exe
             latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
