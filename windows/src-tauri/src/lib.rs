@@ -155,7 +155,8 @@ pub fn run() {
             todo_store::get_app_config,
             todo_store::save_app_config,
             todo_store::sync_to_cloud,
-            todo_store::fetch_from_cloud
+            todo_store::fetch_from_cloud,
+            todo_store::get_latest_release
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
