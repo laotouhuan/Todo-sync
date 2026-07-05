@@ -67,6 +67,14 @@ fun EditTodoDialog(
     var content by remember(todo.content) { mutableStateOf(todo.content) }
     var date by remember(todo.date) { mutableStateOf(todo.date ?: "") }
     var time by remember(todo.time) { mutableStateOf(todo.time ?: "") }
+    var hasDateEnabled by remember(todo.date) { mutableStateOf(!todo.date.isNullOrEmpty() && !isWeekDate(todo.date!!) && !isMonthDate(todo.date!!)) }
+    var cachedDate by remember(todo.id) { mutableStateOf(if (!todo.date.isNullOrEmpty() && !isWeekDate(todo.date!!) && !isMonthDate(todo.date!!)) todo.date!! else "") }
+
+    LaunchedEffect(date) {
+        if (date.isNotBlank() && !isWeekDate(date) && !isMonthDate(date)) {
+            cachedDate = date
+        }
+    }
     var completedDates by remember(todo.completed_dates) { mutableStateOf(todo.completed_dates) }
     var subtasks by remember(todo.subtasks) { mutableStateOf(todo.subtasks) }
     var editingSubtaskId by remember { mutableStateOf<String?>(null) }
@@ -237,26 +245,50 @@ fun EditTodoDialog(
                 if (selectedTypeUi == TaskType.NORMAL) {
                     Spacer(Modifier.height(8.dp))
                     Row(
-                        modifier = Modifier.fillMaxWidth(), 
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedTextField(
-                            value = date,
-                            onValueChange = { date = it },
-                            label = { Text("截止日期 (YYYY-MM-DD)") },
-                            modifier = Modifier.weight(1f).onFocusChanged { if (!it.isFocused) performAutoSave() }
-                        )
-                        Button(
-                            onClick = {
-                                date = java.time.LocalDate.now().plusDays(1).toString()
+                        Text("设置截止日期", style = MaterialTheme.typography.bodyLarge)
+                        Switch(
+                            checked = hasDateEnabled,
+                            onCheckedChange = { checked ->
+                                if (checked) {
+                                    val targetDate = if (cachedDate.isNotBlank()) cachedDate else java.time.LocalDate.now().toString()
+                                    date = targetDate
+                                } else {
+                                    date = ""
+                                }
+                                hasDateEnabled = checked
                                 performAutoSave()
-                            },
-                            modifier = Modifier.height(56.dp).padding(top = 6.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 16.dp)
+                            }
+                        )
+                    }
+
+                    if (hasDateEnabled) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(), 
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("明天")
+                            OutlinedTextField(
+                                value = date,
+                                onValueChange = { date = it },
+                                label = { Text("截止日期 (YYYY-MM-DD)") },
+                                modifier = Modifier.weight(1f).onFocusChanged { if (!it.isFocused) performAutoSave() }
+                            )
+                            Button(
+                                onClick = {
+                                    date = java.time.LocalDate.now().plusDays(1).toString()
+                                    performAutoSave()
+                                },
+                                modifier = Modifier.height(56.dp).padding(top = 6.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp)
+                            ) {
+                                Text("明天")
+                            }
                         }
                     }
                 }
@@ -300,28 +332,44 @@ fun EditTodoDialog(
                 }
 
                 Spacer(Modifier.height(16.dp))
+                var copyOnlyUncompleted by remember { mutableStateOf(true) }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("子步骤/备注", style = MaterialTheme.typography.titleMedium)
                     
-                    var expandedCopyMenu by remember { mutableStateOf(false) }
-                    Box {
-                        TextButton(onClick = { expandedCopyMenu = true }) { Text("复制") }
-                        DropdownMenu(expanded = expandedCopyMenu, onDismissRequest = { expandedCopyMenu = false }) {
-                            DropdownMenuItem(text = { Text("纯文本") }, onClick = { 
-                                val text = subtasks.joinToString("\n") { it.content }
-                                copyToClipboard(context, text)
-                                expandedCopyMenu = false 
-                            })
-                            DropdownMenuItem(text = { Text("无序列表") }, onClick = { 
-                                val text = subtasks.joinToString("\n") { "- ${it.content}" }
-                                copyToClipboard(context, text)
-                                expandedCopyMenu = false 
-                            })
-                            DropdownMenuItem(text = { Text("有序列表") }, onClick = { 
-                                val text = subtasks.mapIndexed { i, s -> "${i + 1}. ${s.content}" }.joinToString("\n")
-                                copyToClipboard(context, text)
-                                expandedCopyMenu = false 
-                            })
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { copyOnlyUncompleted = !copyOnlyUncompleted }.padding(end = 8.dp)
+                        ) {
+                            Checkbox(
+                                checked = copyOnlyUncompleted,
+                                onCheckedChange = { copyOnlyUncompleted = it }
+                            )
+                            Text("仅未完成", style = MaterialTheme.typography.bodySmall)
+                        }
+
+                        var expandedCopyMenu by remember { mutableStateOf(false) }
+                        Box {
+                            TextButton(onClick = { expandedCopyMenu = true }) { Text("复制") }
+                            DropdownMenu(expanded = expandedCopyMenu, onDismissRequest = { expandedCopyMenu = false }) {
+                                DropdownMenuItem(text = { Text("纯文本") }, onClick = { 
+                                    val filteredSubs = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
+                                    val text = filteredSubs.joinToString("\n") { it.content }
+                                    copyToClipboard(context, text)
+                                    expandedCopyMenu = false 
+                                })
+                                DropdownMenuItem(text = { Text("无序列表") }, onClick = { 
+                                    val text = (if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks).joinToString("\n") { "- ${it.content}" }
+                                    copyToClipboard(context, text)
+                                    expandedCopyMenu = false 
+                                })
+                                DropdownMenuItem(text = { Text("有序列表") }, onClick = { 
+                                    val filteredSubs = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
+                                    val text = filteredSubs.mapIndexed { i, s -> "${i + 1}. ${s.content}" }.joinToString("\n")
+                                    copyToClipboard(context, text)
+                                    expandedCopyMenu = false 
+                                })
+                            }
                         }
                     }
                 }

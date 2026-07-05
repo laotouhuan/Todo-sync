@@ -381,7 +381,6 @@ fun classifyForTodayFocus(todos: List<Todo>, todayStr: String, thisWeekStr: Stri
         !t.deleted && (
             t.date == todayStr
             || t.isOverdue(todayStr)
-            || t.date == null
             || t.date == thisWeekStr
             || t.date == thisMonthStr
             || (t.completed && t.completed_at?.startsWith(todayStr) == true)
@@ -392,9 +391,7 @@ fun classifyForTodayFocus(todos: List<Todo>, todayStr: String, thisWeekStr: Stri
             it.task_type != TaskType.WEEKLY_CHECKIN && it.task_type != TaskType.MONTHLY_CHECKIN
                 && it.date != null && !isWeekDate(it.date ?: "") && !isMonthDate(it.date ?: "")
         }.sortedWith(TodoComparator),
-        noDateTasks = filtered.filter {
-            it.task_type != TaskType.WEEKLY_CHECKIN && it.task_type != TaskType.MONTHLY_CHECKIN && it.date == null
-        }.sortedWith(TodoComparator),
+        noDateTasks = emptyList(),
         weekTasks = filtered.filter {
             it.task_type == TaskType.WEEKLY_CHECKIN || isWeekDate(it.date ?: "")
         }.sortedWith(TodoComparator),
