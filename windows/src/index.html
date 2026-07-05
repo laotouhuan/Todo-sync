@@ -148,18 +148,19 @@
           </select>
         </div>
         
-        <!-- 截止日期与时间行 (仅普通任务显示) -->
+        <!-- 截止日期行 (仅普通任务显示) -->
         <div class="date-time-row" id="edit-date-time-row" style="margin-bottom: 12px;">
-          <div class="input-group" style="flex: 2;">
-            <label for="edit-date">截止日期</label>
-            <div style="display: flex; gap: 8px; align-items: center;">
-              <input type="date" id="edit-date" style="flex: 1;" />
-              <button type="button" id="edit-date-type-btn" class="icon-btn-small" style="padding: 8px 12px; font-size: 0.8rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: var(--text-secondary); cursor: pointer; white-space: nowrap; height: 38px;">文本格式</button>
-            </div>
-          </div>
           <div class="input-group" style="flex: 1;">
-            <label for="edit-time">提醒时间</label>
-            <input type="time" id="edit-time" />
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label for="edit-date">设置截止日期</label>
+              <label class="switch">
+                <input type="checkbox" id="edit-has-date-switch">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div id="edit-date-container" style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
+              <input type="date" id="edit-date" style="flex: 1;" />
+            </div>
           </div>
         </div>
 
@@ -322,7 +323,14 @@
   <!-- Copy Options Modal -->
   <div id="copy-modal" class="modal-overlay" style="display: none; z-index: 2000;">
     <div class="modal-content glass-panel" style="max-width: 300px; padding: 20px;">
-      <h4 style="margin-top: 0; margin-bottom: 16px; text-align: center;">选择复制格式</h4>
+      <h4 style="margin-top: 0; margin-bottom: 12px; text-align: center;">选择复制格式</h4>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 0 4px;">
+        <label for="copy-only-uncompleted-switch" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">仅复制未完成项</label>
+        <label class="switch">
+          <input type="checkbox" id="copy-only-uncompleted-switch" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
       <div style="display: flex; flex-direction: column; gap: 10px;">
         <button id="copy-opt-1" class="modal-btn primary" style="width: 100%;">纯文本</button>
         <button id="copy-opt-2" class="modal-btn primary" style="width: 100%;">无序列表 (-)</button>

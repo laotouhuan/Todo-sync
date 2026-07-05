@@ -27,6 +27,7 @@ let todayCollapsed = false;
 let weekCollapsed = true;
 let monthCollapsed = true;
 let currentEditingTodo = null;
+let editCachedDate = '';
 let dateFilter = 'today'; // 'today' | 'all'
 let searchQuery = '';
 let allTabMode = 'uncompleted'; // 'uncompleted' | 'completed'
@@ -328,9 +329,7 @@ function getMetaHtml(todo, todayStr, tomorrowStr) {
         // 已完成和未完成任务都显示截止日期，确保已完成历史中保留原始截止信息
         html += `<span class="meta-item date ${dateClass}">📅 ${escapeHtml(dateLabel)}</span>`;
     }
-    if (todo.time) {
-        html += `<span class="meta-item time">🕐 ${escapeHtml(todo.time)}</span>`;
-    }
+    // Time rendering removed as per v1.0.2 design
     if (todo.recurring && todo.recurring !== 'none') {
         html += `<span class="meta-item meta-icon" title="循环: ${escapeHtml(RECURRING_LABELS[todo.recurring] || todo.recurring)}">🔁</span>`;
     }
@@ -948,30 +947,35 @@ async function _doAutoSave() {
                 todoData.todos[index].recurring = 'none';
 
                 if (taskTypeVal === 'normal') {
-                    let dateVal = document.getElementById('edit-date').value || null;
-                    if (dateVal) {
-                        dateVal = dateVal.trim();
-                        const isDay = /^\d{4}-\d{2}-\d{2}$/.test(dateVal);
-                        const isWeek = isWeekDate(dateVal);
-                        const isMonth = isMonthDate(dateVal);
-                        if (!isDay && !isWeek && !isMonth) {
-                            // 格式不合规时，恢复为上一合法值或空
-                            dateVal = currentEditingTodo.date || null;
-                            document.getElementById('edit-date').value = dateVal || '';
-                        } else if (isWeek) {
-                            // 强转为周打卡任务
-                            todoData.todos[index].task_type = 'weekly_checkin';
-                            if (taskTypeSelect) taskTypeSelect.value = 'weekly_checkin';
-                            updateEditModalFields('weekly_checkin');
-                        } else if (isMonth) {
-                            // 强转为月打卡任务
-                            todoData.todos[index].task_type = 'monthly_checkin';
-                            if (taskTypeSelect) taskTypeSelect.value = 'monthly_checkin';
-                            updateEditModalFields('monthly_checkin');
+                    const hasDateSwitch = document.getElementById('edit-has-date-switch');
+                    if (hasDateSwitch && hasDateSwitch.checked) {
+                        let dateVal = document.getElementById('edit-date').value || null;
+                        if (dateVal) {
+                            dateVal = dateVal.trim();
+                            const isDay = /^\d{4}-\d{2}-\d{2}$/.test(dateVal);
+                            const isWeek = isWeekDate(dateVal);
+                            const isMonth = isMonthDate(dateVal);
+                            if (!isDay && !isWeek && !isMonth) {
+                                // 格式不合规时，恢复为上一合法值或空
+                                dateVal = currentEditingTodo.date || null;
+                                document.getElementById('edit-date').value = dateVal || '';
+                            } else if (isWeek) {
+                                // 强转为周打卡任务
+                                todoData.todos[index].task_type = 'weekly_checkin';
+                                if (taskTypeSelect) taskTypeSelect.value = 'weekly_checkin';
+                                updateEditModalFields('weekly_checkin');
+                            } else if (isMonth) {
+                                // 强转为月打卡任务
+                                todoData.todos[index].task_type = 'monthly_checkin';
+                                if (taskTypeSelect) taskTypeSelect.value = 'monthly_checkin';
+                                updateEditModalFields('monthly_checkin');
+                            }
                         }
+                        todoData.todos[index].date = dateVal;
+                    } else {
+                        todoData.todos[index].date = null;
                     }
-                    todoData.todos[index].date = dateVal;
-                    todoData.todos[index].time = document.getElementById('edit-time').value || null;
+                    todoData.todos[index].time = null;
                 } else {
                     todoData.todos[index].time = null;
                     if (taskTypeVal === 'weekly_checkin') {
@@ -1054,22 +1058,25 @@ function openEditModal(todo) {
 
     updateEditModalFields(taskTypeVal);
 
-    document.getElementById('edit-time').value = todo.time || '';
-
-    // 日期格式自动检测并切换模式
+    // 日期开关及缓存初始化
     const dateInput = document.getElementById('edit-date');
-    const typeBtn = document.getElementById('edit-date-type-btn');
+    const hasDateSwitch = document.getElementById('edit-has-date-switch');
+    const dateContainer = document.getElementById('edit-date-container');
     const dateVal = todo.date || '';
 
-    if (isWeekDate(dateVal) || isMonthDate(dateVal)) {
-        dateInput.type = 'text';
-        if (typeBtn) typeBtn.textContent = '日历格式';
-        dateInput.placeholder = 'YYYY-MM-DD, YYYY-Wxx, YYYY-MM';
+    dateInput.type = 'date';
+
+    if (dateVal && !isWeekDate(dateVal) && !isMonthDate(dateVal)) {
+        hasDateSwitch.checked = true;
+        dateContainer.style.display = 'flex';
+        dateInput.value = dateVal;
+        editCachedDate = dateVal;
     } else {
-        dateInput.type = 'date';
-        if (typeBtn) typeBtn.textContent = '文本格式';
+        hasDateSwitch.checked = false;
+        dateContainer.style.display = 'none';
+        dateInput.value = '';
+        editCachedDate = (todo.task_type === 'normal' && todo.date && !isWeekDate(todo.date) && !isMonthDate(todo.date)) ? todo.date : getTodayString();
     }
-    dateInput.value = dateVal;
 
     const targetCountInput = document.getElementById('edit-target-count');
     if (targetCountInput) {
@@ -1321,7 +1328,7 @@ function renderCollapsibleGroup(group, label, isCollapsed, type, themeColor, tod
 }
 
 // ====== Render Flat Pending Group (no collapsible wrappers, just flat headers & lists) ======
-function renderFlatPendingGroup(group, label, themeColor, todayStr, tomorrowStr) {
+function renderFlatPendingGroup(group, label, themeColor, todayStr, tomorrowStr, groupType) {
     if (!group || group.length === 0) return;
 
     // 创建扁平时间线分类标题（不包含“待完成”前缀）
@@ -1334,6 +1341,7 @@ function renderFlatPendingGroup(group, label, themeColor, todayStr, tomorrowStr)
     // 直接平铺待完成卡片列表
     const itemsContainer = document.createElement('div');
     itemsContainer.className = 'pending-timeline-items';
+    itemsContainer.dataset.groupType = groupType;
     group.forEach(todo => {
         itemsContainer.appendChild(createTodoItemElement(todo, todayStr, tomorrowStr));
     });
@@ -1362,7 +1370,6 @@ function render() {
 
             return t.date === todayStr 
                 || isOverdue(t, todayStr) 
-                || !t.date 
                 || t.date === thisWeekStr 
                 || t.date === thisMonthStr
                 || isOverdueCompletedToday;
@@ -1392,27 +1399,17 @@ function render() {
                 const groups = groupTodosByDate(uncompletedTodos, todayStr);
                 const { todayGroup, noDateGroup, weekGroup, monthGroup, futureGroup, pastGroup } = groups;
                 
-                todayGroup.sort(sortFunc);
-                noDateGroup.sort(sortFunc);
-                weekGroup.sort(sortFunc);
-                monthGroup.sort(sortFunc);
+                // 未来任务中不要出现周任务/月任务/逾期任务/今日任务，只需要有确定了日期的、明天以后的任务
+                const futureTasks = futureGroup.filter(t => t.task_type === 'normal');
                 
-                futureGroup.sort((a, b) => {
+                noDateGroup.sort(sortFunc);
+                futureTasks.sort((a, b) => {
                     if (a.date !== b.date) return a.date.localeCompare(b.date);
                     return sortFunc(a, b);
                 });
 
-                pastGroup.sort((a, b) => {
-                    if (a.date !== b.date) return b.date.localeCompare(a.date);
-                    return sortFunc(a, b);
-                });
-
-                renderFlatPendingGroup(todayGroup, '今日/逾期', 'var(--accent-color)', todayStr, tomorrowStr);
-                renderFlatPendingGroup(weekGroup, '本周', '#fadb14', todayStr, tomorrowStr);
-                renderFlatPendingGroup(monthGroup, '本月', '#ff7a45', todayStr, tomorrowStr);
-                renderFlatPendingGroup(futureGroup, '以后', '#1890ff', todayStr, tomorrowStr);
-                renderFlatPendingGroup(noDateGroup, '无日期', '#8c8c8c', todayStr, tomorrowStr);
-                renderFlatPendingGroup(pastGroup, '已过期', '#ff4d4f', todayStr, tomorrowStr);
+                renderFlatPendingGroup(noDateGroup, '无日期', '#8c8c8c', todayStr, tomorrowStr, 'no-date');
+                renderFlatPendingGroup(futureTasks, '未来任务', '#1890ff', todayStr, tomorrowStr, 'future');
             } else {
                 // 2. 收集已完成任务（含打卡任务拆分）
                 const completedGroupsMap = {};
@@ -1628,6 +1625,64 @@ function render() {
                         if (evt.from !== evt.to) {
                             updateOrderForContainer(evt.from);
                         }
+                        
+                        if (stateChanged) {
+                            render();
+                            await saveData();
+                        }
+                    }
+                };
+                container._sortableInstance = new Sortable(container, sortableOpts);
+            });
+        }
+
+        // Initialize SortableJS — 全部待办 -> 待完成分组内拖动排序
+        if (dateFilter === 'all' && allTabMode === 'uncompleted' && window.Sortable) {
+            document.querySelectorAll('.pending-timeline-items').forEach(el => {
+                if (el._sortableInstance) {
+                    el._sortableInstance.destroy();
+                    el._sortableInstance = null;
+                }
+            });
+
+            document.querySelectorAll('.pending-timeline-items').forEach(container => {
+                const groupType = container.dataset.groupType;
+                const sortableOpts = {
+                    group: `pending-${groupType}-group`, // 隔离不同分组
+                    animation: 150,
+                    ghostClass: 'drag-over',
+                    chosenClass: 'drag-chosen',
+                    dragClass: 'drag-active',
+                    filter: '.checkbox, .todo-content, .todo-meta, .inline-subtasks-list, .edit-btn',
+                    preventOnFilter: false,
+                    delay: 200,
+                    delayOnTouchOnly: false,
+                    fallbackTolerance: 5,
+                    forceFallback: true,
+                    fallbackClass: 'drag-fallback',
+                    fallbackOnBody: true,
+                    scrollSensitivity: 50,
+                    scrollSpeed: 12,
+                    scroll: document.getElementById('main-content'),
+                    onStart: function(evt) {
+                        window.currentlyDraggedTodoId = evt.item.dataset.id;
+                    },
+                    onEnd: async function(evt) {
+                        window.currentlyDraggedTodoId = null;
+                        const todoMap = new Map(todoData.todos.map(t => [t.id, t]));
+                        let stateChanged = false;
+                        
+                        const items = Array.from(container.querySelectorAll('.todo-item'));
+                        items.forEach((el, index) => {
+                            const td = todoMap.get(el.dataset.id);
+                            if (td) {
+                                if (td.order !== index) {
+                                    td.order = index;
+                                    td.updated_at = new Date().toISOString();
+                                    stateChanged = true;
+                                }
+                            }
+                        });
                         
                         if (stateChanged) {
                             render();
@@ -2161,7 +2216,7 @@ window.addEventListener("DOMContentLoaded", () => {
     });
 
     // 绑定编辑模态框自动保存
-    ['edit-content', 'edit-date', 'edit-time', 'edit-task-type', 'edit-target-count'].forEach(id => {
+    ['edit-content', 'edit-date', 'edit-has-date-switch', 'edit-task-type', 'edit-target-count'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
             el.addEventListener('change', autoSaveEdit);
@@ -2201,25 +2256,25 @@ window.addEventListener("DOMContentLoaded", () => {
     }
 
     const dateInput = document.getElementById('edit-date');
-    const typeBtn = document.getElementById('edit-date-type-btn');
-    if (typeBtn && dateInput) {
-        typeBtn.addEventListener('click', () => {
-            const oldVal = dateInput.value;
-            if (dateInput.type === 'date') {
-                dateInput.type = 'text';
-                typeBtn.textContent = '日历格式';
-                dateInput.placeholder = 'YYYY-MM-DD, YYYY-Wxx, YYYY-MM';
-                dateInput.value = oldVal;
+    const hasDateSwitch = document.getElementById('edit-has-date-switch');
+    const dateContainer = document.getElementById('edit-date-container');
+
+    if (hasDateSwitch && dateInput && dateContainer) {
+        hasDateSwitch.addEventListener('change', () => {
+            if (hasDateSwitch.checked) {
+                dateContainer.style.display = 'flex';
+                dateInput.value = editCachedDate || getTodayString();
             } else {
-                dateInput.type = 'date';
-                typeBtn.textContent = '文本格式';
-                if (/^\d{4}-\d{2}-\d{2}$/.test(oldVal)) {
-                    dateInput.value = oldVal;
-                } else {
-                    dateInput.value = '';
-                }
+                dateContainer.style.display = 'none';
+                dateInput.value = '';
             }
             autoSaveEdit();
+        });
+
+        dateInput.addEventListener('input', () => {
+            if (dateInput.value) {
+                editCachedDate = dateInput.value;
+            }
         });
     }
 
@@ -2285,12 +2340,18 @@ window.addEventListener("DOMContentLoaded", () => {
     });
 
     const performCopy = async (format) => {
+        const copyOnlyUncompleted = document.getElementById('copy-only-uncompleted-switch').checked;
         let textToCopy = '';
+        let indexForNumberedList = 1;
         currentEditingSubtasks.forEach((sub, i) => {
+            if (copyOnlyUncompleted && sub.completed) {
+                return;
+            }
             if (format === '2') {
                 textToCopy += '- ' + sub.content + '\n';
             } else if (format === '3') {
-                textToCopy += (i + 1) + '. ' + sub.content + '\n';
+                textToCopy += indexForNumberedList + '. ' + sub.content + '\n';
+                indexForNumberedList++;
             } else {
                 textToCopy += sub.content + '\n';
             }
@@ -2319,8 +2380,15 @@ window.addEventListener("DOMContentLoaded", () => {
         const { content, taskDate, taskType, targetCount } = parseInputSyntax(raw);
         if (!content) return;
 
-        const finalDate = taskDate || getTodayString();
+        const finalDate = taskDate || null;
+        let minOrder = Date.now();
+        todoData.todos.forEach(t => {
+            if (!t.deleted && !t.completed && typeof t.order === 'number' && t.order < minOrder) {
+                minOrder = t.order;
+            }
+        });
         const todo = createTodo(content, finalDate);
+        todo.order = minOrder - 1;
         applyTaskType(todo, taskType, targetCount);
 
         todoData.todos.push(todo);
@@ -2360,8 +2428,15 @@ window.addEventListener("DOMContentLoaded", () => {
             const { content, taskDate, taskType, targetCount } = parseInputSyntax(raw);
             if (!content) return;
 
-            const finalDate = taskDate || getTodayString();
+            const finalDate = taskDate || null;
+            let minOrder = Date.now();
+            todoData.todos.forEach(t => {
+                if (!t.deleted && !t.completed && typeof t.order === 'number' && t.order < minOrder) {
+                    minOrder = t.order;
+                }
+            });
             const todo = createTodo(content, finalDate);
+            todo.order = minOrder - 1;
             applyTaskType(todo, taskType, targetCount);
 
             todoData.todos.push(todo);

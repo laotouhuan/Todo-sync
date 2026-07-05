@@ -136,7 +136,6 @@ fun ClassicListView(viewModel: TodoViewModel) {
 
             it.date == todayStr 
                 || it.isOverdue(todayStr) 
-                || it.date == null 
                 || it.date == thisWeekStr 
                 || it.date == thisMonthStr 
                 || isOverdueCompletedToday
@@ -158,11 +157,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
             list.addAll(todayTasks.map { FocusItem.Task(it) })
         }
 
-        // 2. No Date Tasks
-        list.add(FocusItem.Header("HEADER_NODATE", "无日期任务", Color.Gray, expandNoDate, { expandNoDate = !expandNoDate }))
-        if (expandNoDate) {
-            list.addAll(noDateTasks.map { FocusItem.Task(it) })
-        }
+
 
         // 3. Week Tasks
         list.add(FocusItem.Header("HEADER_WEEK", "本周任务", Color(0xFFFADB14), expandWeek, { expandWeek = !expandWeek }))
@@ -434,6 +429,90 @@ fun ClassicListView(viewModel: TodoViewModel) {
             val uncompletedFuture = sortedUncompletedGroups.future
             val uncompletedPast = sortedUncompletedGroups.past
 
+            val uncompletedFutureTasks = remember(uncompletedFuture) {
+                uncompletedFuture.filter { it.task_type == "normal" }.sortedWith { a, b ->
+                    val da = a.date ?: ""
+                    val db = b.date ?: ""
+                    da.compareTo(db)
+                }
+            }
+
+            val allTodosItemsOriginal = remember(uncompletedNoDate, uncompletedFutureTasks, expandNoDate, expandFuture) {
+                val list = mutableListOf<AllTodoItem>()
+                
+                // 1. 无日期任务 (Now on top!)
+                list.add(AllTodoItem.Header("HEADER_ALL_NODATE", "无日期", Color.Gray, expandNoDate, { expandNoDate = !expandNoDate }))
+                if (expandNoDate) {
+                    list.addAll(uncompletedNoDate.map { AllTodoItem.Task(it, "uncompleted_nodate") })
+                }
+                
+                // 2. 未来任务
+                list.add(AllTodoItem.Header("HEADER_ALL_FUTURE", "未来任务", Color(0xFF1890FF), expandFuture, { expandFuture = !expandFuture }))
+                if (expandFuture) {
+                    list.addAll(uncompletedFutureTasks.map { AllTodoItem.Task(it, "uncompleted_future") })
+                }
+                
+                list
+            }
+            
+            var reorderableAllTodosItems by remember { mutableStateOf<List<AllTodoItem>>(emptyList()) }
+            
+            val reorderStateAllTodos = rememberReorderableLazyListState(
+                onMove = { from, to ->
+                    val fromKey = from.key as? String ?: return@rememberReorderableLazyListState
+                    val toKey = to.key as? String ?: return@rememberReorderableLazyListState
+                    
+                    val isFromNoDate = fromKey.startsWith("uncompleted_nodate_")
+                    val isToNoDate = toKey.startsWith("uncompleted_nodate_")
+                    val isFromFuture = fromKey.startsWith("uncompleted_future_")
+                    val isToFuture = toKey.startsWith("uncompleted_future_")
+                    
+                    val canMove = (isFromNoDate && isToNoDate) || (isFromFuture && isToFuture)
+                    if (!canMove) return@rememberReorderableLazyListState
+                    
+                    val fromIndex = reorderableAllTodosItems.indexOfFirst { it.key == fromKey }
+                    val toIndex = reorderableAllTodosItems.indexOfFirst { it.key == toKey }
+                    if (fromIndex != -1 && toIndex != -1) {
+                        if (reorderableAllTodosItems[fromIndex] is AllTodoItem.Task) {
+                            reorderableAllTodosItems = reorderableAllTodosItems.toMutableList().apply {
+                                add(toIndex, removeAt(fromIndex))
+                            }
+                        }
+                    }
+                },
+                onDragEnd = { _, _ ->
+                    val updatedList = mutableListOf<Todo>()
+                    var currentNoDateIndex = 0.0
+                    var currentFutureIndex = 0.0
+                    
+                    reorderableAllTodosItems.forEach { item ->
+                        if (item is AllTodoItem.Task) {
+                            val todo = item.todo
+                            if (item.groupPrefix == "uncompleted_nodate") {
+                                val newOrder = currentNoDateIndex
+                                currentNoDateIndex += 1.0
+                                if (todo.order != newOrder) {
+                                    updatedList.add(todo.copy(order = newOrder, updated_at = nowIso()))
+                                }
+                            } else if (item.groupPrefix == "uncompleted_future") {
+                                val newOrder = currentFutureIndex
+                                currentFutureIndex += 1.0
+                                if (todo.order != newOrder) {
+                                    updatedList.add(todo.copy(order = newOrder, updated_at = nowIso()))
+                                }
+                            }
+                        }
+                    }
+                    if (updatedList.isNotEmpty()) {
+                        viewModel.batchUpdateTodos(updatedList)
+                    }
+                }
+            )
+            
+            LaunchedEffect(allTodosItemsOriginal) {
+                reorderableAllTodosItems = allTodosItemsOriginal
+            }
+
             val completedMap = remember(filteredTodos, todayStr) {
                 val map = mutableMapOf<String, MutableList<Pair<Todo, String?>>>()
                 filteredTodos.forEach { todo ->
@@ -532,42 +611,39 @@ fun ClassicListView(viewModel: TodoViewModel) {
                         )
                     }
 
-                    LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    LazyColumn(
+                        state = reorderStateAllTodos.listState,
+                        modifier = Modifier.reorderable(reorderStateAllTodos).weight(1f).fillMaxWidth()
+                    ) {
                         if (allTabMode == "uncompleted") {
-                            if (uncompletedToday.isNotEmpty()) {
-                                item { GroupHeader("今天/逾期", Color(0xFF1890FF), expandToday) { expandToday = !expandToday } }
-                                if (expandToday) {
-                                    items(items = uncompletedToday, key = { "uncompleted_today_${it.id}" }) { todoItem(it) }
-                                }
-                            }
-                            if (uncompletedWeek.isNotEmpty()) {
-                                item { GroupHeader("本周", Color(0xFFFADB14), expandWeek) { expandWeek = !expandWeek } }
-                                if (expandWeek) {
-                                    items(items = uncompletedWeek, key = { "uncompleted_week_${it.id}" }) { todoItem(it) }
-                                }
-                            }
-                            if (uncompletedMonth.isNotEmpty()) {
-                                item { GroupHeader("本月", Color(0xFFFF7A45), expandMonth) { expandMonth = !expandMonth } }
-                                if (expandMonth) {
-                                    items(items = uncompletedMonth, key = { "uncompleted_month_${it.id}" }) { todoItem(it) }
-                                }
-                            }
-                            if (uncompletedFuture.isNotEmpty()) {
-                                item { GroupHeader("以后", Color(0xFF1890FF), expandFuture) { expandFuture = !expandFuture } }
-                                if (expandFuture) {
-                                    items(items = uncompletedFuture, key = { "uncompleted_future_${it.id}" }) { todoItem(it) }
-                                }
-                            }
-                            if (uncompletedNoDate.isNotEmpty()) {
-                                item { GroupHeader("无日期", Color.Gray, expandNoDate) { expandNoDate = !expandNoDate } }
-                                if (expandNoDate) {
-                                    items(items = uncompletedNoDate, key = { "uncompleted_nodate_${it.id}" }) { todoItem(it) }
-                                }
-                            }
-                            if (uncompletedPast.isNotEmpty()) {
-                                item { GroupHeader("已过期", Color(0xFFFF4D4F), expandPast) { expandPast = !expandPast } }
-                                if (expandPast) {
-                                    items(items = uncompletedPast, key = { "uncompleted_past_${it.id}" }) { todoItem(it) }
+                            items(items = reorderableAllTodosItems, key = { it.key }) { item ->
+                                ReorderableItem(reorderableState = reorderStateAllTodos, key = item.key) { isDragging ->
+                                    val elevation = animateDpAsState(if (isDragging) 8.dp else 0.dp)
+                                    Surface(shadowElevation = elevation.value) {
+                                        when (item) {
+                                            is AllTodoItem.Header -> {
+                                                GroupHeader(
+                                                    title = item.title,
+                                                    color = item.color,
+                                                    isExpanded = item.isExpanded,
+                                                    isHovered = false,
+                                                    onClick = item.onToggleExpand
+                                                )
+                                            }
+                                            is AllTodoItem.Task -> {
+                                                Box(modifier = Modifier.detectReorderAfterLongPress(reorderStateAllTodos)) {
+                                                    TodoItemRow(
+                                                        todo = item.todo,
+                                                        viewModel = viewModel,
+                                                        onEdit = { showEditDialogFor = item.todo },
+                                                        onMoveToTomorrow = { viewModel.updateTodo(item.todo.copy(date = dates.tomorrow)) },
+                                                        todayStr = todayStr,
+                                                        tomorrowStr = dates.tomorrow
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         } else {
@@ -1172,4 +1248,21 @@ fun ImportLastPeriodCard(
             }
         )
     }
+}
+
+sealed class AllTodoItem {
+    data class Header(
+        val id: String,
+        val title: String,
+        val color: Color,
+        val isExpanded: Boolean,
+        val onToggleExpand: () -> Unit
+    ) : AllTodoItem()
+    data class Task(val todo: Todo, val groupPrefix: String) : AllTodoItem()
+    
+    val key: String
+        get() = when (this) {
+            is Header -> id
+            is Task -> "${groupPrefix}_${todo.id}"
+        }
 }

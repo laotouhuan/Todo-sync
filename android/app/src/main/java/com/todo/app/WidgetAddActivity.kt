@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.todo.app.ui.theme.TodoAppTheme
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 
 class WidgetAddActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -101,10 +102,13 @@ class WidgetAddActivity : ComponentActivity() {
             val repository = TodoApplication.instance.repository
             lifecycleScope.launch {
                 try {
+                    val currentData = repository.getTodoData().first()
+                    val minOrder = currentData.todos.filter { !it.deleted && !it.completed }.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()
                     val newTodo = com.todo.app.data.model.Todo.create(parsed.content, parsed.date).copy(
                         task_type = parsed.taskType,
                         target_count = parsed.targetCount,
-                        recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none"
+                        recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
+                        order = minOrder - 1.0
                     )
                     repository.addTodo(newTodo)
                     

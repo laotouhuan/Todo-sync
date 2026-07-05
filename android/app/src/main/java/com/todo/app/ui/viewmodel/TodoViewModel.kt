@@ -75,10 +75,13 @@ class TodoViewModel(val repository: TodoRepository, val configManager: ConfigMan
         if (parsed.content.isBlank()) return
 
         viewModelScope.launch {
+            val currentList = todos.value
+            val minOrder = currentList.filter { !it.completed }.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()
             val todo = Todo.create(parsed.content, parsed.date).copy(
                 task_type = parsed.taskType,
                 target_count = parsed.targetCount,
-                recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none"
+                recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
+                order = minOrder - 1.0
             )
             repository.addTodo(todo)
         }
