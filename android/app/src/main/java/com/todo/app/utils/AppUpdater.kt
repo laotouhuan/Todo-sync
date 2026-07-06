@@ -19,17 +19,25 @@ data class UpdateInfo(
     val apkUrl: String
 )
 
+sealed interface UpdateResult {
+    data class NewVersion(val info: UpdateInfo) : UpdateResult
+    object LatestVersion : UpdateResult
+    data class Error(val message: String) : UpdateResult
+}
+
 object AppUpdater {
     private val client = OkHttpClient()
 
-    suspend fun checkForUpdates(currentVersion: String): UpdateInfo? = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdates(currentVersion: String): UpdateResult = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url("https://github.com/laotouhuan/Todo-sync/releases/latest/download/latest.json")
             .build()
         try {
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                val bodyStr = response.body?.string() ?: return@withContext null
+                if (!response.isSuccessful) {
+                    return@withContext UpdateResult.Error("HTTP 状态码: ${response.code}")
+                }
+                val bodyStr = response.body?.string() ?: return@withContext UpdateResult.Error("接口返回数据为空")
                 val json = JSONObject(bodyStr)
                 val latestVersion = json.getString("version")
                 val notes = json.optString("notes", "")
@@ -47,13 +55,15 @@ object AppUpdater {
                 }
 
                 if (apkUrl != null && isNewerVersion(currentVersion, latestVersion)) {
-                    return@withContext UpdateInfo(latestVersion, notes, apkUrl)
+                    return@withContext UpdateResult.NewVersion(UpdateInfo(latestVersion, notes, apkUrl))
+                } else {
+                    return@withContext UpdateResult.LatestVersion
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            return@withContext UpdateResult.Error(e.message ?: e.javaClass.simpleName)
         }
-        return@withContext null
     }
 
     private fun isNewerVersion(current: String, latest: String): Boolean {

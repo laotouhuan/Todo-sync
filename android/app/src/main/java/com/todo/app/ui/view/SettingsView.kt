@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import com.todo.app.ui.viewmodel.TodoViewModel
 import com.todo.app.utils.AppUpdater
 import com.todo.app.utils.UpdateInfo
+import com.todo.app.utils.UpdateResult
 import kotlinx.coroutines.launch
 
 @Composable
@@ -268,13 +269,19 @@ fun SettingsView(viewModel: TodoViewModel) {
                         onClick = {
                             checkingForUpdate = true
                             coroutineScope.launch {
-                                val info = AppUpdater.checkForUpdates(versionName)
+                                val result = AppUpdater.checkForUpdates(versionName)
                                 checkingForUpdate = false
-                                if (info != null) {
-                                    updateInfo = info
-                                    showUpdateDialog = true
-                                } else {
-                                    snackbarHostState.showSnackbar("当前已是最新版本")
+                                when (result) {
+                                    is UpdateResult.NewVersion -> {
+                                        updateInfo = result.info
+                                        showUpdateDialog = true
+                                    }
+                                    is UpdateResult.LatestVersion -> {
+                                        snackbarHostState.showSnackbar("当前已是最新版本")
+                                    }
+                                    is UpdateResult.Error -> {
+                                        snackbarHostState.showSnackbar("检测更新失败: ${result.message}")
+                                    }
                                 }
                             }
                         },
