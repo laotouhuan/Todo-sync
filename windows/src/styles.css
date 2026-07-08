@@ -1302,6 +1302,10 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   border-radius: 8px;
   margin-bottom: 4px;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: grab;
+}
+.subtask-item:active {
+  cursor: grabbing;
 }
 .subtask-item:hover {
   background: rgba(255, 255, 255, 0.04);
@@ -1540,5 +1544,44 @@ input:checked + .slider {
 }
 input:checked + .slider:before {
   transform: translateX(16px);
+}
+
+.autocomplete-list {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  background: rgba(30, 30, 30, 0.85);
+  backdrop-filter: blur(15px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  list-style: none;
+  padding: 6px 0;
+  margin: 4px 0 0 0;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 9999;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+/* 主页面输入框在底部，因此联想弹窗向上弹出；闪电录入在中央，向下弹出 */
+#app-footer .autocomplete-list {
+  bottom: 100%;
+  margin-bottom: 8px;
+}
+.autocomplete-item {
+  padding: 10px 16px;
+  color: var(--text-primary, #fff);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background 0.2s;
+  font-size: 14px;
+}
+.autocomplete-item:hover, .autocomplete-item.active {
+  background: rgba(255, 255, 255, 0.1);
+}
+.autocomplete-item .shortcut-desc {
+  color: var(--text-secondary, #888);
+  font-size: 12px;
 }
 

@@ -111,7 +111,10 @@
     <!-- Add Input -->
     <footer id="app-footer">
       <form id="add-form">
-        <input type="text" id="todo-input" placeholder="添加新待办..." autocomplete="off" />
+        <div class="autocomplete-wrapper" style="position: relative; flex: 1;">
+          <input type="text" id="todo-input" placeholder="添加新待办..." autocomplete="off" style="width: 100%; box-sizing: border-box;" />
+          <ul id="todo-autocomplete-list" class="autocomplete-list" style="display: none;"></ul>
+        </div>
         <button type="submit" class="add-btn">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -179,7 +182,10 @@
         <!-- 子任务区域 -->
         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; margin-bottom: 4px;">
           <label style="margin: 0; font-weight: 600;">子步骤/备注</label>
-          <button type="button" id="copy-subtasks-btn" class="icon-btn-small copy-btn">复制内容</button>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" id="sort-subtasks-btn" class="icon-btn-small copy-btn">整理排序</button>
+            <button type="button" id="copy-subtasks-btn" class="icon-btn-small copy-btn">复制内容</button>
+          </div>
         </div>
         <div class="subtasks-container" style="margin-top: 0; padding: 0; background: transparent;">
           <ul id="edit-subtasks-list" class="subtasks-list"></ul>
@@ -306,9 +312,12 @@
           <button type="button" id="backup-btn" class="modal-btn secondary" style="width: 100%; margin-top: 8px;">从历史备份恢复</button>
         </div>
 
-        <div style="border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 10px;">
-          <label>软件更新</label>
-          <button type="button" id="check-update-btn" class="modal-btn secondary" style="width: 100%; margin-top: 8px;">手动检查更新</button>
+        <div style="border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 10px; display: flex; flex-direction: column; gap: 4px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <label style="margin: 0;">软件更新</label>
+            <span id="current-version-text" style="font-size: 0.75rem; color: var(--text-secondary); font-weight: normal;">当前版本: v...</span>
+          </div>
+          <button type="button" id="check-update-btn" class="modal-btn secondary" style="width: 100%; margin-top: 4px;">手动检查更新</button>
         </div>
       </div>
       <div class="modal-footer">
@@ -323,7 +332,7 @@
   <!-- Copy Options Modal -->
   <div id="copy-modal" class="modal-overlay" style="display: none; z-index: 2000;">
     <div class="modal-content glass-panel" style="max-width: 300px; padding: 20px;">
-      <h4 style="margin-top: 0; margin-bottom: 12px; text-align: center;">选择复制格式</h4>
+      <h3 style="margin-top: 0; margin-bottom: 16px; text-align: center; color: var(--accent-color); user-select: none; -webkit-user-select: none;">选择复制格式</h3>
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 0 4px;">
         <label for="copy-only-uncompleted-switch" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">仅复制未完成项</label>
         <label class="switch">
@@ -342,9 +351,10 @@
 
   <!-- 闪电录入（聚光灯模式）遮罩层 -->
   <div class="modal-overlay" id="quick-add-modal">
-    <div style="width: 80%; max-width: 600px;">
+    <div class="autocomplete-wrapper" style="position: relative; width: 80%; max-width: 600px;">
       <input type="text" id="quick-add-input" placeholder="输入待办事项，按回车闪电保存..." 
         style="width: 100%; padding: 20px 30px; font-size: 24px; border: none; border-radius: 16px; background: rgba(255,255,255,0.1); color: #fff; outline: none; box-shadow: 0 10px 30px rgba(0,0,0,0.3); backdrop-filter: blur(20px);" />
+      <ul id="quick-add-autocomplete-list" class="autocomplete-list" style="display: none;"></ul>
     </div>
   </div>
 

@@ -359,9 +359,9 @@ class TodoRepository(private val context: Context) {
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            // 不向用户展示服务器错误详情和目录结构，防止信息泄露
+            val msg = if (e.message?.contains("云端") == true) e.message!! else "云端同步失败，请检查网络连接和 WebDAV 配置"
             withContext(Dispatchers.Main) {
-                android.widget.Toast.makeText(context, "云端同步失败，请检查网络连接和 WebDAV 配置", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
             }
         }
     }

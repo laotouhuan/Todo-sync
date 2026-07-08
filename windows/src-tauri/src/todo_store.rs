@@ -106,6 +106,25 @@ pub async fn sync_to_cloud(app: AppHandle, data: String) -> Result<(), String> {
     }
 }
 
+async fn check_parent_folder_exists(client: &reqwest::Client, parent_url: &str, user: &str, pass: &str) -> bool {
+    let xml_body = "<?xml version=\"1.0\"?><D:propfind xmlns:D=\"DAV:\"><D:prop><D:displayname/></D:prop></D:propfind>";
+    let propfind_method = match reqwest::Method::from_bytes(b"PROPFIND") {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    let resp = client.request(propfind_method, parent_url)
+        .basic_auth(user, Some(pass))
+        .header("Depth", "0")
+        .header("Content-Type", "application/xml; charset=utf-8")
+        .body(xml_body)
+        .send().await;
+        
+    match resp {
+        Ok(r) => r.status().is_success() || r.status().as_u16() == 207,
+        Err(_) => false,
+    }
+}
+
 #[tauri::command]
 pub async fn fetch_from_cloud(app: AppHandle) -> Result<String, String> {
     let conn = build_webdav_conn(&app)?;
@@ -117,6 +136,18 @@ pub async fn fetch_from_cloud(app: AppHandle) -> Result<String, String> {
 
     if resp.status().is_success() {
         resp.text().await.map_err(|e| e.to_string())
+    } else if resp.status().as_u16() == 404 {
+        let last_slash = conn.target.rfind('/').unwrap_or(0);
+        if last_slash > 0 {
+            let parent_url = &conn.target[..last_slash];
+            if check_parent_folder_exists(&client, parent_url, &conn.user, &conn.pass).await {
+                Err("FILE_NOT_FOUND".to_string())
+            } else {
+                Err("云端同步目录不存在，请先在坚果云中手动创建该文件夹。".to_string())
+            }
+        } else {
+            Err("FILE_NOT_FOUND".to_string())
+        }
     } else {
         Err(format!("WebDAV GET Error: {}", resp.status()))
     }

@@ -51,6 +51,27 @@ class WebDavClient(
         }
     }
 
+    suspend fun checkFolderExists(folderPath: String): Boolean = withContext(Dispatchers.IO) {
+        val credential = Credentials.basic(username, appPassword)
+        val xmlBody = "<?xml version=\"1.0\"?><D:propfind xmlns:D=\"DAV:\"><D:prop><D:displayname/></D:prop></D:propfind>"
+        val body = xmlBody.toRequestBody("application/xml; charset=utf-8".toMediaType())
+        val encodedFolder = encodePath(folderPath)
+        val targetUrl = if (serverUrl.endsWith("/")) serverUrl + encodedFolder else "$serverUrl/$encodedFolder"
+        val request = Request.Builder()
+            .url(targetUrl)
+            .header("Authorization", credential)
+            .header("Depth", "0")
+            .method("PROPFIND", body)
+            .build()
+        try {
+            client.newCall(request).execute().use { response ->
+                return@withContext response.code == 207 || response.isSuccessful
+            }
+        } catch (e: Exception) {
+            return@withContext false
+        }
+    }
+
     /**
      * 从 WebDAV 下载文件
      * @param filePath 相对路径，如 "todo_data.json" 或 "MyTodos/todo_data.json"
@@ -71,14 +92,30 @@ class WebDavClient(
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     return@withContext response.body?.string() ?: ""
+                } else if (response.code == 404) {
+                    val lastSlash = filePath.lastIndexOf('/')
+                    val parentPath = if (lastSlash != -1) filePath.substring(0, lastSlash) else ""
+                    if (parentPath.isNotEmpty()) {
+                        if (checkFolderExists(parentPath)) {
+                            return@withContext null
+                        } else {
+                            throw Exception("云端同步目录 [${parentPath}] 不存在，请先在坚果云中手动创建该文件夹。")
+                        }
+                    } else {
+                        return@withContext null
+                    }
                 } else {
                     throw Exception("HTTP ${response.code}: ${response.message} (请求地址: $url)")
                 }
             }
         } catch (e: Exception) {
+            if (e.message?.contains("云端同步目录") == true) {
+                throw e
+            }
             throw Exception("网络请求异常: ${e.message}")
         }
     }
+
 
     /**
      * 上传文件内容到 WebDAV
