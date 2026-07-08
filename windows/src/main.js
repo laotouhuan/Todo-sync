@@ -1048,24 +1048,31 @@ function renderEditSubtasks() {
             listEl._sortableInstance.destroy();
             listEl._sortableInstance = null;
         }
-        if (currentEditingSubtasks.length > 0) {
+        if (currentEditingSubtasks.length > 1) {
             listEl._sortableInstance = new Sortable(listEl, {
                 animation: 150,
+                delay: 300,
+                delayOnTouchOnly: false,
+                forceFallback: true,
+                fallbackClass: 'drag-fallback',
+                fallbackOnBody: true,
+                fallbackTolerance: 5,
                 ghostClass: 'drag-over',
                 chosenClass: 'drag-chosen',
                 dragClass: 'drag-active',
-                filter: '.subtask-checkbox, .subtask-inline-edit, .subtask-actions',
+                scroll: listEl,
+                scrollSensitivity: 50,
+                scrollSpeed: 12,
+                filter: '.subtask-checkbox, .subtask-inline-edit, .subtask-actions, .icon-btn-small',
                 preventOnFilter: false,
                 onEnd: function(evt) {
-                    const items = Array.from(listEl.querySelectorAll('li'));
-                    const newSubtasks = [];
-                    items.forEach(el => {
-                        const idx = parseInt(el.dataset.index);
-                        newSubtasks.push(currentEditingSubtasks[idx]);
-                    });
-                    currentEditingSubtasks = newSubtasks;
-                    renderEditSubtasks();
-                    autoSaveEdit();
+                    const { oldIndex, newIndex } = evt;
+                    if (oldIndex !== newIndex && oldIndex != null && newIndex != null) {
+                        const moved = currentEditingSubtasks.splice(oldIndex, 1)[0];
+                        currentEditingSubtasks.splice(newIndex, 0, moved);
+                        renderEditSubtasks();
+                        autoSaveEdit();
+                    }
                 }
             });
         }
