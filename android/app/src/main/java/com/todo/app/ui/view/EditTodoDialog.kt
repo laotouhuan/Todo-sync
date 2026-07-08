@@ -53,13 +53,13 @@ import com.todo.app.data.model.getThisMonthDates
 import com.todo.app.data.model.TaskType
 import com.todo.app.data.model.RecurringType
 import java.util.UUID
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
+import java.util.Collections
 import org.burnoutcrew.reorderable.rememberReorderableLazyListState
 import org.burnoutcrew.reorderable.reorderable
 import org.burnoutcrew.reorderable.ReorderableItem
 import org.burnoutcrew.reorderable.detectReorderAfterLongPress
-import java.util.Collections
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -345,7 +345,7 @@ fun EditTodoDialog(
                         onDismissRequest = { showCopyDialog = false },
                         title = { Text("复制子步骤") },
                         text = {
-                            Column {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.clickable { copyOnlyUncompleted = !copyOnlyUncompleted }.padding(bottom = 8.dp)
@@ -357,41 +357,31 @@ fun EditTodoDialog(
                                     Text("仅复制未完成项")
                                 }
                                 Text("选择复制格式：")
+                                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(onClick = {
+                                            val filtered = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
+                                            copyToClipboard(context, filtered.joinToString("\n") { it.content })
+                                            showCopyDialog = false
+                                        }, modifier = Modifier.weight(1f)) { Text("纯文本") }
+                                        Button(onClick = {
+                                            val filtered = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
+                                            copyToClipboard(context, filtered.joinToString("\n") { "- ${it.content}" })
+                                            showCopyDialog = false
+                                        }, modifier = Modifier.weight(1f)) { Text("无序") }
+                                    }
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(onClick = {
+                                            val filtered = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
+                                            copyToClipboard(context, filtered.mapIndexed { i, s -> "${i + 1}. ${s.content}" }.joinToString("\n"))
+                                            showCopyDialog = false
+                                        }, modifier = Modifier.weight(1f)) { Text("有序") }
+                                        OutlinedButton(onClick = { showCopyDialog = false }, modifier = Modifier.weight(1f)) { Text("取消") }
+                                    }
+                                }
                             }
                         },
-                        confirmButton = {},
-                        dismissButton = {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                TextButton(onClick = { showCopyDialog = false }) { Text("取消", color = Color.Gray) }
-                                TextButton(onClick = {
-                                    val filtered = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
-                                    copyToClipboard(context, filtered.joinToString("\n") { it.content })
-                                    showCopyDialog = false
-                                }) { Text("文本") }
-                                TextButton(onClick = {
-                            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = {
-                                        val filtered = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
-                                        copyToClipboard(context, filtered.joinToString("\n") { it.content })
-                                        showCopyDialog = false
-                                    }, modifier = Modifier.weight(1f)) { Text("纯文本") }
-                                    Button(onClick = {
-                                        val filtered = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
-                                        copyToClipboard(context, filtered.joinToString("\n") { "- ${it.content}" })
-                                        showCopyDialog = false
-                                    }, modifier = Modifier.weight(1f)) { Text("无序") }
-                                }
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = {
-                                        val filtered = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
-                                        copyToClipboard(context, filtered.mapIndexed { i, s -> "${i + 1}. ${s.content}" }.joinToString("\n"))
-                                        showCopyDialog = false
-                                    }, modifier = Modifier.weight(1f)) { Text("有序") }
-                                    OutlinedButton(onClick = { showCopyDialog = false }, modifier = Modifier.weight(1f)) { Text("取消") }
-                                }
-                            }
-                        }
+                        confirmButton = {}
                     )
                 }
 
