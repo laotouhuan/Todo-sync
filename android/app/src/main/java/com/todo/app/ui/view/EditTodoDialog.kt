@@ -53,7 +53,6 @@ import com.todo.app.data.model.getThisMonthDates
 import com.todo.app.data.model.TaskType
 import com.todo.app.data.model.RecurringType
 import java.util.UUID
-import java.util.Collections
 import org.burnoutcrew.reorderable.rememberReorderableLazyListState
 import org.burnoutcrew.reorderable.reorderable
 import org.burnoutcrew.reorderable.ReorderableItem
@@ -401,9 +400,9 @@ fun EditTodoDialog(
                 
                 val reorderState = rememberReorderableLazyListState(
                     onMove = { from, to ->
-                        val newSubtasks = subtasks.toMutableList()
-                        Collections.swap(newSubtasks, from.index, to.index)
-                        subtasks = newSubtasks
+                        subtasks = subtasks.toMutableList().apply {
+                            add(to.index, removeAt(from.index))
+                        }
                     },
                     onDragEnd = { startIndex, endIndex ->
                         if (startIndex != endIndex) performAutoSave()
@@ -417,7 +416,11 @@ fun EditTodoDialog(
                     items(subtasks, key = { it.id }) { sub ->
                         ReorderableItem(reorderState, key = sub.id) { isDragging ->
                             val elevation = if (isDragging) 4.dp else 0.dp
-                            Surface(shadowElevation = elevation, color = if (isDragging) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent) {
+                            Surface(
+                                shadowElevation = elevation,
+                                color = if (isDragging) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
+                                modifier = Modifier.animateItemPlacement()
+                            ) {
                                 val dragModifier = if (editingSubtaskId != sub.id) {
                                     Modifier.detectReorderAfterLongPress(reorderState)
                                 } else {
