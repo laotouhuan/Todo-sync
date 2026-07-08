@@ -221,3 +221,63 @@ export function getLastMonthString(date = new Date()) {
     }
     return `${year}-${String(month).padStart(2, '0')}`;
 }
+
+// ====== Stats Helpers ======
+
+/**
+ * Categorize completed task by local time.
+ * @param {string} isoTimestamp 
+ * @returns {string} 'morning' | 'afternoon' | 'evening' | 'night' | 'unknown'
+ */
+export function categorizeByTimeSlot(isoTimestamp) {
+    if (!isoTimestamp) return 'unknown';
+    try {
+        const date = new Date(isoTimestamp);
+        if (isNaN(date.getTime())) return 'unknown';
+        const hours = date.getHours();
+        if (hours >= 6 && hours < 12) return 'morning';      // 6-11
+        if (hours >= 12 && hours < 18) return 'afternoon';   // 12-17
+        if (hours >= 18 && hours < 24) return 'evening';     // 18-23
+        return 'night';                                      // 0-5
+    } catch (e) {
+        return 'unknown';
+    }
+}
+
+/**
+ * Calculate the number of days a task has existed.
+ * @param {string} createdAt ISO timestamp
+ * @param {Date|string} [now] Current date reference
+ * @returns {number} Age in days, or -1 if createdAt is invalid
+ */
+export function calcTaskAgeDays(createdAt, now = new Date()) {
+    if (!createdAt) return -1;
+    try {
+        const createdMs = new Date(createdAt).getTime();
+        const nowMs = new Date(now).getTime();
+        if (isNaN(createdMs) || isNaN(nowMs)) return -1;
+        const diff = nowMs - createdMs;
+        if (diff < 0) return 0;
+        return Math.floor(diff / 86400000);
+    } catch (e) {
+        return -1;
+    }
+}
+
+/**
+ * Get health grade based on average age of incomplete tasks.
+ * @param {number} avgAgeDays 
+ * @returns {object} { grade: 'A'|'B'|'C', text: string, color: string }
+ */
+export function getHealthGrade(avgAgeDays) {
+    if (isNaN(avgAgeDays) || avgAgeDays <= 0) {
+        return { grade: 'A', text: '清单已清空，太棒了！', color: '#22c55e' };
+    }
+    if (avgAgeDays < 3) {
+        return { grade: 'A', text: '你的清单代谢非常健康！', color: '#22c55e' };
+    }
+    if (avgAgeDays < 7) {
+        return { grade: 'B', text: '清单状态良好，继续保持', color: '#f59e0b' };
+    }
+    return { grade: 'C', text: '清单有些积压，试试清理一下？', color: '#ef4444' };
+}

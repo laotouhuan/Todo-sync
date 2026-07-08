@@ -1,8 +1,11 @@
 package com.todo.app.ui.view
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -10,74 +13,118 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.todo.app.ui.viewmodel.TodoViewModel
 import com.todo.app.data.model.Todo
 import com.todo.app.data.model.TodoComparator
+import com.todo.app.data.model.calcTaskAgeDays
+import com.todo.app.data.model.categorizeByTimeSlot
+import com.todo.app.data.model.getHealthGrade
 import com.todo.app.data.model.isOverdue
-import com.todo.app.data.model.weekStringOf
 import com.todo.app.data.model.monthStringOf
+import com.todo.app.data.model.nowIso
+import com.todo.app.data.model.weekStringOf
+import com.todo.app.ui.viewmodel.TodoViewModel
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.time.temporal.IsoFields
 import java.util.Locale
 
 @Composable
 fun StatsView(viewModel: TodoViewModel) {
+    var subTab by remember { mutableIntStateOf(0) } // 0 = Insights, 1 = Health
+    var showEditDialogFor by remember { mutableStateOf<Todo?>(null) }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        // 二级 Tab
+        TabRow(selectedTabIndex = subTab) {
+            Tab(selected = subTab == 0, onClick = { subTab = 0 }, text = { Text("效率洞察") })
+            Tab(selected = subTab == 1, onClick = { subTab = 1 }, text = { Text("清单健康") })
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        AnimatedContent(targetState = subTab, label = "statsSubTab") { currentTab ->
+            when (currentTab) {
+                0 -> InsightsContent(viewModel, onEditTodo = { showEditDialogFor = it })
+                1 -> HealthContent(viewModel)
+            }
+        }
+    }
+
+    showEditDialogFor?.let { todo ->
+        EditTodoDialog(
+            todo = todo,
+            onDismiss = { showEditDialogFor = null },
+            onAutoSave = { updated -> 
+                viewModel.updateTodo(updated)
+                showEditDialogFor = updated 
+            },
+            onDelete = {
+                viewModel.deleteTodo(todo.id)
+                showEditDialogFor = null
+            }
+        )
+    }
+}
+
+@Composable
+fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     val todos by viewModel.todos.collectAsState()
     var period by remember { mutableStateOf("day") }
     var targetDate by remember { mutableStateOf(LocalDate.now()) }
-    var filterStatus by remember { mutableStateOf("all") } // all, completed, uncompleted
-    var showEditDialogFor by remember { mutableStateOf<Todo?>(null) }
 
     val targetWeekStr = weekStringOf(targetDate)
     val targetMonthStr = monthStringOf(targetDate)
 
-    val periodTodos = when (period) {
-        "day" -> todos.filter { t ->
-            val dateStr = t.date
-            if (!dateStr.isNullOrEmpty()) {
-                dateStr == targetDate.toString()
-            } else {
-                t.completed && t.completed_at?.take(10) == targetDate.toString()
+    val periodTodos = remember(todos, period, targetDate) {
+        when (period) {
+            "day" -> todos.filter { t ->
+                val dateStr = t.date
+                if (!dateStr.isNullOrEmpty()) {
+                    dateStr == targetDate.toString()
+                } else {
+                    t.completed && t.completed_at?.take(10) == targetDate.toString()
+                }
             }
-        }
-        "week" -> todos.filter { t ->
-            val dateStr = t.date
-            if (!dateStr.isNullOrEmpty()) {
-                dateStr == targetWeekStr || (dateStr.length == 10 && dateStr.startsWith(targetWeekStr.substring(0,4)) && 
-                    LocalDate.parse(dateStr).get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) &&
-                    LocalDate.parse(dateStr).get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR))
-            } else {
-                t.completed && t.completed_at?.take(10)?.let { completedDateStr ->
-                    try {
-                        val checkDate = LocalDate.parse(completedDateStr)
-                        checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
-                        checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
-                    } catch (e: Exception) {
-                        false
-                    }
-                } ?: false
+            "week" -> todos.filter { t ->
+                val dateStr = t.date
+                if (!dateStr.isNullOrEmpty()) {
+                    dateStr == targetWeekStr || (dateStr.length == 10 && dateStr.startsWith(targetWeekStr.substring(0,4)) && 
+                        LocalDate.parse(dateStr).get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) &&
+                        LocalDate.parse(dateStr).get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR))
+                } else {
+                    t.completed && t.completed_at?.take(10)?.let { completedDateStr ->
+                        try {
+                            val checkDate = LocalDate.parse(completedDateStr)
+                            checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
+                            checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
+                        } catch (e: Exception) {
+                            false
+                        }
+                    } ?: false
+                }
             }
-        }
-        else -> todos.filter { t ->
-            val dateStr = t.date
-            if (!dateStr.isNullOrEmpty()) {
-                dateStr == targetMonthStr || (dateStr.length == 10 && dateStr.startsWith(targetMonthStr))
-            } else {
-                t.completed && t.completed_at?.take(7) == targetMonthStr
+            else -> todos.filter { t ->
+                val dateStr = t.date
+                if (!dateStr.isNullOrEmpty()) {
+                    dateStr == targetMonthStr || (dateStr.length == 10 && dateStr.startsWith(targetMonthStr))
+                } else {
+                    t.completed && t.completed_at?.take(7) == targetMonthStr
+                }
             }
         }
     }
 
     var totalDouble = 0.0
     var completedDouble = 0.0
-    var overdueCount = 0
 
     periodTodos.forEach { t ->
         totalDouble += 1.0
-        
         if (t.task_type == "weekly_checkin" || t.task_type == "monthly_checkin") {
             var periodCheckinCount = 0
             t.completed_dates.forEach { dStr ->
@@ -99,7 +146,6 @@ fun StatsView(viewModel: TodoViewModel) {
                     }
                 }
             }
-
             if (t.target_count != null) {
                 completedDouble += Math.min(1.0, periodCheckinCount.toDouble() / t.target_count!!.toDouble())
             } else {
@@ -107,7 +153,6 @@ fun StatsView(viewModel: TodoViewModel) {
             }
         } else {
             if (t.completed) completedDouble += 1.0
-            if (t.isOverdue(LocalDate.now().toString())) overdueCount++
         }
     }
 
@@ -117,13 +162,12 @@ fun StatsView(viewModel: TodoViewModel) {
         return if (valDouble % 1.0 == 0.0) valDouble.toInt().toString() else String.format(Locale.US, "%.1f", valDouble)
     }
 
-    val displayTodos = when (filterStatus) {
-        "completed" -> periodTodos.filter { it.completed }
-        "uncompleted" -> periodTodos.filter { !it.completed }
-        else -> periodTodos
-    }.sortedWith(TodoComparator)
+    val displayTodos = periodTodos.sortedWith(TodoComparator)
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    val todayStr = LocalDate.now().toString()
+    val tomorrowStr = LocalDate.now().plusDays(1).toString()
+
+    Column(modifier = Modifier.fillMaxSize()) {
         // Period Tabs
         val tabIndex = when (period) { "day" -> 0; "week" -> 1; else -> 2 }
         TabRow(selectedTabIndex = tabIndex) {
@@ -132,7 +176,7 @@ fun StatsView(viewModel: TodoViewModel) {
             Tab(selected = period == "month", onClick = { period = "month" }, text = { Text("月") })
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
         // Date Nav
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -160,57 +204,116 @@ fun StatsView(viewModel: TodoViewModel) {
             }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next") }
         }
 
-        // Filter Status
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            SegmentedButton(listOf("全部", "已完成", "待完成"), when (filterStatus) {
-                "completed" -> 1
-                "uncompleted" -> 2
-                else -> 0
-            }) { idx ->
-                filterStatus = when (idx) {
-                    1 -> "completed"
-                    2 -> "uncompleted"
-                    else -> "all"
-                }
-            }
+        // 时段分布卡片
+        val completedNormalTodos = remember(periodTodos) { periodTodos.filter { it.completed && !it.completed_at.isNullOrEmpty() } }
+        var morningCount = 0
+        var afternoonCount = 0
+        var eveningCount = 0
+        var nightCount = 0
+        completedNormalTodos.forEach { t ->
+            val slot = categorizeByTimeSlot(t.completed_at)
+            if (slot == "morning") morningCount++
+            else if (slot == "afternoon") afternoonCount++
+            else if (slot == "evening") eveningCount++
+            else if (slot == "night") nightCount++
         }
-
-        Spacer(Modifier.height(16.dp))
+        val totalSlots = morningCount + afternoonCount + eveningCount + nightCount
+        val morningPct = if (totalSlots == 0) 0 else Math.round((morningCount.toDouble() / totalSlots) * 100).toInt()
+        val afternoonPct = if (totalSlots == 0) 0 else Math.round((afternoonCount.toDouble() / totalSlots) * 100).toInt()
+        val eveningPct = if (totalSlots == 0) 0 else Math.round((eveningCount.toDouble() / totalSlots) * 100).toInt()
+        val nightPct = if (totalSlots == 0) 0 else Math.round((nightCount.toDouble() / totalSlots) * 100).toInt()
 
         // Summary Bar
         ElevatedCard(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-            shape = RoundedCornerShape(16.dp),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 6.dp)
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            shape = RoundedCornerShape(12.dp)
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Text("共 ${formatVal(totalDouble)} 项，已完成 ${formatVal(completedDouble)} 项，其中逾期 $overdueCount 项", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(12.dp))
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text("共 ${formatVal(totalDouble)} 项，已完成 ${formatVal(completedDouble)} 项，进度 ${(progress * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     LinearProgressIndicator(
                         progress = { progress }, 
-                        modifier = Modifier.weight(1f).height(12.dp),
+                        modifier = Modifier.weight(1f).height(8.dp),
                         strokeCap = StrokeCap.Round,
                         color = MaterialTheme.colorScheme.primary,
                         trackColor = MaterialTheme.colorScheme.surfaceVariant
                     )
-                    Spacer(Modifier.width(16.dp))
-                    Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(12.dp))
+                    Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
+        // 时段分布卡片
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                val insightText = if (totalSlots == 0) {
+                    "☀️ 暂无已完成的任务数据"
+                } else {
+                    var maxCount = morningCount
+                    var maxSlotLabel = "清晨"
+                    var maxPct = morningPct
+                    if (afternoonCount > maxCount) {
+                        maxCount = afternoonCount
+                        maxSlotLabel = "下午"
+                        maxPct = afternoonPct
+                    }
+                    if (eveningCount > maxCount) {
+                        maxCount = eveningCount
+                        maxSlotLabel = "晚上"
+                        maxPct = eveningPct
+                    }
+                    if (nightCount > maxCount) {
+                        maxSlotLabel = "深夜" // Note: label was "深夜" in Compose code, mapped to "night"
+                        maxPct = nightPct
+                    }
+                    "☀️ 当前周期内你的高效时段在 ${maxSlotLabel}，占已完成任务的 ${maxPct}%"
+                }
+                Text(insightText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(8.dp))
+                
+                // Color bar
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(16.dp).clip(RoundedCornerShape(8.dp))
+                ) {
+                    val weightMorning = if (morningCount == 0 && totalSlots == 0) 1f else morningCount.toFloat()
+                    val weightAfternoon = if (afternoonCount == 0 && totalSlots == 0) 1f else afternoonCount.toFloat()
+                    val weightEvening = if (eveningCount == 0 && totalSlots == 0) 1f else eveningCount.toFloat()
+                    val weightNight = if (nightCount == 0 && totalSlots == 0) 1f else nightCount.toFloat()
+
+                    Box(modifier = Modifier.weight(weightMorning).fillMaxHeight().background(Color(0xFFF59E0B)))
+                    Box(modifier = Modifier.weight(weightAfternoon).fillMaxHeight().background(Color(0xFF7B61FF)))
+                    Box(modifier = Modifier.weight(weightEvening).fillMaxHeight().background(Color(0xFF6366F1)))
+                    Box(modifier = Modifier.weight(weightNight).fillMaxHeight().background(Color(0xFF3B82F6)))
+                }
+                
+                Spacer(Modifier.height(4.dp))
+                
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("清晨: $morningPct%", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("下午: $afternoonPct%", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("晚上: $eveningPct%", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("深夜: $nightPct%", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
         // List
-        val todayStr = LocalDate.now().toString()
-        val tomorrowStr = LocalDate.now().plusDays(1).toString()
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(displayTodos) { todo ->
                 TodoItemRow(
                     todo = todo,
                     viewModel = viewModel,
-                    onEdit = { showEditDialogFor = todo },
+                    onEdit = { onEditTodo(todo) },
                     onMoveToTomorrow = {
-                        viewModel.updateTodo(todo.copy(date = tomorrowStr))
+                        viewModel.updateTodo(todo.copy(date = tomorrowStr, updated_at = nowIso()))
                     },
                     todayStr = todayStr,
                     tomorrowStr = tomorrowStr
@@ -218,19 +321,283 @@ fun StatsView(viewModel: TodoViewModel) {
             }
         }
     }
+}
 
-    showEditDialogFor?.let { todo ->
-        EditTodoDialog(
-            todo = todo,
-            onDismiss = { showEditDialogFor = null },
-            onAutoSave = { updated -> 
-                viewModel.updateTodo(updated)
-                showEditDialogFor = updated 
-            },
-            onDelete = {
-                viewModel.deleteTodo(todo.id)
-                showEditDialogFor = null
+@Composable
+fun HealthContent(viewModel: TodoViewModel) {
+    val todos by viewModel.todos.collectAsState()
+    var throughputDays by remember { mutableIntStateOf(30) }
+    var expandedDropdown by remember { mutableStateOf(false) }
+
+    val activeTodos = remember(todos) { todos.filter { !it.deleted } }
+    val incompleteTodos = remember(activeTodos) { activeTodos.filter { !it.completed } }
+
+    val nowTime = OffsetDateTime.now()
+
+    // 1. Average age
+    val totalAge = incompleteTodos.sumOf { calcTaskAgeDays(it.created_at, nowTime).toDouble() }
+    val avgAge = if (incompleteTodos.isEmpty()) 0.0 else totalAge / incompleteTodos.size
+
+    // 2. Health Grade
+    val healthGrade = getHealthGrade(avgAge)
+
+    // 3. Throughput calculation
+    val thresholdDate = nowTime.minusDays(throughputDays.toLong())
+    var addedCount = 0
+    var completedCount = 0
+    
+    activeTodos.forEach { t ->
+        val createdDateTime = try {
+            OffsetDateTime.parse(t.created_at)
+        } catch (e: Exception) {
+            try { OffsetDateTime.ofInstant(java.time.Instant.parse(t.created_at), java.time.ZoneId.systemDefault()) } catch (ex: Exception) { null }
+        }
+        if (createdDateTime != null && createdDateTime.isAfter(thresholdDate)) {
+            addedCount++
+        }
+
+        if (t.completed && !t.completed_at.isNullOrEmpty()) {
+            val completedDateTime = try {
+                OffsetDateTime.parse(t.completed_at)
+            } catch (e: Exception) {
+                try { OffsetDateTime.ofInstant(java.time.Instant.parse(t.completed_at), java.time.ZoneId.systemDefault()) } catch (ex: Exception) { null }
             }
-        )
+            if (completedDateTime != null && completedDateTime.isAfter(thresholdDate)) {
+                completedCount++
+            }
+        } else if (t.task_type == "weekly_checkin" || t.task_type == "monthly_checkin") {
+            t.completed_dates.forEach { dStr ->
+                try {
+                    val checkDate = LocalDate.parse(dStr).atStartOfDay(java.time.ZoneId.systemDefault()).toOffsetDateTime()
+                    if (checkDate.isAfter(thresholdDate)) {
+                        completedCount++
+                    }
+                } catch (e: Exception) {}
+            }
+        }
+    }
+
+    // 4. Sleeping tasks (survived >= 7 days)
+    val sleepingTodos = incompleteTodos.filter {
+        calcTaskAgeDays(it.created_at, nowTime) >= 7
+    }.sortedByDescending {
+        calcTaskAgeDays(it.created_at, nowTime)
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Health Grade Card
+        item {
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text("清单健康度", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = healthGrade.first,
+                        style = MaterialTheme.typography.displayMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(healthGrade.third)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "“${healthGrade.second}”",
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        // Metabolism (Throughput) Card
+        item {
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("新陈代谢", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Box {
+                            TextButton(onClick = { expandedDropdown = true }) {
+                                Text("最近 $throughputDays 天 ▾")
+                            }
+                            DropdownMenu(
+                                expanded = expandedDropdown,
+                                onDismissRequest = { expandedDropdown = false }
+                            ) {
+                                listOf(7, 14, 30, 60, 90).forEach { days ->
+                                    DropdownMenuItem(
+                                        text = { Text("最近 $days 天") },
+                                        onClick = {
+                                            throughputDays = days
+                                            expandedDropdown = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("新增 $addedCount 项", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("消灭 $completedCount 项", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp))
+                    ) {
+                        val totalThroughput = addedCount + completedCount
+                        val addedWeight = if (totalThroughput == 0) 1f else addedCount.toFloat()
+                        val completedWeight = if (totalThroughput == 0) 1f else completedCount.toFloat()
+
+                        Box(modifier = Modifier.weight(addedWeight).fillMaxHeight().background(Color(0xFF3B82F6)))
+                        Box(modifier = Modifier.weight(completedWeight).fillMaxHeight().background(Color(0xFF10B981)))
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    val verdict = when {
+                        completedCount > addedCount -> "清单正在变轻盈 ✨"
+                        completedCount == addedCount -> "收支平衡，保持节奏"
+                        else -> "任务在积压，试试清理一下？"
+                    }
+                    Text(
+                        text = verdict,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+
+        // Metrics Row
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                ElevatedCard(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("⏱️", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(4.dp))
+                        Text(String.format(Locale.US, "%.1f 天", avgAge), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(2.dp))
+                        Text("平均任务寿命", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
+                ElevatedCard(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("💤", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(4.dp))
+                        Text("${sleepingTodos.size} 项", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(2.dp))
+                        Text("沉睡任务", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+
+        // Sleeping list section header
+        item {
+            Text(
+                text = "💤 沉睡待办清理 (超过7天未完成)",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+
+        if (sleepingTodos.isEmpty()) {
+            item {
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
+                ) {
+                    Text(
+                        text = "所有任务都在健康流转中，继续保持！",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        } else {
+            items(sleepingTodos, key = { it.id }) { todo ->
+                val age = calcTaskAgeDays(todo.created_at, nowTime)
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(todo.content, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            Text("已存活 $age 天", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(
+                                onClick = {
+                                    val tomorrowStr = LocalDate.now().plusDays(1).toString()
+                                    viewModel.updateTodo(todo.copy(date = tomorrowStr, updated_at = nowIso()))
+                                },
+                                colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF7B61FF))
+                            ) {
+                                Text("延期")
+                            }
+
+                            TextButton(
+                                onClick = {
+                                    viewModel.deleteTodo(todo.id)
+                                },
+                                colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFEF4444))
+                            ) {
+                                Text("删除")
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

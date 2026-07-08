@@ -15,7 +15,8 @@ import {
     getTodayString, getTomorrowString, getThisWeekString,
     getThisMonthString, getLastWeekString, getLastMonthString,
     isWeekDate, isMonthDate, isOverdue, getDateLabel, getCompletionStatusLabel,
-    sortFunc, parseInputSyntax, createTodo, groupTodosByDate
+    sortFunc, parseInputSyntax, createTodo, groupTodosByDate,
+    categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade
 } from '../src/dateUtils.js';
 
 // ====== formatDate ======
@@ -389,5 +390,95 @@ describe('groupTodosByDate', () => {
         assert.equal(groups.monthGroup.length, 0);
         assert.equal(groups.pastGroup.length, 2); // 2026-W25 and 2026-05
         assert.equal(groups.futureGroup.length, 2); // 2026-W27 and 2026-07
+    });
+});
+
+// ====== Stats Helpers ======
+describe('categorizeByTimeSlot', () => {
+    it('清晨 6-12', () => {
+        assert.equal(categorizeByTimeSlot('2026-07-08T06:00:00'), 'morning');
+        assert.equal(categorizeByTimeSlot('2026-07-08T11:59:59'), 'morning');
+    });
+
+    it('下午 12-18', () => {
+        assert.equal(categorizeByTimeSlot('2026-07-08T12:00:00'), 'afternoon');
+        assert.equal(categorizeByTimeSlot('2026-07-08T17:59:59'), 'afternoon');
+    });
+
+    it('晚上 18-24', () => {
+        assert.equal(categorizeByTimeSlot('2026-07-08T18:00:00'), 'evening');
+        assert.equal(categorizeByTimeSlot('2026-07-08T23:59:59'), 'evening');
+    });
+
+    it('深夜 0-6', () => {
+        assert.equal(categorizeByTimeSlot('2026-07-08T00:00:00'), 'night');
+        assert.equal(categorizeByTimeSlot('2026-07-08T05:59:59'), 'night');
+    });
+
+    it('无效/空值输入返回 unknown', () => {
+        assert.equal(categorizeByTimeSlot(null), 'unknown');
+        assert.equal(categorizeByTimeSlot(''), 'unknown');
+        assert.equal(categorizeByTimeSlot('invalid-date'), 'unknown');
+    });
+});
+
+describe('calcTaskAgeDays', () => {
+    it('当天创建为 0 天', () => {
+        const created = '2026-07-08T12:00:00Z';
+        const now = '2026-07-08T23:00:00Z';
+        assert.equal(calcTaskAgeDays(created, now), 0);
+    });
+
+    it('3天前创建为 3 天', () => {
+        const created = '2026-07-05T12:00:00Z';
+        const now = '2026-07-08T15:00:00Z';
+        assert.equal(calcTaskAgeDays(created, now), 3);
+    });
+
+    it('跨月计算', () => {
+        const created = '2026-06-30T12:00:00Z';
+        const now = '2026-07-08T15:00:00Z';
+        assert.equal(calcTaskAgeDays(created, now), 8);
+    });
+
+    it('无效输入返回 -1', () => {
+        assert.equal(calcTaskAgeDays(null), -1);
+        assert.equal(calcTaskAgeDays('invalid'), -1);
+    });
+});
+
+describe('getHealthGrade', () => {
+    it('平均寿命 < 3 天为 A', () => {
+        const result = getHealthGrade(1.5);
+        assert.equal(result.grade, 'A');
+        assert.equal(result.color, '#22c55e');
+    });
+
+    it('平均寿命 = 2.99 天为 A', () => {
+        const result = getHealthGrade(2.99);
+        assert.equal(result.grade, 'A');
+    });
+
+    it('平均寿命 = 3.0 天为 B', () => {
+        const result = getHealthGrade(3.0);
+        assert.equal(result.grade, 'B');
+        assert.equal(result.color, '#f59e0b');
+    });
+
+    it('平均寿命 = 6.99 天为 B', () => {
+        const result = getHealthGrade(6.99);
+        assert.equal(result.grade, 'B');
+    });
+
+    it('平均寿命 >= 7 天为 C', () => {
+        const result = getHealthGrade(7.0);
+        assert.equal(result.grade, 'C');
+        assert.equal(result.color, '#ef4444');
+    });
+
+    it('空清单/NaN/小于等于0返回 A', () => {
+        assert.equal(getHealthGrade(0).grade, 'A');
+        assert.equal(getHealthGrade(NaN).grade, 'A');
+        assert.equal(getHealthGrade(-1).grade, 'A');
     });
 });

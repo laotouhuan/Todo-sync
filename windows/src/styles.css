@@ -1272,6 +1272,386 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   border-radius: 3px;
 }
 
+/* Sub Tabs Navigation */
+.stats-sub-tabs {
+  margin-bottom: 12px;
+  display: flex;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 2px;
+  border: 1px solid var(--glass-border);
+}
+
+.stats-sub-tabs .tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.stats-sub-tabs .tab-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.stats-sub-tabs .tab-btn.active {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* Containers for Sub-views */
+#stats-insights {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+#stats-health {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow-y: auto;
+  gap: 14px;
+  padding-right: 6px;
+}
+
+#stats-health::-webkit-scrollbar {
+  width: 6px;
+}
+
+#stats-health::-webkit-scrollbar-thumb {
+  background: var(--glass-border);
+  border-radius: 3px;
+}
+
+/* Time Distribution Styles */
+.time-distribution-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.time-insight-text {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+.time-bar {
+  display: flex;
+  height: 20px;
+  border-radius: 6px;
+  overflow: hidden;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.time-bar-segment {
+  height: 100%;
+  transition: flex 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 4px;
+}
+
+.segment-morning {
+  background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+}
+
+.segment-afternoon {
+  background: linear-gradient(135deg, #7b61ff 0%, #b3a3ff 100%);
+}
+
+.segment-evening {
+  background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+}
+
+.segment-night {
+  background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+}
+
+.time-bar-labels {
+  display: flex;
+  margin-top: 2px;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.time-bar-label {
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Health Grade Styles */
+.health-grade-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.health-grade-title {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.health-grade-letter {
+  font-size: 2.5rem;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+  transition: color 0.3s ease;
+}
+
+.health-grade-text {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 10px;
+  font-weight: 500;
+}
+
+/* Throughput (Metabolism) Card */
+.throughput-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.throughput-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.throughput-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.throughput-select {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  padding: 3px 8px;
+  outline: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.throughput-select:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.throughput-select option {
+  background: #1e1e24;
+  color: var(--text-primary);
+}
+
+.throughput-numbers {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.throughput-bar {
+  display: flex;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  overflow: hidden;
+  gap: 2px;
+}
+
+.throughput-bar-added {
+  background: linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%);
+  height: 100%;
+  transition: flex 0.4s ease;
+}
+
+.throughput-bar-completed {
+  background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
+  height: 100%;
+  transition: flex 0.4s ease;
+}
+
+.throughput-verdict {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-align: center;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+/* Metrics Row (Avg Age + Sleeping Tasks) */
+.metrics-row {
+  display: flex;
+  gap: 12px;
+}
+
+.metric-card {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 4px;
+}
+
+.metric-icon {
+  font-size: 1.2rem;
+  margin-bottom: 2px;
+}
+
+.metric-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.metric-label {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* Sleeping Tasks Section */
+.sleeping-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.sleeping-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+
+.sleeping-empty {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 24px;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+#sleeping-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sleeping-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  gap: 12px;
+  transition: all 0.2s ease;
+}
+
+.sleeping-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sleeping-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.sleeping-item-info span:first-child {
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sleeping-item-info span:last-child {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.sleeping-item-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.sleeping-action-btn {
+  border: none;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.btn-postpone {
+  background: rgba(123, 97, 255, 0.15);
+  color: #b3a3ff;
+}
+
+.btn-postpone:hover {
+  background: rgba(123, 97, 255, 0.3);
+}
+
+.btn-delete {
+  background: rgba(255, 77, 79, 0.15);
+  color: #ff7875;
+}
+
+.btn-delete:hover {
+  background: rgba(255, 77, 79, 0.3);
+}
+
 /* Subtasks Modal Styling */
 .subtasks-container {
   background: var(--bg-secondary);
