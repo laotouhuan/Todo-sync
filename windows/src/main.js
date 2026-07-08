@@ -2109,15 +2109,9 @@ window.addEventListener("DOMContentLoaded", () => {
 
                     if (userConfirmed) {
                         try {
-                            // 尝试 payload 是 path
-                            await invoke('plugin:opener|open', { path: release.html_url });
+                            await invoke('plugin:opener|open_url', { url: release.html_url });
                         } catch (openErr) {
-                            try {
-                                // 尝试 payload 是 url (Tauri v1/v2 变动兼容)
-                                await invoke('plugin:opener|open', { url: release.html_url });
-                            } catch (openErr2) {
-                                throw new Error(`系统浏览器拉起失败 (plugin:opener|open)。\n原始报错: ${String(openErr)}\n\n请手动访问此链接下载最新版: \n${release.html_url}`);
-                            }
+                            throw new Error(`系统浏览器拉起失败 (plugin:opener|open_url)。\n原始报错: ${String(openErr)}\n\n请手动访问此链接下载最新版: \n${release.html_url}`);
                         }
                     }
                 } else {
