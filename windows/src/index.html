@@ -78,34 +78,113 @@
 
     <!-- Stats Container -->
     <div id="stats-container" class="hidden">
-      <div class="stats-header">
-        <div class="tabs-container stats-period-tabs">
-          <button class="tab-btn active" id="stats-period-day" data-period="day">日</button>
-          <button class="tab-btn" id="stats-period-week" data-period="week">周</button>
-          <button class="tab-btn" id="stats-period-month" data-period="month">月</button>
+      <!-- 二级导航 Tab -->
+      <div class="tabs-container stats-sub-tabs" style="margin-bottom: 12px; width: 100%;">
+        <button class="tab-btn active" data-subtab="insights" style="flex: 1;">效率洞察</button>
+        <button class="tab-btn" data-subtab="health" style="flex: 1;">清单健康</button>
+      </div>
+
+      <!-- 效率洞察容器 -->
+      <div id="stats-insights">
+        <div class="stats-header">
+          <div class="tabs-container stats-period-tabs">
+            <button class="tab-btn active" id="stats-period-day" data-period="day">日</button>
+            <button class="tab-btn" id="stats-period-week" data-period="week">周</button>
+            <button class="tab-btn" id="stats-period-month" data-period="month">月</button>
+          </div>
+          <div class="stats-date-nav">
+            <button id="stats-prev-btn" class="icon-btn-small">
+              <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span id="stats-date-label">2026年 第22周</span>
+            <button id="stats-next-btn" class="icon-btn-small">
+              <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
         </div>
-        <div class="stats-date-nav">
-          <button id="stats-prev-btn" class="icon-btn-small">
-            <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-          <span id="stats-date-label">2026年 第22周</span>
-          <button id="stats-next-btn" class="icon-btn-small">
-            <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
+
+        <div class="stats-summary-bar">
+          <div class="stats-summary-text" id="stats-summary-text">共 0 项任务，已完成 0 项，进度 0%</div>
+          <div class="stats-progress-track">
+            <div class="stats-progress-fill" id="stats-progress-fill" style="width: 0%;"></div>
+          </div>
         </div>
-        <div class="stats-filter-container">
-          <button class="pill-btn stats-filter-btn active" data-filter="all">全部</button>
-          <button class="pill-btn stats-filter-btn" data-filter="completed">已完成</button>
-          <button class="pill-btn stats-filter-btn" data-filter="uncompleted">待完成</button>
+
+        <!-- 时段分布卡片 -->
+        <div class="time-distribution-card" id="time-distribution">
+          <div class="time-insight-text" id="time-insight-text">☀️ 暂无已完成的任务数据</div>
+          <div class="time-bar" id="time-bar">
+            <div class="time-bar-segment segment-morning" style="flex: 1;" title="清晨 6-12"></div>
+            <div class="time-bar-segment segment-afternoon" style="flex: 1;" title="下午 12-18"></div>
+            <div class="time-bar-segment segment-evening" style="flex: 1;" title="晚上 18-24"></div>
+            <div class="time-bar-segment segment-night" style="flex: 1;" title="深夜 0-6"></div>
+          </div>
+          <div class="time-bar-labels">
+            <div class="time-bar-label" id="label-morning" style="flex: 1;">清晨: -</div>
+            <div class="time-bar-label" id="label-afternoon" style="flex: 1;">下午: -</div>
+            <div class="time-bar-label" id="label-evening" style="flex: 1;">晚上: -</div>
+            <div class="time-bar-label" id="label-night" style="flex: 1;">深夜: -</div>
+          </div>
+        </div>
+
+        <ul id="stats-list"></ul>
+      </div>
+
+      <!-- 清单健康容器 -->
+      <div id="stats-health" class="hidden">
+        <!-- 清单健康度评分 -->
+        <div class="health-grade-card">
+          <div class="health-grade-title">清单健康度</div>
+          <div class="health-grade-letter" id="health-grade-letter">A</div>
+          <div class="health-grade-text" id="health-grade-text">“你的清单代谢非常健康！”</div>
+        </div>
+
+        <!-- 新陈代谢 (吞吐量卡片) -->
+        <div class="throughput-card">
+          <div class="throughput-header">
+            <span class="throughput-title">新陈代谢</span>
+            <select id="throughput-period-select" class="throughput-select">
+              <option value="7">最近 7 天</option>
+              <option value="14">最近 14 天</option>
+              <option value="30" selected>最近 30 天</option>
+              <option value="60">最近 60 天</option>
+              <option value="90">最近 90 天</option>
+            </select>
+          </div>
+          <div class="throughput-numbers">
+            <span style="font-size: 0.75rem; color: var(--text-secondary);">新增 <strong id="throughput-added" style="color: var(--text-primary);">0</strong> 项</span>
+            <span style="font-size: 0.75rem; color: var(--text-secondary);">消灭 <strong id="throughput-completed" style="color: var(--text-primary);">0</strong> 项</span>
+          </div>
+          <div class="throughput-bar">
+            <div id="throughput-bar-added" class="throughput-bar-added" style="flex: 1;"></div>
+            <div id="throughput-bar-completed" class="throughput-bar-completed" style="flex: 1;"></div>
+          </div>
+          <div id="throughput-verdict" class="throughput-verdict">清单正在变轻盈 ✨</div>
+        </div>
+
+        <!-- 平均寿命 + 沉睡数量 -->
+        <div class="metrics-row">
+          <div class="metric-card">
+            <div class="metric-icon">⏱️</div>
+            <div class="metric-value" id="metric-avg-age">0.0 天</div>
+            <div class="metric-label">平均任务寿命</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon">💤</div>
+            <div class="metric-value" id="metric-sleeping-count">0 项</div>
+            <div class="metric-label">沉睡任务</div>
+          </div>
+        </div>
+
+        <!-- 沉睡待办清理 -->
+        <div class="sleeping-section">
+          <div class="sleeping-title">💤 沉睡待办清理 (超过7天未完成)</div>
+          <div class="sleeping-empty" id="sleeping-empty" style="display: none;">
+            所有任务都在健康流转中，继续保持！
+          </div>
+          <div id="sleeping-list"></div>
         </div>
       </div>
-      <div class="stats-summary-bar">
-        <div class="stats-summary-text" id="stats-summary-text">共 0 项任务，已完成 0 项，进度 0%</div>
-        <div class="stats-progress-track">
-          <div class="stats-progress-fill" id="stats-progress-fill" style="width: 0%;"></div>
-        </div>
-      </div>
-      <ul id="stats-list"></ul>
     </div>
 
     <!-- Add Input -->

@@ -401,3 +401,74 @@ fun classifyForTodayFocus(todos: List<Todo>, todayStr: String, thisWeekStr: Stri
     )
 }
 
+// ====== Stats Helpers ======
+
+/**
+ * Categorize completed task by local time.
+ * @param isoTimestamp ISO 8601 timestamp string
+ * @returns 'morning' | 'afternoon' | 'evening' | 'night' | 'unknown'
+ */
+fun categorizeByTimeSlot(isoTimestamp: String?): String {
+    if (isoTimestamp.isNullOrEmpty()) return "unknown"
+    return try {
+        val odt = OffsetDateTime.parse(isoTimestamp)
+        val hours = odt.toLocalTime().hour
+        when {
+            hours in 6..11 -> "morning"
+            hours in 12..17 -> "afternoon"
+            hours in 18..23 -> "evening"
+            else -> "night"
+        }
+    } catch (e: Exception) {
+        try {
+            val instant = Instant.parse(isoTimestamp)
+            val odt = OffsetDateTime.ofInstant(instant, java.time.ZoneId.systemDefault())
+            val hours = odt.toLocalTime().hour
+            when {
+                hours in 6..11 -> "morning"
+                hours in 12..17 -> "afternoon"
+                hours in 18..23 -> "evening"
+                else -> "night"
+            }
+        } catch (e2: Exception) {
+            "unknown"
+        }
+    }
+}
+
+/**
+ * Calculate the number of days a task has existed.
+ * @param createdAt ISO timestamp
+ * @param now Current date reference
+ * @returns Age in days, or -1 if invalid
+ */
+fun calcTaskAgeDays(createdAt: String?, now: OffsetDateTime = OffsetDateTime.now()): Long {
+    if (createdAt.isNullOrEmpty()) return -1
+    return try {
+        val createdDateTime = try {
+            OffsetDateTime.parse(createdAt)
+        } catch (e: Exception) {
+            OffsetDateTime.ofInstant(Instant.parse(createdAt), java.time.ZoneId.systemDefault())
+        }
+        val duration = java.time.Duration.between(createdDateTime, now)
+        val days = duration.toDays()
+        if (days < 0) 0 else days
+    } catch (e: Exception) {
+        -1
+    }
+}
+
+/**
+ * Get health grade based on average age of incomplete tasks.
+ * @param avgAgeDays Average age in days
+ * @returns Triple(grade, text, color)
+ */
+fun getHealthGrade(avgAgeDays: Double): Triple<String, String, Long> {
+    return when {
+        avgAgeDays.isNaN() || avgAgeDays <= 0.0 -> Triple("A", "清单已清空，太棒了！", 0xFF22C55E)
+        avgAgeDays < 3.0 -> Triple("A", "你的清单代谢非常健康！", 0xFF22C55E)
+        avgAgeDays < 7.0 -> Triple("B", "清单状态良好，继续保持", 0xFFF59E0B)
+        else -> Triple("C", "清单有些积压，试试清理一下？", 0xFFEF4444)
+    }
+}
+

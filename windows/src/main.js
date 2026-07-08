@@ -3,7 +3,8 @@ import {
     getTodayString, getTomorrowString, getThisWeekString, getLastWeekString,
     getThisMonthString, getLastMonthString,
     isWeekDate, isMonthDate, isOverdue, getDateLabel, getCompletionStatusLabel,
-    sortFunc, parseInputSyntax, createTodo, groupTodosByDate
+    sortFunc, parseInputSyntax, createTodo, groupTodosByDate,
+    categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade
 } from './dateUtils.js';
 
 const { invoke } = window.__TAURI__.core;
@@ -23,6 +24,8 @@ let isPinned = false;
 let statsPeriod = 'day'; // 'day' | 'week' | 'month'
 let statsStatus = 'all'; // 'all' | 'completed' | 'uncompleted'
 let statsTargetDate = new Date();
+let statsSubTab = 'insights'; // 'insights' | 'health'
+let healthThroughputDays = 30; // 吞吐量统计天数，默认30天
 let todayCollapsed = false;
 let weekCollapsed = true;
 let monthCollapsed = true;
@@ -1264,7 +1267,23 @@ function closeEditModal() {
 }
 
 // ====== Render Stats ======
+// ====== Render Stats ======
 function renderStats(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
+    const insightsEl = document.getElementById('stats-insights');
+    const healthEl = document.getElementById('stats-health');
+
+    if (statsSubTab === 'insights') {
+        if (insightsEl) insightsEl.classList.remove('hidden');
+        if (healthEl) healthEl.classList.add('hidden');
+        renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr);
+    } else {
+        if (healthEl) healthEl.classList.remove('hidden');
+        if (insightsEl) insightsEl.classList.add('hidden');
+        renderHealth(todayStr, tomorrowStr);
+    }
+}
+
+function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     const statsList = document.getElementById('stats-list');
     statsList.innerHTML = '';
 
@@ -1323,7 +1342,6 @@ function renderStats(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
 
     let totalCountSum = 0;
     let completedCountSum = 0;
-    let overdueCount = 0;
 
     periodTodos.forEach(t => {
         totalCountSum += 1.0;
@@ -1351,19 +1369,70 @@ function renderStats(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
             }
         } else {
             if (t.completed) completedCountSum += 1.0;
-            if (isOverdue(t, todayStr)) overdueCount++;
         }
     });
 
     const formatVal = val => val % 1 === 0 ? val : val.toFixed(1);
     const progress = totalCountSum === 0 ? 0 : Math.round((completedCountSum / totalCountSum) * 100);
 
-    document.getElementById('stats-summary-text').textContent = `共 ${formatVal(totalCountSum)} 项，已完成 ${formatVal(completedCountSum)} 项，其中逾期 ${overdueCount} 项`;
+    document.getElementById('stats-summary-text').textContent = `共 ${formatVal(totalCountSum)} 项，已完成 ${formatVal(completedCountSum)} 项，进度 ${progress}%`;
     document.getElementById('stats-progress-fill').style.width = `${progress}%`;
 
+    // 时段分布渲染
+    const completedNormalTodos = periodTodos.filter(t => t.completed && t.completed_at);
+    let morningCount = 0, afternoonCount = 0, eveningCount = 0, nightCount = 0;
+    completedNormalTodos.forEach(t => {
+        const slot = categorizeByTimeSlot(t.completed_at);
+        if (slot === 'morning') morningCount++;
+        else if (slot === 'afternoon') afternoonCount++;
+        else if (slot === 'evening') eveningCount++;
+        else if (slot === 'night') nightCount++;
+    });
+    const totalSlots = morningCount + afternoonCount + eveningCount + nightCount;
+    
+    const morningPct = totalSlots === 0 ? 0 : Math.round((morningCount / totalSlots) * 100);
+    const afternoonPct = totalSlots === 0 ? 0 : Math.round((afternoonCount / totalSlots) * 100);
+    const eveningPct = totalSlots === 0 ? 0 : Math.round((eveningCount / totalSlots) * 100);
+    const nightPct = totalSlots === 0 ? 0 : Math.round((nightCount / totalSlots) * 100);
+
+    document.getElementById('label-morning').textContent = `清晨: ${morningPct}%`;
+    document.getElementById('label-afternoon').textContent = `下午: ${afternoonPct}%`;
+    document.getElementById('label-evening').textContent = `晚上: ${eveningPct}%`;
+    document.getElementById('label-night').textContent = `深夜: ${nightPct}%`;
+
+    document.querySelector('.segment-morning').style.flex = morningCount || 1;
+    document.querySelector('.segment-afternoon').style.flex = afternoonCount || 1;
+    document.querySelector('.segment-evening').style.flex = eveningCount || 1;
+    document.querySelector('.segment-night').style.flex = nightCount || 1;
+
+    const insightTextEl = document.getElementById('time-insight-text');
+    if (totalSlots === 0) {
+        insightTextEl.textContent = '☀️ 暂无已完成的任务数据';
+    } else {
+        let maxCount = morningCount;
+        let maxSlotLabel = '清晨';
+        let maxPct = morningPct;
+
+        if (afternoonCount > maxCount) {
+            maxCount = afternoonCount;
+            maxSlotLabel = '下午';
+            maxPct = afternoonPct;
+        }
+        if (eveningCount > maxCount) {
+            maxCount = eveningCount;
+            maxSlotLabel = '晚上';
+            maxPct = eveningPct;
+        }
+        if (nightCount > maxCount) {
+            maxCount = nightCount;
+            maxSlotLabel = '深夜';
+            maxPct = nightPct;
+        }
+        
+        insightTextEl.textContent = `☀️ 当前周期内你的高效时段在 ${maxSlotLabel}，占已完成任务的 ${maxPct}%`;
+    }
+
     let displayTodos = periodTodos;
-    if (statsStatus === 'completed') displayTodos = periodTodos.filter(t => t.completed);
-    else if (statsStatus === 'uncompleted') displayTodos = periodTodos.filter(t => !t.completed);
 
     displayTodos.sort(sortFunc);
 
@@ -1375,6 +1444,123 @@ function renderStats(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     } else {
         displayTodos.forEach(todo => {
             statsList.appendChild(createTodoItemElement(todo, todayStr, tomorrowStr));
+        });
+    }
+}
+
+function renderHealth(todayStr, tomorrowStr) {
+    const activeTodos = todoData.todos.filter(t => !t.deleted);
+    const incompleteTodos = activeTodos.filter(t => !t.completed);
+    
+    // 1. 计算未完成任务的平均寿命
+    const now = new Date();
+    let totalAgeDays = 0;
+    let incompleteCount = 0;
+    incompleteTodos.forEach(t => {
+        const age = calcTaskAgeDays(t.created_at, now);
+        if (age >= 0) {
+            totalAgeDays += age;
+            incompleteCount++;
+        }
+    });
+    
+    const avgAge = incompleteCount === 0 ? 0 : totalAgeDays / incompleteCount;
+    document.getElementById('metric-avg-age').textContent = `${avgAge.toFixed(1)} 天`;
+
+    // 2. 健康评级
+    const healthGrade = getHealthGrade(avgAge);
+    const gradeLetterEl = document.getElementById('health-grade-letter');
+    const gradeTextEl = document.getElementById('health-grade-text');
+    gradeLetterEl.textContent = healthGrade.grade;
+    gradeLetterEl.style.color = healthGrade.color;
+    gradeTextEl.textContent = `“${healthGrade.text}”`;
+
+    // 3. 吞吐量对比
+    const thresholdMs = now.getTime() - (healthThroughputDays * 86400000);
+    const thresholdDate = new Date(thresholdMs);
+    
+    let addedCount = 0;
+    let completedCount = 0;
+    
+    activeTodos.forEach(t => {
+        if (t.created_at) {
+            const createdDate = new Date(t.created_at);
+            if (!isNaN(createdDate.getTime()) && createdDate >= thresholdDate) {
+                addedCount++;
+            }
+        }
+        if (t.completed && t.completed_at) {
+            const completedDate = new Date(t.completed_at);
+            if (!isNaN(completedDate.getTime()) && completedDate >= thresholdDate) {
+                completedCount++;
+            }
+        } else if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
+            const completedDates = t.completed_dates || [];
+            completedDates.forEach(dStr => {
+                const checkDate = new Date(dStr + 'T00:00:00');
+                if (!isNaN(checkDate.getTime()) && checkDate >= thresholdDate) {
+                    completedCount++;
+                }
+            });
+        }
+    });
+
+    document.getElementById('throughput-added').textContent = addedCount;
+    document.getElementById('throughput-completed').textContent = completedCount;
+
+    const totalThroughput = addedCount + completedCount;
+    const addedPct = totalThroughput === 0 ? 50 : (addedCount / totalThroughput) * 100;
+    const completedPct = totalThroughput === 0 ? 50 : (completedCount / totalThroughput) * 100;
+
+    document.getElementById('throughput-bar-added').style.flex = addedPct;
+    document.getElementById('throughput-bar-completed').style.flex = completedPct;
+
+    const verdictEl = document.getElementById('throughput-verdict');
+    if (completedCount > addedCount) {
+        verdictEl.textContent = '清单正在变轻盈 ✨';
+    } else if (completedCount === addedCount) {
+        verdictEl.textContent = '收支平衡，保持节奏';
+    } else {
+        verdictEl.textContent = '任务在积压，试试清理一下？';
+    }
+
+    // 4. 沉睡待办
+    const sleepingTodos = incompleteTodos.filter(t => {
+        const age = calcTaskAgeDays(t.created_at, now);
+        return age >= 7; // SLEEPING_THRESHOLD_DAYS
+    });
+    
+    sleepingTodos.sort((a, b) => {
+        const ageA = calcTaskAgeDays(a.created_at, now);
+        const ageB = calcTaskAgeDays(b.created_at, now);
+        return ageB - ageA;
+    });
+
+    document.getElementById('metric-sleeping-count').textContent = `${sleepingTodos.length} 项`;
+
+    const sleepingList = document.getElementById('sleeping-list');
+    sleepingList.innerHTML = '';
+
+    const emptyEl = document.getElementById('sleeping-empty');
+    if (sleepingTodos.length === 0) {
+        emptyEl.style.display = 'block';
+    } else {
+        emptyEl.style.display = 'none';
+        sleepingTodos.forEach(todo => {
+            const age = calcTaskAgeDays(todo.created_at, now);
+            const item = document.createElement('div');
+            item.className = 'sleeping-item';
+            item.innerHTML = `
+                <div class="sleeping-item-info">
+                    <span>${escapeHtml(todo.content)}</span>
+                    <span>已存活 ${age} 天</span>
+                </div>
+                <div class="sleeping-item-actions">
+                    <button class="sleeping-action-btn btn-postpone" data-id="${todo.id}">延期</button>
+                    <button class="sleeping-action-btn btn-delete" data-id="${todo.id}">删除</button>
+                </div>
+            `;
+            sleepingList.appendChild(item);
         });
     }
 }
@@ -2195,6 +2381,11 @@ window.addEventListener("DOMContentLoaded", () => {
         if (enterStats) {
             currentView = 'stats';
             statsTargetDate = new Date();
+            statsSubTab = 'insights';
+            document.querySelectorAll('.stats-sub-tabs .tab-btn').forEach(btn => {
+                if (btn.dataset.subtab === 'insights') btn.classList.add('active');
+                else btn.classList.remove('active');
+            });
             mainContentEl.classList.add('hidden');
             if (tabsContainerEl) tabsContainerEl.classList.add('hidden');
             if (appFooterEl) appFooterEl.classList.add('hidden');
@@ -2235,6 +2426,51 @@ window.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // 统计二级子页签切换
+    document.querySelectorAll('.stats-sub-tabs .tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            statsSubTab = btn.dataset.subtab;
+            document.querySelectorAll('.stats-sub-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            render();
+        });
+    });
+
+    // 吞吐量对比周期选择
+    const throughputSelect = document.getElementById('throughput-period-select');
+    if (throughputSelect) {
+        throughputSelect.addEventListener('change', (e) => {
+            healthThroughputDays = parseInt(e.target.value, 10);
+            render();
+        });
+    }
+
+    // 沉睡待办列表操作事件委托
+    const sleepingListEl = document.getElementById('sleeping-list');
+    if (sleepingListEl) {
+        sleepingListEl.addEventListener('click', async (e) => {
+            const btn = e.target;
+            if (!btn.classList.contains('sleeping-action-btn')) return;
+            const id = btn.getAttribute('data-id');
+            const todo = todoData.todos.find(t => t.id === id);
+            if (!todo) return;
+
+            if (btn.classList.contains('btn-postpone')) {
+                const tomorrow = new Date();
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                todo.date = formatDate(tomorrow);
+                todo.updated_at = new Date().toISOString();
+                showToast('已延期至明天');
+            } else if (btn.classList.contains('btn-delete')) {
+                todo.deleted = true;
+                todo.updated_at = new Date().toISOString();
+                showToast('已删除任务');
+            }
+            render();
+            await saveData();
+        });
+    }
+
     // 统计周期切换（统一事件绑定）
     document.querySelectorAll('.stats-period-tabs .tab-btn[data-period]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -2259,14 +2495,6 @@ window.addEventListener("DOMContentLoaded", () => {
         render();
     });
 
-    document.querySelectorAll('.stats-filter-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.stats-filter-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            statsStatus = btn.getAttribute('data-filter');
-            render();
-        });
-    });
 
     // 今天/全部过滤标签
     const tabToday = document.getElementById('tab-today');
