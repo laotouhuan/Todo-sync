@@ -55,6 +55,11 @@ import com.todo.app.data.model.RecurringType
 import java.util.UUID
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
+import org.burnoutcrew.reorderable.rememberReorderableLazyListState
+import org.burnoutcrew.reorderable.reorderable
+import org.burnoutcrew.reorderable.ReorderableItem
+import org.burnoutcrew.reorderable.detectReorderAfterLongPress
+import java.util.Collections
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -332,94 +337,148 @@ fun EditTodoDialog(
                 }
 
                 Spacer(Modifier.height(16.dp))
+                var showCopyDialog by remember { mutableStateOf(false) }
                 var copyOnlyUncompleted by remember { mutableStateOf(true) }
+
+                if (showCopyDialog) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { showCopyDialog = false },
+                        title = { Text("复制子步骤") },
+                        text = {
+                            Column {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.clickable { copyOnlyUncompleted = !copyOnlyUncompleted }.padding(bottom = 8.dp)
+                                ) {
+                                    Checkbox(
+                                        checked = copyOnlyUncompleted,
+                                        onCheckedChange = { copyOnlyUncompleted = it }
+                                    )
+                                    Text("仅复制未完成项")
+                                }
+                                Text("选择复制格式：")
+                            }
+                        },
+                        confirmButton = {},
+                        dismissButton = {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                TextButton(onClick = { showCopyDialog = false }) { Text("取消", color = Color.Gray) }
+                                TextButton(onClick = {
+                                    val filtered = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
+                                    copyToClipboard(context, filtered.joinToString("\n") { it.content })
+                                    showCopyDialog = false
+                                }) { Text("文本") }
+                                TextButton(onClick = {
+                            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(onClick = {
+                                        val filtered = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
+                                        copyToClipboard(context, filtered.joinToString("\n") { it.content })
+                                        showCopyDialog = false
+                                    }, modifier = Modifier.weight(1f)) { Text("纯文本") }
+                                    Button(onClick = {
+                                        val filtered = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
+                                        copyToClipboard(context, filtered.joinToString("\n") { "- ${it.content}" })
+                                        showCopyDialog = false
+                                    }, modifier = Modifier.weight(1f)) { Text("无序") }
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(onClick = {
+                                        val filtered = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
+                                        copyToClipboard(context, filtered.mapIndexed { i, s -> "${i + 1}. ${s.content}" }.joinToString("\n"))
+                                        showCopyDialog = false
+                                    }, modifier = Modifier.weight(1f)) { Text("有序") }
+                                    OutlinedButton(onClick = { showCopyDialog = false }, modifier = Modifier.weight(1f)) { Text("取消") }
+                                }
+                            }
+                        }
+                    )
+                }
+
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("子步骤/备注", style = MaterialTheme.typography.titleMedium)
                     
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { copyOnlyUncompleted = !copyOnlyUncompleted }.padding(end = 8.dp)
-                        ) {
-                            Checkbox(
-                                checked = copyOnlyUncompleted,
-                                onCheckedChange = { copyOnlyUncompleted = it }
-                            )
-                            Text("仅未完成", style = MaterialTheme.typography.bodySmall)
-                        }
-
-                        var expandedCopyMenu by remember { mutableStateOf(false) }
-                        Box {
-                            TextButton(onClick = { expandedCopyMenu = true }) { Text("复制") }
-                            DropdownMenu(expanded = expandedCopyMenu, onDismissRequest = { expandedCopyMenu = false }) {
-                                DropdownMenuItem(text = { Text("纯文本") }, onClick = { 
-                                    val filteredSubs = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
-                                    val text = filteredSubs.joinToString("\n") { it.content }
-                                    copyToClipboard(context, text)
-                                    expandedCopyMenu = false 
-                                })
-                                DropdownMenuItem(text = { Text("无序列表") }, onClick = { 
-                                    val text = (if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks).joinToString("\n") { "- ${it.content}" }
-                                    copyToClipboard(context, text)
-                                    expandedCopyMenu = false 
-                                })
-                                DropdownMenuItem(text = { Text("有序列表") }, onClick = { 
-                                    val filteredSubs = if (copyOnlyUncompleted) subtasks.filter { !it.completed } else subtasks
-                                    val text = filteredSubs.mapIndexed { i, s -> "${i + 1}. ${s.content}" }.joinToString("\n")
-                                    copyToClipboard(context, text)
-                                    expandedCopyMenu = false 
-                                })
-                            }
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = {
+                            if (subtasks.isEmpty()) return@TextButton
+                            subtasks = subtasks.sortedBy { it.completed }
+                            performAutoSave()
+                        }) { Text("排序") }
+                        
+                        TextButton(onClick = { showCopyDialog = true }) { Text("复制") }
                     }
                 }
                 
-                LazyColumn(modifier = Modifier.heightIn(max = 150.dp).fillMaxWidth()) {
+                val reorderState = rememberReorderableLazyListState(
+                    onMove = { from, to ->
+                        val newSubtasks = subtasks.toMutableList()
+                        Collections.swap(newSubtasks, from.index, to.index)
+                        subtasks = newSubtasks
+                    },
+                    onDragEnd = { startIndex, endIndex ->
+                        if (startIndex != endIndex) performAutoSave()
+                    }
+                )
+
+                LazyColumn(
+                    state = reorderState.listState,
+                    modifier = Modifier.heightIn(max = 150.dp).fillMaxWidth().reorderable(reorderState)
+                ) {
                     items(subtasks, key = { it.id }) { sub ->
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                            Checkbox(checked = sub.completed, onCheckedChange = { chk ->
-                                val updatedSubtasks = subtasks.map { 
-                                    if (it.id == sub.id) it.copy(completed = chk, completed_at = if (chk) nowIso() else null) else it 
+                        ReorderableItem(reorderState, key = sub.id) { isDragging ->
+                            val elevation = if (isDragging) 4.dp else 0.dp
+                            Surface(shadowElevation = elevation, color = if (isDragging) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent) {
+                                val dragModifier = if (editingSubtaskId != sub.id) {
+                                    Modifier.detectReorderAfterLongPress(reorderState)
+                                } else {
+                                    Modifier
                                 }
-                                subtasks = updatedSubtasks
-                                val allCompleted = updatedSubtasks.isNotEmpty() && updatedSubtasks.all { it.completed }
-                                if (allCompleted) {
-                                    parentCompleted = true
-                                    parentCompletedAt = nowInstant()
-                                }
-                                performAutoSave()
-                            })
-                            if (editingSubtaskId == sub.id) {
-                                var editContent by remember(sub.content) { mutableStateOf(sub.content) }
-                                BasicTextFieldWithHint(
-                                    value = editContent,
-                                    onValueChange = { editContent = it },
-                                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                                    textStyle = LocalTextStyle.current.copy(color = MaterialTheme.colorScheme.onSurface),
-                                    hint = ""
-                                )
-                                IconButton(onClick = { 
-                                    subtasks = subtasks.map { s -> if (s.id == sub.id) s.copy(content = editContent) else s }
-                                    performAutoSave()
-                                    editingSubtaskId = null
-                                }) {
-                                    Icon(Icons.Filled.Check, contentDescription = "保存", modifier = Modifier.size(20.dp))
-                                }
-                            } else {
-                                Text(
-                                    text = sub.content,
-                                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                                    color = if (sub.completed) Color.Gray else MaterialTheme.colorScheme.onSurface,
-                                    textDecoration = if (sub.completed) TextDecoration.LineThrough else null
-                                )
-                                IconButton(onClick = { editingSubtaskId = sub.id }) {
-                                    Icon(Icons.Filled.Edit, contentDescription = "编辑", modifier = Modifier.size(20.dp))
-                                }
-                                IconButton(onClick = { 
-                                    subtasks = subtasks.filter { it.id != sub.id }
-                                    performAutoSave()
-                                }) {
-                                    Icon(Icons.Filled.Close, contentDescription = "删除子任务", modifier = Modifier.size(20.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().then(dragModifier)) {
+                                    Checkbox(checked = sub.completed, onCheckedChange = { chk ->
+                                        val updatedSubtasks = subtasks.map { 
+                                            if (it.id == sub.id) it.copy(completed = chk, completed_at = if (chk) nowIso() else null) else it 
+                                        }
+                                        subtasks = updatedSubtasks
+                                        val allCompleted = updatedSubtasks.isNotEmpty() && updatedSubtasks.all { it.completed }
+                                        if (allCompleted) {
+                                            parentCompleted = true
+                                            parentCompletedAt = nowInstant()
+                                        }
+                                        performAutoSave()
+                                    })
+                                    if (editingSubtaskId == sub.id) {
+                                        var editContent by remember(sub.content) { mutableStateOf(sub.content) }
+                                        BasicTextFieldWithHint(
+                                            value = editContent,
+                                            onValueChange = { editContent = it },
+                                            modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                                            textStyle = LocalTextStyle.current.copy(color = MaterialTheme.colorScheme.onSurface),
+                                            hint = ""
+                                        )
+                                        IconButton(onClick = { 
+                                            subtasks = subtasks.map { s -> if (s.id == sub.id) s.copy(content = editContent) else s }
+                                            performAutoSave()
+                                            editingSubtaskId = null
+                                        }) {
+                                            Icon(Icons.Filled.Check, contentDescription = "保存", modifier = Modifier.size(20.dp))
+                                        }
+                                    } else {
+                                        Text(
+                                            text = sub.content,
+                                            modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                                            color = if (sub.completed) Color.Gray else MaterialTheme.colorScheme.onSurface,
+                                            textDecoration = if (sub.completed) TextDecoration.LineThrough else null
+                                        )
+                                        IconButton(onClick = { editingSubtaskId = sub.id }) {
+                                            Icon(Icons.Filled.Edit, contentDescription = "编辑", modifier = Modifier.size(20.dp))
+                                        }
+                                        IconButton(onClick = { 
+                                            subtasks = subtasks.filter { it.id != sub.id }
+                                            performAutoSave()
+                                        }) {
+                                            Icon(Icons.Filled.Close, contentDescription = "删除子任务", modifier = Modifier.size(20.dp))
+                                        }
+                                    }
                                 }
                             }
                         }

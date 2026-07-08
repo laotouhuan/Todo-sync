@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +36,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -186,7 +188,6 @@ fun ClassicListView(viewModel: TodoViewModel) {
     var activeDraggingKey by remember { mutableStateOf<String?>(null) }
     val reorderState = rememberReorderableLazyListState(
         onMove = { from, to ->
-            val fromKey = from.key as? String ?: return@rememberReorderableLazyListState
             val toKey = to.key as? String ?: return@rememberReorderableLazyListState
 
             // Set hover state during drag (do NOT expand immediately)
@@ -196,9 +197,9 @@ fun ClassicListView(viewModel: TodoViewModel) {
                 hoveredHeaderKey = null
             }
 
-            val fromIndex = reorderableFocusItems.indexOfFirst { it.key == fromKey }
-            val toIndex = reorderableFocusItems.indexOfFirst { it.key == toKey }
-            if (fromIndex != -1 && toIndex != -1) {
+            val fromIndex = from.index
+            val toIndex = to.index
+            if (fromIndex in reorderableFocusItems.indices && toIndex in reorderableFocusItems.indices) {
                 if (reorderableFocusItems[fromIndex] is FocusItem.Task) {
                     reorderableFocusItems = reorderableFocusItems.toMutableList().apply {
                         add(toIndex, removeAt(fromIndex))
@@ -352,8 +353,10 @@ fun ClassicListView(viewModel: TodoViewModel) {
     }
 
     val isDragging = reorderState.draggingItemKey != null
-    LaunchedEffect(focusItemsOriginal) {
-        reorderableFocusItems = focusItemsOriginal
+    LaunchedEffect(focusItemsOriginal, isDragging) {
+        if (!isDragging) {
+            reorderableFocusItems = focusItemsOriginal
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -423,7 +426,9 @@ fun ClassicListView(viewModel: TodoViewModel) {
             }
 
             val uncompletedToday = sortedUncompletedGroups.today
-            val uncompletedNoDate = sortedUncompletedGroups.noDate
+            val uncompletedNoDate = remember(sortedUncompletedGroups.noDate) {
+                sortedUncompletedGroups.noDate.sortedWith(TodoComparator)
+            }
             val uncompletedWeek = sortedUncompletedGroups.week
             val uncompletedMonth = sortedUncompletedGroups.month
             val uncompletedFuture = sortedUncompletedGroups.future
@@ -433,7 +438,11 @@ fun ClassicListView(viewModel: TodoViewModel) {
                 uncompletedFuture.filter { it.task_type == "normal" }.sortedWith { a, b ->
                     val da = a.date ?: ""
                     val db = b.date ?: ""
-                    da.compareTo(db)
+                    if (da != db) {
+                        da.compareTo(db)
+                    } else {
+                        TodoComparator.compare(a, b)
+                    }
                 }
             }
 
@@ -470,9 +479,9 @@ fun ClassicListView(viewModel: TodoViewModel) {
                     val canMove = (isFromNoDate && isToNoDate) || (isFromFuture && isToFuture)
                     if (!canMove) return@rememberReorderableLazyListState
                     
-                    val fromIndex = reorderableAllTodosItems.indexOfFirst { it.key == fromKey }
-                    val toIndex = reorderableAllTodosItems.indexOfFirst { it.key == toKey }
-                    if (fromIndex != -1 && toIndex != -1) {
+                    val fromIndex = from.index
+                    val toIndex = to.index
+                    if (fromIndex in reorderableAllTodosItems.indices && toIndex in reorderableAllTodosItems.indices) {
                         if (reorderableAllTodosItems[fromIndex] is AllTodoItem.Task) {
                             reorderableAllTodosItems = reorderableAllTodosItems.toMutableList().apply {
                                 add(toIndex, removeAt(fromIndex))
@@ -509,8 +518,11 @@ fun ClassicListView(viewModel: TodoViewModel) {
                 }
             )
             
-            LaunchedEffect(allTodosItemsOriginal) {
-                reorderableAllTodosItems = allTodosItemsOriginal
+            val isDraggingAll = reorderStateAllTodos.draggingItemKey != null
+            LaunchedEffect(allTodosItemsOriginal, isDraggingAll) {
+                if (!isDraggingAll) {
+                    reorderableAllTodosItems = allTodosItemsOriginal
+                }
             }
 
             val completedMap = remember(filteredTodos, todayStr) {
@@ -700,21 +712,63 @@ fun ClassicListView(viewModel: TodoViewModel) {
         
         // Smart Add Input
         var addInput by remember { mutableStateOf("") }
+        var isInputFocused by remember { mutableStateOf(false) }
+
+        val atRegex = remember { Regex("""(?:^|\s)@([a-zA-Z0-9-]*)$""", RegexOption.IGNORE_CASE) }
+        val matchResult = atRegex.find(addInput)
+        val showShortcutBar = isInputFocused && (matchResult != null)
+        val atSearchQuery = matchResult?.groupValues?.getOrNull(1) ?: ""
+
         Surface(tonalElevation = 8.dp) {
-            Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = addInput,
-                    onValueChange = { addInput = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("添加待办") },
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(onClick = {
-                    viewModel.addTodoSmart(addInput)
-                    addInput = ""
-                }) {
-                    Icon(Icons.Filled.Add, contentDescription = "Add")
+            Column {
+                if (showShortcutBar) {
+                    val shortcutItems = listOf(
+                        Pair("今天", "@today"),
+                        Pair("明天", "@tomorrow"),
+                        Pair("每天重复", "@daily"),
+                        Pair("本周打卡", "@week"),
+                        Pair("本月打卡", "@month")
+                    ).filter { it.second.startsWith("@$atSearchQuery", ignoreCase = true) }
+
+                    if (shortcutItems.isNotEmpty()) {
+                        LazyRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(shortcutItems) { item ->
+                                SuggestionChip(
+                                    onClick = {
+                                        val lastAtIdx = addInput.lastIndexOf('@')
+                                        if (lastAtIdx != -1) {
+                                            addInput = addInput.substring(0, lastAtIdx) + item.second + " "
+                                        }
+                                    },
+                                    label = { Text(item.first) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = addInput,
+                        onValueChange = { addInput = it },
+                        modifier = Modifier
+                            .weight(1f)
+                            .onFocusChanged { isInputFocused = it.isFocused },
+                        placeholder = { Text("添加待办") },
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(onClick = {
+                        viewModel.addTodoSmart(addInput)
+                        addInput = ""
+                    }) {
+                        Icon(Icons.Filled.Add, contentDescription = "Add")
+                    }
                 }
             }
         }

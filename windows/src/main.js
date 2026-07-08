@@ -76,6 +76,113 @@ function setSyncStatus(state) {
 }
 
 /**
+ * 智能输入联想与补全逻辑
+ */
+function insertCompletion(input, value) {
+    const lastAtIdx = input.value.lastIndexOf('@');
+    if (lastAtIdx !== -1) {
+        input.value = input.value.substring(0, lastAtIdx) + value + ' ';
+    }
+}
+
+function bindAutocomplete(inputEl, listEl) {
+    if (!inputEl || !listEl) return;
+    
+    const items = [
+        { label: '今天', value: '@today', desc: '今天截止' },
+        { label: '明天', value: '@tomorrow', desc: '明天截止' },
+        { label: '每天重复', value: '@daily', desc: '每日重复任务' },
+        { label: '本周打卡', value: '@week', desc: '本周打卡任务' },
+        { label: '本月打卡', value: '@month', desc: '本月打卡任务' }
+    ];
+    
+    inputEl.addEventListener('input', () => {
+        const match = inputEl.value.match(/(?:^|\s)@([a-zA-Z0-9-]*)$/);
+        if (!match) {
+            listEl.style.display = 'none';
+            return;
+        }
+        
+        const query = match[1].toLowerCase();
+        const filtered = items.filter(item => item.value.toLowerCase().startsWith('@' + query));
+        
+        listEl.innerHTML = '';
+        if (filtered.length === 0) {
+            listEl.style.display = 'none';
+            return;
+        }
+        
+        filtered.forEach((item, index) => {
+            const li = document.createElement('li');
+            li.className = 'autocomplete-item';
+            if (index === 0) {
+                li.classList.add('active');
+            }
+            li.dataset.value = item.value;
+            li.innerHTML = `${item.label} <span class="shortcut-desc">${item.desc}</span>`;
+            
+            li.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                insertCompletion(inputEl, item.value);
+                listEl.style.display = 'none';
+            });
+            
+            listEl.appendChild(li);
+        });
+        
+        listEl.style.display = 'block';
+    });
+    
+    inputEl.addEventListener('keydown', (e) => {
+        if (listEl.style.display === 'none') return;
+        
+        const liElements = listEl.querySelectorAll('.autocomplete-item');
+        if (liElements.length === 0) return;
+        
+        let activeIdx = -1;
+        liElements.forEach((li, index) => {
+            if (li.classList.contains('active')) {
+                activeIdx = index;
+            }
+        });
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (activeIdx !== -1) {
+                liElements[activeIdx].classList.remove('active');
+            }
+            const nextIdx = (activeIdx + 1) % liElements.length;
+            liElements[nextIdx].classList.add('active');
+            liElements[nextIdx].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (activeIdx !== -1) {
+                liElements[activeIdx].classList.remove('active');
+            }
+            const prevIdx = (activeIdx - 1 + liElements.length) % liElements.length;
+            liElements[prevIdx].classList.add('active');
+            liElements[prevIdx].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter') {
+            if (activeIdx !== -1) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                const val = liElements[activeIdx].dataset.value;
+                insertCompletion(inputEl, val);
+                listEl.style.display = 'none';
+            }
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            listEl.style.display = 'none';
+        }
+    });
+    
+    inputEl.addEventListener('blur', () => {
+        listEl.style.display = 'none';
+    });
+}
+
+/**
  * 统一设置任务类型和重复属性（供表单提交和闪电录入共用）
  * @param {Object} todo - createTodo 返回的对象
  * @param {string|null} taskType - parseInputSyntax 解析出的任务类型
@@ -231,13 +338,31 @@ async function loadData() {
                     showToast('检测到云端更新，已自动同步完成');
                 }
             } catch (e) {
-                console.error("WebDAV pull failed, using local cache:", e);
-                if (localData && localData.todos) {
-                    todoData = localData;
-                    todoData.todos.forEach(migrateAndNormalize);
-                    render();
+                if (e === "FILE_NOT_FOUND") {
+                    console.log("Cloud file not found, but parent folder exists. Initializing cloud database with local data...");
+                    if (localData && localData.todos) {
+                        todoData = localData;
+                        todoData.todos.forEach(migrateAndNormalize);
+                        render();
+                    } else {
+                        todoData = { version: 1, last_updated: new Date().toISOString(), todos: [] };
+                        render();
+                    }
+                    await saveData();
+                } else {
+                    console.error("WebDAV pull failed, using local cache:", e);
+                    if (localData && localData.todos) {
+                        todoData = localData;
+                        todoData.todos.forEach(migrateAndNormalize);
+                        render();
+                    }
+                    setSyncStatus(SyncState.ERROR);
+                    if (typeof e === 'string' && e.includes("云端同步目录不存在")) {
+                        alert(e);
+                    } else {
+                        showToast("云端同步失败，请检查网络或配置");
+                    }
                 }
-                setSyncStatus(SyncState.ERROR);
             }
         } else {
             if (localData && localData.todos) {
@@ -818,6 +943,7 @@ function renderEditSubtasks() {
     currentEditingSubtasks.forEach((sub, idx) => {
         const li = document.createElement('li');
         li.className = `subtask-item ${sub.completed ? 'completed' : ''}`;
+        li.dataset.index = idx;
         li.innerHTML = `
             <div class="subtask-checkbox" style="width: 16px; height: 16px; margin-right: 12px; flex-shrink: 0; cursor: pointer; border: 1.5px solid ${sub.completed ? 'var(--accent-color)' : 'var(--text-secondary)'}; background: ${sub.completed ? 'var(--accent-color)' : 'transparent'}; border-radius: 4px; display: flex; justify-content: center; align-items: center; transition: all 0.2s;">
                 <svg viewBox="0 0 24 24" fill="none" width="12" height="12" style="opacity: ${sub.completed ? '1' : '0'}; transition: opacity 0.2s;">
@@ -916,6 +1042,34 @@ function renderEditSubtasks() {
 
         listEl.appendChild(li);
     });
+
+    if (window.Sortable) {
+        if (listEl._sortableInstance) {
+            listEl._sortableInstance.destroy();
+            listEl._sortableInstance = null;
+        }
+        if (currentEditingSubtasks.length > 0) {
+            listEl._sortableInstance = new Sortable(listEl, {
+                animation: 150,
+                ghostClass: 'drag-over',
+                chosenClass: 'drag-chosen',
+                dragClass: 'drag-active',
+                filter: '.subtask-checkbox, .subtask-inline-edit, .subtask-actions',
+                preventOnFilter: false,
+                onEnd: function(evt) {
+                    const items = Array.from(listEl.querySelectorAll('li'));
+                    const newSubtasks = [];
+                    items.forEach(el => {
+                        const idx = parseInt(el.dataset.index);
+                        newSubtasks.push(currentEditingSubtasks[idx]);
+                    });
+                    currentEditingSubtasks = newSubtasks;
+                    renderEditSubtasks();
+                    autoSaveEdit();
+                }
+            });
+        }
+    }
 }
 
 let _autoSaveTimer = null;
@@ -1569,9 +1723,11 @@ function render() {
                                     // 拖到上半区：今日任务
                                     t.task_type = 'normal';
                                     t.recurring = 'none';
-                                    if (t.date !== todayStr) {
-                                        t.date = todayStr;
-                                        stateChanged = true;
+                                    if (!isOverdue(t, todayStr)) {
+                                        if (t.date !== todayStr) {
+                                            t.date = todayStr;
+                                            stateChanged = true;
+                                        }
                                     }
                                 } else {
                                     // 拖到下半区：无日期任务
@@ -1761,6 +1917,10 @@ window.addEventListener("DOMContentLoaded", () => {
     inputEl = document.getElementById('todo-input');
     statusEl = document.getElementById('sync-status');
 
+    // 绑定智能输入联想
+    const todoAutocompleteList = document.getElementById('todo-autocomplete-list');
+    bindAutocomplete(inputEl, todoAutocompleteList);
+
     // 置顶按钮
     const pinBtn = document.getElementById('pin-btn');
     if (pinBtn) {
@@ -1815,6 +1975,17 @@ window.addEventListener("DOMContentLoaded", () => {
             settingWebdavPass.value = appConfig.webdav_password || '';
             settingWebdavFilepath.value = appConfig.webdav_filepath || '我的坚果云/to-do/todo_data.json';
             
+            // 获取并显示当前版本号
+            try {
+                const currentVersion = await invoke('get_app_version');
+                const versionTextEl = document.getElementById('current-version-text');
+                if (versionTextEl) {
+                    versionTextEl.textContent = `当前版本: v${currentVersion}`;
+                }
+            } catch (e) {
+                console.error("Failed to fetch app version:", e);
+            }
+
             if (settingSyncMode.value === 'webdav') {
                 settingLocalGroup.style.display = 'none';
                 settingWebdavGroup.style.display = 'block';
@@ -2223,9 +2394,16 @@ window.addEventListener("DOMContentLoaded", () => {
             if (li.getAttribute('data-selected') === 'true') {
                 const orig = currentImportCandidates[idx];
                 const newTodo = createTodo(orig.content, targetDateStr);
+                newTodo.task_type = orig.task_type;
+                newTodo.target_count = orig.target_count || null;
                 newTodo.time = orig.time || null;
                 newTodo.recurring = orig.recurring || 'none';
-                newTodo.subtasks = orig.subtasks ? JSON.parse(JSON.stringify(orig.subtasks)).map(s => { s.completed = false; return s; }) : [];
+                newTodo.subtasks = orig.subtasks ? JSON.parse(JSON.stringify(orig.subtasks)).map(s => {
+                    s.id = crypto.randomUUID();
+                    s.completed = false;
+                    s.completed_at = null;
+                    return s;
+                }) : [];
                 todoData.todos.push(newTodo);
                 imported = true;
             }
@@ -2350,6 +2528,16 @@ window.addEventListener("DOMContentLoaded", () => {
 
     // 复制子步骤逻辑
     const copyModal = document.getElementById('copy-modal');
+    document.getElementById('sort-subtasks-btn').addEventListener('click', () => {
+        if (!currentEditingSubtasks || currentEditingSubtasks.length === 0) return;
+        currentEditingSubtasks.sort((a, b) => {
+            if (a.completed === b.completed) return 0;
+            return a.completed ? 1 : -1;
+        });
+        renderEditSubtasks();
+        autoSaveEdit();
+    });
+
     document.getElementById('copy-subtasks-btn').addEventListener('click', () => {
         if (!currentEditingSubtasks || currentEditingSubtasks.length === 0) {
             alert('没有子步骤可复制');
@@ -2432,6 +2620,8 @@ window.addEventListener("DOMContentLoaded", () => {
     // 闪电录入逻辑
     const quickAddModal = document.getElementById('quick-add-modal');
     const quickAddInput = document.getElementById('quick-add-input');
+    const quickAddAutocompleteList = document.getElementById('quick-add-autocomplete-list');
+    bindAutocomplete(quickAddInput, quickAddAutocompleteList);
     
     listen('trigger-quick-add', (event) => {
         if (quickAddModal && quickAddInput) {
