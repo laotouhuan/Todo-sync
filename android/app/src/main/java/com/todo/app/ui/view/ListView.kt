@@ -1109,7 +1109,7 @@ fun TodoItemRow(
                                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                             rowDates.forEach { date ->
                                                 val dateStr = date.toString()
-                                                val isChecked = todo.completed_dates.any { it.startsWith(dateStr) }
+                                                val isChecked = todo.completedDates.any { it.startsWith(dateStr) }
                                                 val isToday = dateStr == todayStr
                                                 val isCurrentMonth = date.monthValue == targetMonth
 
