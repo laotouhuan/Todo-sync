@@ -132,8 +132,12 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                         val dateStr = t.date
                         if (!dateStr.isNullOrEmpty()) {
                             dateStr == targetWeekStr || (dateStr.length == 10 && dateStr.startsWith(targetWeekStr.substring(0,4)) && 
-                                LocalDate.parse(dateStr).get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) &&
-                                LocalDate.parse(dateStr).get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR))
+                                try {
+                                    val checkDate = LocalDate.parse(dateStr)
+                                    checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) &&
+                                    checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR)
+                                } catch (e: Exception) { false }
+                            )
                         } else {
                             false
                         }

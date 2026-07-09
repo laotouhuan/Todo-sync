@@ -41,10 +41,10 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsView(viewModel: TodoViewModel) {
-    var serverUrl by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("") }
-    var appPassword by remember { mutableStateOf("") }
-    var filePath by remember { mutableStateOf("") }
+    var serverUrl by remember { mutableStateOf(viewModel.configManager.webDavUrl) }
+    var username by remember { mutableStateOf(viewModel.configManager.username) }
+    var appPassword by remember { mutableStateOf(viewModel.configManager.appPassword) }
+    var filePath by remember { mutableStateOf(viewModel.configManager.filePath) }
     var showBackupDialog by remember { mutableStateOf(false) }
     var backupsList by remember { mutableStateOf<List<String>>(emptyList()) }
     var showConfirmForcePull by remember { mutableStateOf(false) }
