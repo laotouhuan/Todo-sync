@@ -1,5 +1,6 @@
 package com.todo.app.data
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Credentials
@@ -15,11 +16,28 @@ class WebDavClient(
     private val username: String,
     private val appPassword: String
 ) {
+    companion object {
+        private const val TAG = "WebDavClient"
+        // NOTE: XML responses from WebDAV are parsed using regex here, which is fragile.
+        // A proper implementation should use XmlPullParser or a dedicated WebDAV library.
+        // This regex approach works for simple PROPFIND responses but may break on
+        // complex XML structures, CDATA sections, or namespace variations.
+        private val DISPLAY_NAME_REGEX = Regex("""<(?:[a-zA-Z0-9_]+:)?displayname>([^<]+)</(?:[a-zA-Z0-9_]+:)?displayname>""")
+    }
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
         .build()
+
+    /**
+     * Build a full WebDAV URL from a relative path.
+     */
+    private fun buildUrl(relativePath: String): String {
+        val encodedPath = encodePath(relativePath)
+        return if (serverUrl.endsWith("/")) "$serverUrl$encodedPath" else "$serverUrl/$encodedPath"
+    }
 
     private fun encodePath(path: String): String {
         return path.split("/").joinToString("/") { segment ->
@@ -27,12 +45,15 @@ class WebDavClient(
         }
     }
 
-    suspend fun listRoot(): String = withContext(Dispatchers.IO) {
+    /**
+     * List contents of a given directory path.
+     * @param directoryPath The relative directory path to list. Defaults to "我的坚果云/".
+     */
+    suspend fun listRoot(directoryPath: String = "我的坚果云/"): String = withContext(Dispatchers.IO) {
         val credential = Credentials.basic(username, appPassword)
         val xmlBody = "<?xml version=\"1.0\"?><D:propfind xmlns:D=\"DAV:\"><D:prop><D:displayname/></D:prop></D:propfind>"
         val body = xmlBody.toRequestBody("application/xml; charset=utf-8".toMediaType())
-        val encodedRoot = encodePath("我的坚果云/")
-        val targetUrl = if (serverUrl.endsWith("/")) serverUrl + encodedRoot else "$serverUrl/$encodedRoot"
+        val targetUrl = buildUrl(directoryPath)
         val request = Request.Builder()
             .url(targetUrl)
             .header("Authorization", credential)
@@ -42,11 +63,15 @@ class WebDavClient(
         try {
             client.newCall(request).execute().use { response ->
                 val xml = response.body?.string() ?: ""
-                val names = "<(?:[a-zA-Z0-9_]+:)?displayname>([^<]+)</(?:[a-zA-Z0-9_]+:)?displayname>".toRegex()
-                    .findAll(xml).map { it.groupValues[1] }.filter { it.isNotBlank() && it != "我的坚果云" }.toList()
-                return@withContext "【我的坚果云】内有: " + names.joinToString(", ")
+                // Regex-based XML parsing (see TAG companion note for limitations)
+                val names = DISPLAY_NAME_REGEX.findAll(xml)
+                    .map { it.groupValues[1] }
+                    .filter { it.isNotBlank() && it != directoryPath.trimEnd('/') }
+                    .toList()
+                return@withContext "【${directoryPath.trimEnd('/')}】内有: " + names.joinToString(", ")
             }
         } catch (e: Exception) {
+            Log.e(TAG, "listRoot failed for path: $directoryPath", e)
             return@withContext "获取目录失败: ${e.message}"
         }
     }
@@ -55,8 +80,7 @@ class WebDavClient(
         val credential = Credentials.basic(username, appPassword)
         val xmlBody = "<?xml version=\"1.0\"?><D:propfind xmlns:D=\"DAV:\"><D:prop><D:displayname/></D:prop></D:propfind>"
         val body = xmlBody.toRequestBody("application/xml; charset=utf-8".toMediaType())
-        val encodedFolder = encodePath(folderPath)
-        val targetUrl = if (serverUrl.endsWith("/")) serverUrl + encodedFolder else "$serverUrl/$encodedFolder"
+        val targetUrl = buildUrl(folderPath)
         val request = Request.Builder()
             .url(targetUrl)
             .header("Authorization", credential)
@@ -68,6 +92,7 @@ class WebDavClient(
                 return@withContext response.code == 207 || response.isSuccessful
             }
         } catch (e: Exception) {
+            Log.e(TAG, "checkFolderExists failed for: $folderPath", e)
             return@withContext false
         }
     }
@@ -79,15 +104,14 @@ class WebDavClient(
      */
     suspend fun downloadFile(filePath: String): String? = withContext(Dispatchers.IO) {
         val credential = Credentials.basic(username, appPassword)
-        val encodedPath = encodePath(filePath)
-        val url = if (serverUrl.endsWith("/")) serverUrl + encodedPath else "$serverUrl/$encodedPath"
-        
+        val url = buildUrl(filePath)
+
         val request = Request.Builder()
             .url(url)
             .header("Authorization", credential)
             .get()
             .build()
-            
+
         try {
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
@@ -119,31 +143,34 @@ class WebDavClient(
 
     /**
      * 上传文件内容到 WebDAV
+     * @param filePath 相对路径
+     * @param content JSON content to upload
+     * @return true if upload succeeded
+     * @throws IOException if a network error occurs (callers should handle)
      */
     suspend fun uploadFile(filePath: String, content: String): Boolean = withContext(Dispatchers.IO) {
         val credential = Credentials.basic(username, appPassword)
-        val encodedPath = encodePath(filePath)
-        val url = if (serverUrl.endsWith("/")) serverUrl + encodedPath else "$serverUrl/$encodedPath"
-        
+        val url = buildUrl(filePath)
+
         val body = content.toRequestBody("application/json; charset=utf-8".toMediaType())
-        
+
         val request = Request.Builder()
             .url(url)
             .header("Authorization", credential)
             .put(body)
             .build()
-            
+
         try {
             client.newCall(request).execute().use { response ->
                 val success = response.isSuccessful
                 if (!success) {
-                    System.err.println("WebDAV PUT Error: ${response.code} ${response.message}")
+                    Log.e(TAG, "WebDAV PUT Error: ${response.code} ${response.message}")
                 }
                 return@withContext success
             }
         } catch (e: IOException) {
-            e.printStackTrace()
-            return@withContext false
+            Log.e(TAG, "WebDAV PUT IOException for: $filePath", e)
+            throw e  // Let callers decide how to handle network errors
         }
     }
 }

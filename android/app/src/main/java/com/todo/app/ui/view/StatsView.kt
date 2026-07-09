@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.todo.app.data.model.Todo
 import com.todo.app.data.model.TodoComparator
+import com.todo.app.data.model.TaskType
 import com.todo.app.data.model.calcTaskAgeDays
 import com.todo.app.data.model.categorizeByTimeSlot
 import com.todo.app.data.model.getHealthGrade
@@ -33,6 +34,12 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.temporal.IsoFields
 import java.util.Locale
+
+// ====== Top-level private helper ======
+
+private fun formatVal(valDouble: Double): String {
+    return if (valDouble % 1.0 == 0.0) valDouble.toInt().toString() else String.format(Locale.US, "%.1f", valDouble)
+}
 
 @Composable
 fun StatsView(viewModel: TodoViewModel) {
@@ -84,37 +91,74 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     val periodTodos = remember(todos, period, targetDate) {
         when (period) {
             "day" -> todos.filter { t ->
-                val dateStr = t.date
-                if (!dateStr.isNullOrEmpty()) {
-                    dateStr == targetDate.toString()
+                if (t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) {
+                    t.completed_dates.any { it.startsWith(targetDate.toString()) }
                 } else {
-                    t.completed && t.completed_at?.take(10) == targetDate.toString()
+                    if (t.completed && !t.completed_at.isNullOrEmpty()) {
+                        t.completed_at?.take(10) == targetDate.toString()
+                    } else {
+                        t.date == targetDate.toString()
+                    }
                 }
             }
             "week" -> todos.filter { t ->
-                val dateStr = t.date
-                if (!dateStr.isNullOrEmpty()) {
-                    dateStr == targetWeekStr || (dateStr.length == 10 && dateStr.startsWith(targetWeekStr.substring(0,4)) && 
-                        LocalDate.parse(dateStr).get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) &&
-                        LocalDate.parse(dateStr).get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR))
-                } else {
-                    t.completed && t.completed_at?.take(10)?.let { completedDateStr ->
+                if (t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) {
+                    val hasCheckin = t.completed_dates.any { dStr ->
                         try {
-                            val checkDate = LocalDate.parse(completedDateStr)
+                            val checkDate = LocalDate.parse(dStr.take(10))
                             checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
                             checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
                         } catch (e: Exception) {
                             false
                         }
-                    } ?: false
+                    }
+                    if (t.task_type == TaskType.WEEKLY_CHECKIN && t.date == targetWeekStr) {
+                        if (t.target_count != null) true else hasCheckin
+                    } else {
+                        hasCheckin
+                    }
+                } else {
+                    if (t.completed && !t.completed_at.isNullOrEmpty()) {
+                        t.completed_at?.take(10)?.let { completedDateStr ->
+                            try {
+                                val checkDate = LocalDate.parse(completedDateStr)
+                                checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
+                                checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
+                            } catch (e: Exception) {
+                                false
+                            }
+                        } ?: false
+                    } else {
+                        val dateStr = t.date
+                        if (!dateStr.isNullOrEmpty()) {
+                            dateStr == targetWeekStr || (dateStr.length == 10 && dateStr.startsWith(targetWeekStr.substring(0,4)) && 
+                                LocalDate.parse(dateStr).get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) &&
+                                LocalDate.parse(dateStr).get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR))
+                        } else {
+                            false
+                        }
+                    }
                 }
             }
             else -> todos.filter { t ->
-                val dateStr = t.date
-                if (!dateStr.isNullOrEmpty()) {
-                    dateStr == targetMonthStr || (dateStr.length == 10 && dateStr.startsWith(targetMonthStr))
+                if (t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) {
+                    val hasCheckin = t.completed_dates.any { dStr -> dStr.startsWith(targetMonthStr) }
+                    if (t.task_type == TaskType.MONTHLY_CHECKIN && t.date == targetMonthStr) {
+                        if (t.target_count != null) true else hasCheckin
+                    } else {
+                        hasCheckin
+                    }
                 } else {
-                    t.completed && t.completed_at?.take(7) == targetMonthStr
+                    if (t.completed && !t.completed_at.isNullOrEmpty()) {
+                        t.completed_at?.take(7) == targetMonthStr
+                    } else {
+                        val dateStr = t.date
+                        if (!dateStr.isNullOrEmpty()) {
+                            dateStr == targetMonthStr || (dateStr.length == 10 && dateStr.startsWith(targetMonthStr))
+                        } else {
+                            false
+                        }
+                    }
                 }
             }
         }
@@ -124,17 +168,16 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     var completedDouble = 0.0
 
     periodTodos.forEach { t ->
-        totalDouble += 1.0
-        if (t.task_type == "weekly_checkin" || t.task_type == "monthly_checkin") {
+        if (t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) {
             var periodCheckinCount = 0
             t.completed_dates.forEach { dStr ->
                 when (period) {
                     "day" -> {
-                        if (dStr == targetDate.toString()) periodCheckinCount++
+                        if (dStr.startsWith(targetDate.toString())) periodCheckinCount++
                     }
                     "week" -> {
                         try {
-                            val checkDate = LocalDate.parse(dStr)
+                            val checkDate = LocalDate.parse(dStr.take(10))
                             if (checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
                                 checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)) {
                                 periodCheckinCount++
@@ -147,20 +190,19 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                 }
             }
             if (t.target_count != null) {
-                completedDouble += Math.min(1.0, periodCheckinCount.toDouble() / t.target_count!!.toDouble())
+                completedDouble += Math.min(t.target_count!!.toDouble(), periodCheckinCount.toDouble())
+                totalDouble += t.target_count!!.toDouble()
             } else {
-                completedDouble += if (periodCheckinCount >= 1) 1.0 else 0.0
+                completedDouble += periodCheckinCount.toDouble()
+                totalDouble += periodCheckinCount.toDouble()
             }
         } else {
+            totalDouble += 1.0
             if (t.completed) completedDouble += 1.0
         }
     }
 
     val progress = if (totalDouble == 0.0) 0f else (completedDouble / totalDouble).toFloat()
-    
-    fun formatVal(valDouble: Double): String {
-        return if (valDouble % 1.0 == 0.0) valDouble.toInt().toString() else String.format(Locale.US, "%.1f", valDouble)
-    }
 
     val displayTodos = periodTodos.sortedWith(TodoComparator)
 
@@ -204,18 +246,50 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
             }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next") }
         }
 
-        // 时段分布卡片
-        val completedNormalTodos = remember(periodTodos) { periodTodos.filter { it.completed && !it.completed_at.isNullOrEmpty() } }
         var morningCount = 0
         var afternoonCount = 0
         var eveningCount = 0
         var nightCount = 0
-        completedNormalTodos.forEach { t ->
-            val slot = categorizeByTimeSlot(t.completed_at)
-            if (slot == "morning") morningCount++
-            else if (slot == "afternoon") afternoonCount++
-            else if (slot == "evening") eveningCount++
-            else if (slot == "night") nightCount++
+        var makeupCheckinCount = 0
+
+        periodTodos.forEach { t ->
+            if (t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) {
+                t.completed_dates.forEach { dStr ->
+                    val inPeriod = when (period) {
+                        "day" -> dStr.startsWith(targetDate.toString())
+                        "week" -> {
+                            try {
+                                val checkDate = LocalDate.parse(dStr.take(10))
+                                checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
+                                checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
+                            } catch (e: Exception) {
+                                false
+                            }
+                        }
+                        else -> dStr.startsWith(targetMonthStr)
+                    }
+
+                    if (inPeriod) {
+                        if (dStr.length > 10) {
+                            val slot = categorizeByTimeSlot(dStr)
+                            if (slot == "morning") morningCount++
+                            else if (slot == "afternoon") afternoonCount++
+                            else if (slot == "evening") eveningCount++
+                            else if (slot == "night") nightCount++
+                        } else {
+                            makeupCheckinCount++
+                        }
+                    }
+                }
+            } else {
+                if (t.completed && !t.completed_at.isNullOrEmpty()) {
+                    val slot = categorizeByTimeSlot(t.completed_at)
+                    if (slot == "morning") morningCount++
+                    else if (slot == "afternoon") afternoonCount++
+                    else if (slot == "evening") eveningCount++
+                    else if (slot == "night") nightCount++
+                }
+            }
         }
         val totalSlots = morningCount + afternoonCount + eveningCount + nightCount
         val morningPct = if (totalSlots == 0) 0 else Math.round((morningCount.toDouble() / totalSlots) * 100).toInt()
@@ -300,6 +374,22 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     Text("晚上: $eveningPct%", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("深夜: $nightPct%", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+
+                if (makeupCheckinCount > 0) {
+                    val periodText = when (period) {
+                        "day" -> "本日"
+                        "week" -> "本周"
+                        else -> "本月"
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "* ${periodText}包含 ${makeupCheckinCount} 项补打卡，不计入时段分布统计",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
 
@@ -307,7 +397,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
 
         // List
         LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(displayTodos) { todo ->
+            items(displayTodos, key = { it.id }) { todo ->
                 TodoItemRow(
                     todo = todo,
                     viewModel = viewModel,
@@ -330,7 +420,25 @@ fun HealthContent(viewModel: TodoViewModel) {
     var expandedDropdown by remember { mutableStateOf(false) }
 
     val activeTodos = remember(todos) { todos.filter { !it.deleted } }
-    val incompleteTodos = remember(activeTodos) { activeTodos.filter { !it.completed } }
+    val incompleteTodos = remember(activeTodos) {
+        val currentWeekStr = weekStringOf(LocalDate.now())
+        val currentMonthStr = monthStringOf(LocalDate.now())
+        activeTodos.filter { t ->
+            if (t.completed) {
+                false
+            } else {
+                // 排除过期的周/月打卡任务 (不管是否限定了次数)
+                if (t.task_type == TaskType.WEEKLY_CHECKIN && t.date != null && t.date!! < currentWeekStr) {
+                    false
+                } else if (t.task_type == TaskType.MONTHLY_CHECKIN && t.date != null && t.date!! < currentMonthStr) {
+                    false
+                } else {
+                    // 排除没有设定次数目标的打卡任务 (未过期时)
+                    !((t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) && t.target_count == null)
+                }
+            }
+        }
+    }
 
     val nowTime = OffsetDateTime.now()
 
@@ -347,6 +455,10 @@ fun HealthContent(viewModel: TodoViewModel) {
     var completedCount = 0
     
     activeTodos.forEach { t ->
+        // 排除周/月打卡任务
+        if (t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) {
+            return@forEach
+        }
         val createdDateTime = try {
             OffsetDateTime.parse(t.created_at)
         } catch (e: Exception) {
@@ -364,15 +476,6 @@ fun HealthContent(viewModel: TodoViewModel) {
             }
             if (completedDateTime != null && completedDateTime.isAfter(thresholdDate)) {
                 completedCount++
-            }
-        } else if (t.task_type == "weekly_checkin" || t.task_type == "monthly_checkin") {
-            t.completed_dates.forEach { dStr ->
-                try {
-                    val checkDate = LocalDate.parse(dStr).atStartOfDay(java.time.ZoneId.systemDefault()).toOffsetDateTime()
-                    if (checkDate.isAfter(thresholdDate)) {
-                        completedCount++
-                    }
-                } catch (e: Exception) {}
             }
         }
     }
@@ -479,15 +582,17 @@ fun HealthContent(viewModel: TodoViewModel) {
                     val verdict = when {
                         completedCount > addedCount -> "清单正在变轻盈 ✨"
                         completedCount == addedCount -> "收支平衡，保持节奏"
-                        else -> "任务在积压，试试清理一下？"
+                        else -> ""
                     }
-                    Text(
-                        text = verdict,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Center,
-                        fontWeight = FontWeight.Medium
-                    )
+                    if (verdict.isNotEmpty()) {
+                        Text(
+                            text = verdict,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
         }

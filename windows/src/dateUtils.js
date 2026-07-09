@@ -13,7 +13,8 @@ export function formatDate(d) {
 }
 
 export function getISOWeekString(d) {
-    const date = new Date(d.getTime());
+    const date = d instanceof Date ? new Date(d.getTime()) : new Date(d);
+    if (isNaN(date.getTime())) return '';
     date.setHours(0, 0, 0, 0);
     date.setDate(date.getDate() + 3 - (date.getDay() + 6) % 7);
     const week1 = new Date(date.getFullYear(), 0, 4);
@@ -34,14 +35,14 @@ export function getThisMonthString() { const d = new Date(); return `${d.getFull
  * Check if a date string represents a weekly period (e.g. "2026-W03").
  */
 export function isWeekDate(dateStr) {
-    return dateStr && dateStr.includes('-W');
+    return /^\d{4}-W\d{2}$/.test(dateStr);
 }
 
 /**
  * Check if a date string represents a monthly period (e.g. "2026-06").
  */
 export function isMonthDate(dateStr) {
-    return dateStr && dateStr.length === 7 && !dateStr.includes('-W');
+    return /^\d{4}-\d{2}$/.test(dateStr);
 }
 
 /**
@@ -84,7 +85,8 @@ export function getCompletionStatusLabel(todo) {
 export function sortFunc(a, b) {
     if (a.completed !== b.completed) return a.completed ? 1 : -1;
     if (a.order !== b.order) return a.order - b.order;
-    return new Date(b.created_at) - new Date(a.created_at);
+    // ISO 字符串字典序比较等同于时间序，无需创建 Date 对象
+    return (b.created_at || '').localeCompare(a.created_at || '');
 }
 
 // ====== Input Parsing ======

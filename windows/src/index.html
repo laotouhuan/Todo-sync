@@ -19,27 +19,27 @@
         <div class="status-indicator" id="sync-status"></div>
       </div>
       <div class="header-right">
-        <button id="search-btn" class="icon-btn" title="搜索待办">
+        <button id="search-btn" class="icon-btn" title="搜索待办" aria-label="搜索待办">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
             <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" fill="currentColor"/>
           </svg>
         </button>
-        <button id="manual-sync-btn" class="icon-btn" title="云同步">
+        <button id="manual-sync-btn" class="icon-btn" title="云同步" aria-label="云同步">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
             <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="currentColor"/>
           </svg>
         </button>
-        <button id="stats-btn" class="icon-btn" title="统计">
+        <button id="stats-btn" class="icon-btn" title="统计" aria-label="统计">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
             <path d="M3 3V21H21V19H5V3H3ZM7 17H10V10H7V17ZM12 17H15V6H12V17ZM17 17H20V13H17V17Z" fill="currentColor"/>
           </svg>
         </button>
-        <button id="settings-btn" class="icon-btn" title="设置">
+        <button id="settings-btn" class="icon-btn" title="设置" aria-label="设置">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
             <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22l-1.92 3.32c-.12.21-.07.47.12.61l2.03 1.58c-.05.3-.09.62-.09.94s.04.64.09.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.03-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" fill="currentColor"/>
           </svg>
         </button>
-        <button id="pin-btn" class="icon-btn" title="固定置顶">
+        <button id="pin-btn" class="icon-btn" title="固定置顶" aria-label="固定置顶">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
             <path d="M16 12V4H17V2H7V4H8V12L6 14V16H11.2V22H12.8V16H18V14L16 12Z" fill="currentColor"/>
           </svg>
@@ -48,23 +48,24 @@
     </header>
 
     <!-- Date Filter tabs -->
-    <div class="tabs-container">
-      <button class="tab-btn active" id="tab-today">今天聚焦</button>
-      <button class="tab-btn" id="tab-all">全部待办</button>
+    <div class="tabs-container" role="tablist" aria-label="视图切换">
+      <button class="tab-btn active" id="tab-today" role="tab" aria-selected="true" aria-controls="main-content">今天聚焦</button>
+      <button class="tab-btn" id="tab-all" role="tab" aria-selected="false" aria-controls="main-content">全部待办</button>
     </div>
 
     <!-- Search Bar -->
     <div class="search-bar-container" id="search-bar" style="display: none;">
       <div class="search-input-wrapper">
-        <input type="text" id="search-input" placeholder="🔍 搜索待办任务名称..." />
-        <span id="clear-search-btn" class="clear-search-btn" style="display: none;">&times;</span>
+        <label for="search-input" class="sr-only">搜索待办任务</label>
+        <input type="text" id="search-input" placeholder="🔍 搜索待办任务名称..." aria-label="搜索待办任务名称" />
+        <span id="clear-search-btn" class="clear-search-btn hidden">&times;</span>
       </div>
     </div>
 
     <!-- Sub Tabs for All Todos -->
-    <div class="sub-tabs-container" id="all-sub-tabs" style="display: none;">
-      <button class="sub-tab-btn active" id="sub-tab-uncompleted">待完成</button>
-      <button class="sub-tab-btn" id="sub-tab-completed">已完成</button>
+    <div class="sub-tabs-container hidden" id="all-sub-tabs" role="tablist" aria-label="任务状态筛选">
+      <button class="sub-tab-btn active" id="sub-tab-uncompleted" role="tab" aria-selected="true">待完成</button>
+      <button class="sub-tab-btn" id="sub-tab-completed" role="tab" aria-selected="false">已完成</button>
     </div>
 
 
@@ -79,25 +80,25 @@
     <!-- Stats Container -->
     <div id="stats-container" class="hidden">
       <!-- 二级导航 Tab -->
-      <div class="tabs-container stats-sub-tabs" style="margin-bottom: 12px; width: 100%;">
-        <button class="tab-btn active" data-subtab="insights" style="flex: 1;">效率洞察</button>
-        <button class="tab-btn" data-subtab="health" style="flex: 1;">清单健康</button>
+      <div class="tabs-container stats-sub-tabs" style="margin-bottom: 12px; width: 100%;" role="tablist" aria-label="统计子视图">
+        <button class="tab-btn active" data-subtab="insights" style="flex: 1;" role="tab" aria-selected="true">效率洞察</button>
+        <button class="tab-btn" data-subtab="health" style="flex: 1;" role="tab" aria-selected="false">清单健康</button>
       </div>
 
       <!-- 效率洞察容器 -->
       <div id="stats-insights">
         <div class="stats-header">
-          <div class="tabs-container stats-period-tabs">
-            <button class="tab-btn active" id="stats-period-day" data-period="day">日</button>
-            <button class="tab-btn" id="stats-period-week" data-period="week">周</button>
-            <button class="tab-btn" id="stats-period-month" data-period="month">月</button>
+          <div class="tabs-container stats-period-tabs" role="tablist" aria-label="统计周期">
+            <button class="tab-btn active" id="stats-period-day" data-period="day" role="tab" aria-selected="true">日</button>
+            <button class="tab-btn" id="stats-period-week" data-period="week" role="tab" aria-selected="false">周</button>
+            <button class="tab-btn" id="stats-period-month" data-period="month" role="tab" aria-selected="false">月</button>
           </div>
           <div class="stats-date-nav">
-            <button id="stats-prev-btn" class="icon-btn-small">
+            <button id="stats-prev-btn" class="icon-btn-small" aria-label="上一个周期">
               <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
             <span id="stats-date-label">2026年 第22周</span>
-            <button id="stats-next-btn" class="icon-btn-small">
+            <button id="stats-next-btn" class="icon-btn-small" aria-label="下一个周期">
               <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
           </div>
@@ -125,6 +126,7 @@
             <div class="time-bar-label" id="label-evening" style="flex: 1;">晚上: -</div>
             <div class="time-bar-label" id="label-night" style="flex: 1;">深夜: -</div>
           </div>
+          <div id="time-distribution-tip" class="time-distribution-tip hidden" style="font-size: 0.72rem; color: var(--text-secondary); opacity: 0.65; margin-top: 8px; text-align: center; width: 100%;"></div>
         </div>
 
         <ul id="stats-list"></ul>
@@ -194,7 +196,7 @@
           <input type="text" id="todo-input" placeholder="添加新待办..." autocomplete="off" style="width: 100%; box-sizing: border-box;" />
           <ul id="todo-autocomplete-list" class="autocomplete-list" style="display: none;"></ul>
         </div>
-        <button type="submit" class="add-btn">
+        <button type="submit" class="add-btn" aria-label="添加待办">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
@@ -204,16 +206,16 @@
   </div>
 
   <!-- Edit Modal -->
-  <div id="edit-modal" class="modal-overlay">
+  <div id="edit-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title">
     <div class="modal-content glass-panel">
       <div style="position: relative; display: flex; justify-content: center; align-items: center; margin-bottom: 24px;">
-        <button type="button" id="modal-back-btn" class="modal-back-btn" style="position: absolute; left: 0;">
+        <button type="button" id="modal-back-btn" class="modal-back-btn" style="position: absolute; left: 0;" aria-label="返回">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M19 12H5M12 19l-7-7 7-7"/>
           </svg>
           <span>返回</span>
         </button>
-        <h3 style="margin: 0; font-size: 1.15rem; font-weight: 600;">编辑待办</h3>
+        <h3 id="edit-modal-title" style="margin: 0; font-size: 1.15rem; font-weight: 600;">编辑待办</h3>
       </div>
       <div class="modal-body">
         <label for="edit-content">待办内容</label>
@@ -262,15 +264,15 @@
         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; margin-bottom: 4px;">
           <label style="margin: 0; font-weight: 600;">子步骤/备注</label>
           <div style="display: flex; gap: 8px;">
-            <button type="button" id="sort-subtasks-btn" class="icon-btn-small copy-btn">整理排序</button>
-            <button type="button" id="copy-subtasks-btn" class="icon-btn-small copy-btn">复制内容</button>
+            <button type="button" id="sort-subtasks-btn" class="icon-btn-small copy-btn" aria-label="整理排序子步骤">整理排序</button>
+            <button type="button" id="copy-subtasks-btn" class="icon-btn-small copy-btn" aria-label="复制子步骤内容">复制内容</button>
           </div>
         </div>
         <div class="subtasks-container" style="margin-top: 0; padding: 0; background: transparent;">
           <ul id="edit-subtasks-list" class="subtasks-list"></ul>
           <div class="add-subtask-row">
             <input type="text" id="add-subtask-input" placeholder="添加新子步骤..." autocomplete="off" />
-            <button type="button" id="add-subtask-btn" class="icon-btn-small">
+            <button type="button" id="add-subtask-btn" class="icon-btn-small" aria-label="添加子步骤">
               <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
                 <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
               </svg>
@@ -288,7 +290,7 @@
   </div>
 
   <!-- Import Modal -->
-  <div id="import-modal" class="modal-overlay">
+  <div id="import-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
     <div class="modal-content glass-panel">
       <h3 id="import-modal-title">导入任务</h3>
       <div class="modal-body">
@@ -305,9 +307,9 @@
     </div>
   </div>
   <!-- Backup Modal -->
-  <div id="backup-modal" class="modal-overlay">
+  <div id="backup-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="backup-modal-title">
     <div class="modal-content glass-panel" style="max-width: 400px;">
-      <h3>选择要恢复的本地备份</h3>
+      <h3 id="backup-modal-title">选择要恢复的本地备份</h3>
       <div class="modal-body">
         <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 12px;">如果由于误操作同步导致数据丢失，可以从本地快照恢复。</p>
         <ul id="backup-list" class="subtasks-list" style="max-height: 200px; overflow-y: auto;">
@@ -322,7 +324,7 @@
     </div>
   </div>
   <!-- Delete Confirm Modal -->
-  <div id="delete-confirm-modal" class="modal-overlay" style="z-index: 3000;">
+  <div id="delete-confirm-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-confirm-title" style="z-index: var(--z-modal-confirm);">
     <div class="modal-content delete-confirm-content">
       <div style="display: flex; align-items: center; gap: 10px;">
         <div style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: rgba(255, 77, 79, 0.15); color: #ff4d4f; flex-shrink: 0;">
@@ -332,7 +334,7 @@
             <line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
         </div>
-        <h3 style="margin: 0; font-size: 1.05rem; font-weight: 600; color: #ffffff;">确认删除</h3>
+        <h3 id="delete-confirm-title" style="margin: 0; font-size: 1.05rem; font-weight: 600; color: #ffffff;">确认删除</h3>
       </div>
       <div class="modal-body" style="padding: 0; gap: 0;">
         <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.7); line-height: 1.5; margin: 0;">确定要彻底删除该待办事项吗？此操作无法撤销。</p>
@@ -347,9 +349,9 @@
   </div>
   
   <!-- Settings Modal -->
-  <div id="settings-modal" class="modal-overlay">
+  <div id="settings-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
     <div class="modal-content glass-panel" style="max-width: 450px;">
-      <h3>设置</h3>
+      <h3 id="settings-modal-title">设置</h3>
       <div class="modal-body">
         <div class="input-group">
           <label>同步模式</label>
@@ -409,9 +411,9 @@
   </div>
 
   <!-- Copy Options Modal -->
-  <div id="copy-modal" class="modal-overlay" style="display: none; z-index: 2000;">
+  <div id="copy-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="copy-modal-title" style="display: none; z-index: var(--z-modal-confirm);">
     <div class="modal-content glass-panel" style="max-width: 300px; padding: 20px;">
-      <h3 style="margin-top: 0; margin-bottom: 16px; text-align: center; color: var(--accent-color); user-select: none; -webkit-user-select: none;">选择复制格式</h3>
+      <h3 id="copy-modal-title" style="margin-top: 0; margin-bottom: 16px; text-align: center; color: var(--accent-color); user-select: none; -webkit-user-select: none;">选择复制格式</h3>
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 0 4px;">
         <label for="copy-only-uncompleted-switch" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">仅复制未完成项</label>
         <label class="switch">
@@ -429,7 +431,7 @@
   </div>
 
   <!-- 闪电录入（聚光灯模式）遮罩层 -->
-  <div class="modal-overlay" id="quick-add-modal">
+  <div class="modal-overlay" id="quick-add-modal" role="dialog" aria-modal="true" aria-label="闪电录入">
     <div class="autocomplete-wrapper" style="position: relative; width: 80%; max-width: 600px;">
       <input type="text" id="quick-add-input" placeholder="输入待办事项，按回车闪电保存..." 
         style="width: 100%; padding: 20px 30px; font-size: 24px; border: none; border-radius: 16px; background: rgba(255,255,255,0.1); color: #fff; outline: none; box-shadow: 0 10px 30px rgba(0,0,0,0.3); backdrop-filter: blur(20px);" />
