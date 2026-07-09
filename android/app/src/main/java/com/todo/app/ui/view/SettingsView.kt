@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -40,11 +41,10 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsView(viewModel: TodoViewModel) {
-    val configManager = viewModel.configManager
-    var serverUrl by remember { mutableStateOf(configManager.webDavUrl) }
-    var username by remember { mutableStateOf(configManager.username) }
-    var appPassword by remember { mutableStateOf(configManager.appPassword) }
-    var filePath by remember { mutableStateOf(configManager.filePath) }
+    var serverUrl by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    var appPassword by remember { mutableStateOf("") }
+    var filePath by remember { mutableStateOf("") }
     var showBackupDialog by remember { mutableStateOf(false) }
     var backupsList by remember { mutableStateOf<List<String>>(emptyList()) }
     var showConfirmForcePull by remember { mutableStateOf(false) }
@@ -66,6 +66,9 @@ fun SettingsView(viewModel: TodoViewModel) {
     }
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+
+    val buttonShape = RoundedCornerShape(8.dp)
+    val cardShape = RoundedCornerShape(12.dp)
 
     val startDownloadUpdate = { apkUrl: String ->
         isDownloading = true
@@ -95,8 +98,8 @@ fun SettingsView(viewModel: TodoViewModel) {
                 .verticalScroll(rememberScrollState())
         ) {
             Text("坚果云 WebDAV 设置", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(bottom = 16.dp))
-            
-            ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)) {
+
+            ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     OutlinedTextField(
                         value = serverUrl,
@@ -128,21 +131,17 @@ fun SettingsView(viewModel: TodoViewModel) {
                     )
                 }
             } // Close ElevatedCard
-            
+
             Spacer(modifier = Modifier.height(24.dp))
             Button(
                 onClick = {
-                    configManager.webDavUrl = serverUrl
-                    configManager.username = username
-                    configManager.appPassword = appPassword
-                    configManager.filePath = filePath
-                    viewModel.resetWebDavClient()
+                    viewModel.saveConfig(serverUrl, username, appPassword, filePath)
                     coroutineScope.launch {
                         snackbarHostState.showSnackbar("配置已保存")
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                shape = buttonShape
             ) {
                 Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
@@ -157,7 +156,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                shape = buttonShape,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
             ) {
                 Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -170,7 +169,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                     showConfirmForcePull = true
                 },
                 modifier = Modifier.fillMaxWidth(),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                shape = buttonShape,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
             ) {
                 Icon(Icons.Filled.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -202,17 +201,19 @@ fun SettingsView(viewModel: TodoViewModel) {
             }
 
             Text("高级与维护", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(bottom = 16.dp))
-            ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)) {
+            ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("如果因为误操作同步导致数据丢失，可以从本地自动生成的快照中恢复。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(16.dp))
                     Button(
                         onClick = {
-                            backupsList = viewModel.listBackups()
-                            showBackupDialog = true
+                            coroutineScope.launch {
+                                backupsList = viewModel.listBackups()
+                                showBackupDialog = true
+                            }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                        shape = buttonShape,
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
                     ) {
                         Icon(Icons.Filled.List, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -260,7 +261,7 @@ fun SettingsView(viewModel: TodoViewModel) {
             Spacer(modifier = Modifier.height(24.dp))
 
             Text("关于与更新", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(bottom = 16.dp))
-            ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)) {
+            ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("当前版本: v$versionName", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(16.dp))
@@ -287,7 +288,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                         },
                         enabled = !checkingForUpdate,
                         modifier = Modifier.fillMaxWidth(),
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                        shape = buttonShape
                     ) {
                         Text(if (checkingForUpdate) "正在检查更新..." else "检查更新")
                     }

@@ -3,10 +3,9 @@ package com.todo.app.data.model
 import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.IsoFields
-import java.time.temporal.WeekFields
-import java.util.Locale
 
 /**
  * Centralized date utility functions for Todo-related date operations.
@@ -27,6 +26,16 @@ object RecurringType {
     const val DAILY_REPEAT = "daily_repeat"
 }
 
+const val DEFAULT_TASK_TYPE = TaskType.NORMAL
+
+// ====== Health Grade Data Class ======
+
+data class HealthGrade(
+    val grade: String,
+    val text: String,
+    val color: Long
+)
+
 // ====== Timestamp ======
 
 /** Shared ISO-8601 timestamp with offset (e.g. "2026-06-15T12:00:00+08:00"). */
@@ -36,26 +45,66 @@ fun nowIso(): String =
 /** ISO-8601 instant timestamp (e.g. "2026-06-15T04:00:00Z"). Use [nowIso] for offset-based timestamps. */
 fun nowInstant(): String = Instant.now().toString()
 
+/** Format an Instant as ISO-8601 offset datetime string. */
+fun formatIso(instant: Instant): String =
+    OffsetDateTime.ofInstant(instant, ZoneId.systemDefault())
+        .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+
 // ====== Sorting ======
 
-/** Standard comparator for Todo lists: incomplete first, then by order, then by created_at desc. */
+/** Standard comparator for Todo lists: incomplete first, then by order, then by createdAt desc. */
 val TodoComparator = Comparator<Todo> { a, b ->
     if (a.completed != b.completed) return@Comparator if (a.completed) 1 else -1
     if (a.order != b.order) return@Comparator a.order.compareTo(b.order)
-    b.created_at.compareTo(a.created_at)
+    b.createdAt.compareTo(a.createdAt)
 }
 
 // ====== Date Type Checks ======
 
-/** Check if a date string represents a weekly period (e.g. "2026-W03"). */
-fun isWeekDate(dateStr: String?): Boolean =
-    dateStr != null && dateStr.contains("-W")
-
-/** Check if a date string represents a monthly period (e.g. "2026-06"). */
 private const val MONTH_DATE_LENGTH = 7 // "YYYY-MM"
 
+/** Check if a date string represents a weekly period (e.g. "2026-W03"). */
+fun isWeekDate(dateStr: String?): Boolean =
+    dateStr != null && dateRegexWeek.containsMatchIn(dateStr)
+
+private val dateRegexWeek = Regex("""^\d{4}-W\d{2}$""")
+
+/** Check if a date string represents a monthly period (e.g. "2026-06"). */
 fun isMonthDate(dateStr: String?): Boolean =
-    dateStr != null && dateStr.length == MONTH_DATE_LENGTH && !dateStr.contains("-W")
+    dateStr != null && dateRegexMonth.containsMatchIn(dateStr)
+
+private val dateRegexMonth = Regex("""^\d{4}-\d{2}$""")
+
+// ====== Time Slot Helpers ======
+
+/** Map an hour (0-23) to a time slot string. */
+private fun hourToSlot(hour: Int): String = when (hour) {
+    in 6..11 -> "morning"
+    in 12..17 -> "afternoon"
+    in 18..23 -> "evening"
+    else -> "night"
+}
+
+/**
+ * Categorize an ISO timestamp by local time into a time slot.
+ * @param isoTimestamp ISO 8601 timestamp string
+ * @returns 'morning' | 'afternoon' | 'evening' | 'night' | 'unknown'
+ */
+fun categorizeTimeSlot(isoTimestamp: String?): String {
+    if (isoTimestamp.isNullOrEmpty()) return "unknown"
+    return try {
+        val odt = OffsetDateTime.parse(isoTimestamp)
+        hourToSlot(odt.toLocalTime().hour)
+    } catch (e: Exception) {
+        try {
+            val instant = Instant.parse(isoTimestamp)
+            val odt = OffsetDateTime.ofInstant(instant, ZoneId.systemDefault())
+            hourToSlot(odt.toLocalTime().hour)
+        } catch (_: Exception) {
+            "unknown"
+        }
+    }
+}
 
 // ====== Todo Extension Functions ======
 
@@ -66,7 +115,7 @@ fun isMonthDate(dateStr: String?): Boolean =
 fun Todo.isOverdue(todayStr: String): Boolean {
     val d = date ?: return false
     if (completed) return false
-    // Exclude week and month tasks — they don't have a specific due date
+    // Exclude week and month tasks -- they don't have a specific due date
     if (isWeekDate(d) || isMonthDate(d)) return false
     return d < todayStr
 }
@@ -91,7 +140,7 @@ fun Todo.getDateLabel(todayStr: String, tomorrowStr: String): String {
  */
 fun Todo.getCompletionStatusLabel(): String? {
     if (!completed) return null
-    val ca = completed_at ?: return null
+    val ca = completedAt ?: return null
     val d = date ?: return null
     if (isWeekDate(d) || isMonthDate(d)) return null
     if (ca.length < 10) return null
@@ -133,7 +182,7 @@ fun monthStringOf(date: LocalDate): String =
 fun Todo.getWeeklyCompletedCount(): Int {
     val dateStr = this.date ?: return 0
     if (!isWeekDate(dateStr)) return 0
-    return this.completed_dates.count { dStr ->
+    return this.completedDates.count { dStr ->
         try {
             val checkDate = LocalDate.parse(dStr)
             weekStringOf(checkDate) == dateStr
@@ -144,7 +193,7 @@ fun Todo.getWeeklyCompletedCount(): Int {
 fun Todo.getMonthlyCompletedCount(): Int {
     val dateStr = this.date ?: return 0
     if (!isMonthDate(dateStr)) return 0
-    return this.completed_dates.count { it.startsWith(dateStr) }
+    return this.completedDates.count { it.startsWith(dateStr) }
 }
 
 /**
@@ -152,162 +201,35 @@ fun Todo.getMonthlyCompletedCount(): Int {
  * Handles: add/remove date, sort, compute completed count, check target.
  */
 fun Todo.withToggledCheckinDate(dateStr: String): Todo {
-    val dates = completed_dates.toMutableList()
-    if (dates.contains(dateStr)) dates.remove(dateStr) else dates.add(dateStr)
+    val dates = completedDates.toMutableList()
+    val existingIndex = dates.indexOfFirst { it.startsWith(dateStr) }
+    if (existingIndex > -1) {
+        dates.removeAt(existingIndex)
+    } else {
+        val todayStr = java.time.LocalDate.now().toString()
+        if (dateStr == todayStr) {
+            dates.add(nowIso())
+        } else {
+            dates.add(dateStr)
+        }
+    }
     dates.sort()
-    val tempTodo = copy(completed_dates = dates)
-    val completedCount = when (task_type) {
+    val tempTodo = copy(completedDates = dates)
+    val completedCount = when (taskType) {
         TaskType.WEEKLY_CHECKIN -> tempTodo.getWeeklyCompletedCount()
         TaskType.MONTHLY_CHECKIN -> tempTodo.getMonthlyCompletedCount()
         else -> dates.size
     }
-    val isCompletedNow = target_count != null && completedCount >= target_count!!
+    val isCompletedNow = targetCount != null && completedCount >= targetCount!!
     return copy(
-        completed_dates = dates,
+        completedDates = dates,
         completed = isCompletedNow,
-        completed_at = if (isCompletedNow) (completed_at ?: nowIso()) else null,
-        updated_at = nowIso()
+        completedAt = if (isCompletedNow) (completedAt ?: nowIso()) else null,
+        updatedAt = nowIso()
     )
 }
 
-// ====== Date Strings Helper ======
-
-/**
- * Precomputed date strings for the current day, used for filtering and display.
- */
-data class DateStrings(
-    val today: String,
-    val tomorrow: String,
-    val thisWeek: String,
-    val thisMonth: String
-) {
-    companion object {
-        fun now(): DateStrings {
-            val today = LocalDate.now()
-            return DateStrings(
-                today = today.toString(),
-                tomorrow = today.plusDays(1).toString(),
-                thisWeek = weekStringOf(today),
-                thisMonth = monthStringOf(today)
-            )
-        }
-    }
-}
-
-// ====== Input Parsing ======
-
-private val DATE_REGEX = Regex("""(?:\s+|^)@(today|tomorrow|week|month|day|daily|\d{4}-\d{2}-\d{2}|\d{2}-\d{2})(?:[*/:](\d*))?$""", RegexOption.IGNORE_CASE)
-private val FULL_DATE_REGEX = Regex("""^\d{4}-\d{2}-\d{2}$""")
-private val SHORT_DATE_REGEX = Regex("""^\d{2}-\d{2}$""")
-
-data class ParsedSyntax(
-    val content: String,
-    val date: String?,
-    val taskType: String = "normal",
-    val targetCount: Int? = null
-)
-
-/**
- * Parse @date syntax from raw input text.
- * Supports: @today, @tomorrow, @week, @month, @YYYY-MM-DD, @MM-DD
- * Returns a ParsedSyntax object.
- */
-fun parseDateSyntax(rawContent: String): ParsedSyntax {
-    var content = rawContent.trim()
-    var taskDate: String? = null
-    var taskType = "normal"
-    var targetCount: Int? = null
-
-    val dateMatch = DATE_REGEX.find(content)
-    if (dateMatch != null) {
-        val dateVal = dateMatch.groupValues[1].lowercase()
-        taskDate = when (dateVal) {
-            "today" -> LocalDate.now().toString()
-            "tomorrow" -> LocalDate.now().plusDays(1).toString()
-            "day", "daily" -> {
-                taskType = "daily_repeat"
-                LocalDate.now().toString()
-            }
-            "week" -> {
-                taskType = "weekly_checkin"
-                targetCount = dateMatch.groupValues.getOrNull(2)?.toIntOrNull()
-                weekStringOf(LocalDate.now())
-            }
-            "month" -> {
-                taskType = "monthly_checkin"
-                targetCount = dateMatch.groupValues.getOrNull(2)?.toIntOrNull()
-                monthStringOf(LocalDate.now())
-            }
-            else -> when {
-                FULL_DATE_REGEX.matches(dateVal) -> dateVal
-                SHORT_DATE_REGEX.matches(dateVal) -> "${LocalDate.now().year}-$dateVal"
-                else -> null
-            }
-        }
-        content = content.removeRange(dateMatch.range).trim()
-    }
-
-    return ParsedSyntax(content, taskDate, taskType, targetCount)
-}
-
-// ====== Todo Grouping ======
-
-/**
- * Group todos by date category for the "all tasks" view.
- */
-data class TodoDateGroups(
-    val today: List<Todo>,
-    val noDate: List<Todo>,
-    val week: List<Todo>,
-    val month: List<Todo>,
-    val future: List<Todo>,
-    val past: List<Todo>
-)
-
-fun groupTodosByDate(todos: List<Todo>, todayStr: String): TodoDateGroups {
-    val parsedToday = try {
-        LocalDate.parse(todayStr)
-    } catch (e: Exception) {
-        LocalDate.now()
-    }
-    val thisWeekStr = weekStringOf(parsedToday)
-    val thisMonthStr = monthStringOf(parsedToday)
-
-    val todayGroup = mutableListOf<Todo>()
-    val noDateGroup = mutableListOf<Todo>()
-    val weekGroup = mutableListOf<Todo>()
-    val monthGroup = mutableListOf<Todo>()
-    val futureGroup = mutableListOf<Todo>()
-    val pastGroup = mutableListOf<Todo>()
-
-    todos.forEach { todo ->
-        val d = todo.date
-        when {
-            todo.task_type == "weekly_checkin" || isWeekDate(d) -> {
-                val weekVal = d ?: thisWeekStr
-                when {
-                    weekVal == thisWeekStr -> weekGroup.add(todo)
-                    weekVal < thisWeekStr -> pastGroup.add(todo)
-                    else -> futureGroup.add(todo)
-                }
-            }
-            todo.task_type == "monthly_checkin" || isMonthDate(d) -> {
-                val monthVal = d ?: thisMonthStr
-                when {
-                    monthVal == thisMonthStr -> monthGroup.add(todo)
-                    monthVal < thisMonthStr -> pastGroup.add(todo)
-                    else -> futureGroup.add(todo)
-                }
-            }
-            d.isNullOrEmpty() -> noDateGroup.add(todo)
-            d == todayStr -> todayGroup.add(todo)
-            d > todayStr -> futureGroup.add(todo)
-            else -> pastGroup.add(todo)
-        }
-    }
-
-    return TodoDateGroups(todayGroup, noDateGroup, weekGroup, monthGroup, futureGroup, pastGroup)
-}
+// ====== Calendar Helpers ======
 
 /**
  * Compute the week-aligned (Monday to Sunday) dates for the target month period.
@@ -358,117 +280,3 @@ fun getMonthCalendarDates(todoDate: String?): List<LocalDate> {
 
     return list
 }
-
-// ====== Today Focus Classification ======
-
-/**
- * Pre-classified groups for the "today focus" view.
- * Used by both ListView and TodoWidget to avoid duplicating filter/classify logic.
- */
-data class FocusGroups(
-    val todayTasks: List<Todo>,
-    val noDateTasks: List<Todo>,
-    val weekTasks: List<Todo>,
-    val monthTasks: List<Todo>
-)
-
-/**
- * Filter and classify todos into today-focus groups.
- * Shared between ListView and TodoWidget to ensure consistent behavior.
- */
-fun classifyForTodayFocus(todos: List<Todo>, todayStr: String, thisWeekStr: String, thisMonthStr: String): FocusGroups {
-    val filtered = todos.filter { t ->
-        !t.deleted && (
-            t.date == todayStr
-            || t.isOverdue(todayStr)
-            || t.date == thisWeekStr
-            || t.date == thisMonthStr
-            || (t.completed && t.completed_at?.startsWith(todayStr) == true)
-        )
-    }
-    return FocusGroups(
-        todayTasks = filtered.filter {
-            it.task_type != TaskType.WEEKLY_CHECKIN && it.task_type != TaskType.MONTHLY_CHECKIN
-                && it.date != null && !isWeekDate(it.date ?: "") && !isMonthDate(it.date ?: "")
-        }.sortedWith(TodoComparator),
-        noDateTasks = emptyList(),
-        weekTasks = filtered.filter {
-            it.task_type == TaskType.WEEKLY_CHECKIN || isWeekDate(it.date ?: "")
-        }.sortedWith(TodoComparator),
-        monthTasks = filtered.filter {
-            it.task_type == TaskType.MONTHLY_CHECKIN || isMonthDate(it.date ?: "")
-        }.sortedWith(TodoComparator)
-    )
-}
-
-// ====== Stats Helpers ======
-
-/**
- * Categorize completed task by local time.
- * @param isoTimestamp ISO 8601 timestamp string
- * @returns 'morning' | 'afternoon' | 'evening' | 'night' | 'unknown'
- */
-fun categorizeByTimeSlot(isoTimestamp: String?): String {
-    if (isoTimestamp.isNullOrEmpty()) return "unknown"
-    return try {
-        val odt = OffsetDateTime.parse(isoTimestamp)
-        val hours = odt.toLocalTime().hour
-        when {
-            hours in 6..11 -> "morning"
-            hours in 12..17 -> "afternoon"
-            hours in 18..23 -> "evening"
-            else -> "night"
-        }
-    } catch (e: Exception) {
-        try {
-            val instant = Instant.parse(isoTimestamp)
-            val odt = OffsetDateTime.ofInstant(instant, java.time.ZoneId.systemDefault())
-            val hours = odt.toLocalTime().hour
-            when {
-                hours in 6..11 -> "morning"
-                hours in 12..17 -> "afternoon"
-                hours in 18..23 -> "evening"
-                else -> "night"
-            }
-        } catch (e2: Exception) {
-            "unknown"
-        }
-    }
-}
-
-/**
- * Calculate the number of days a task has existed.
- * @param createdAt ISO timestamp
- * @param now Current date reference
- * @returns Age in days, or -1 if invalid
- */
-fun calcTaskAgeDays(createdAt: String?, now: OffsetDateTime = OffsetDateTime.now()): Long {
-    if (createdAt.isNullOrEmpty()) return -1
-    return try {
-        val createdDateTime = try {
-            OffsetDateTime.parse(createdAt)
-        } catch (e: Exception) {
-            OffsetDateTime.ofInstant(Instant.parse(createdAt), java.time.ZoneId.systemDefault())
-        }
-        val duration = java.time.Duration.between(createdDateTime, now)
-        val days = duration.toDays()
-        if (days < 0) 0 else days
-    } catch (e: Exception) {
-        -1
-    }
-}
-
-/**
- * Get health grade based on average age of incomplete tasks.
- * @param avgAgeDays Average age in days
- * @returns Triple(grade, text, color)
- */
-fun getHealthGrade(avgAgeDays: Double): Triple<String, String, Long> {
-    return when {
-        avgAgeDays.isNaN() || avgAgeDays <= 0.0 -> Triple("A", "清单已清空，太棒了！", 0xFF22C55E)
-        avgAgeDays < 3.0 -> Triple("A", "你的清单代谢非常健康！", 0xFF22C55E)
-        avgAgeDays < 7.0 -> Triple("B", "清单状态良好，继续保持", 0xFFF59E0B)
-        else -> Triple("C", "清单有些积压，试试清理一下？", 0xFFEF4444)
-    }
-}
-

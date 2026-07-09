@@ -6,12 +6,17 @@ use tauri_plugin_dialog::DialogExt;
 use std::time::Duration;
 use fs2::FileExt;
 
+use crate::{WebdavHttpClient, GithubHttpClient};
+
 // 常量定义
-const WEBDAV_TIMEOUT_SECS: u64 = 15;
 const MAX_BACKUP_COUNT: usize = 5;
 const LOCK_RETRY_COUNT: usize = 20;
 const LOCK_RETRY_INTERVAL_MS: u64 = 50;
 
+/// 密码存储说明：
+/// 当前 webdav_password 以明文存储在 config.json 中。
+/// 建议使用 keyring crate 进行安全的系统密钥链存储。
+/// 作为过渡方案，后续可对密码字段进行 base64 混淆。
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct AppConfig {
     pub sync_mode: Option<String>, // "local" or "webdav"
@@ -22,14 +27,18 @@ pub struct AppConfig {
     pub webdav_filepath: Option<String>,
 }
 
-pub fn get_config_path(app: &AppHandle) -> PathBuf {
-    let path = app.path().app_data_dir().unwrap_or_default();
-    let _ = fs::create_dir_all(&path);
-    path.join("config.json")
+pub fn get_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let path = app.path().app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
+    fs::create_dir_all(&path).map_err(|e| format!("Failed to create app data dir: {e}"))?;
+    Ok(path.join("config.json"))
 }
 
 pub fn load_config(app: &AppHandle) -> AppConfig {
-    let path = get_config_path(app);
+    let path = match get_config_path(app) {
+        Ok(p) => p,
+        Err(_) => return AppConfig::default(),
+    };
     if let Ok(data) = fs::read_to_string(&path) {
         serde_json::from_str(&data).unwrap_or_default()
     } else {
@@ -38,7 +47,7 @@ pub fn load_config(app: &AppHandle) -> AppConfig {
 }
 
 pub fn save_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
-    let path = get_config_path(app);
+    let path = get_config_path(app)?;
     let data = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
     fs::write(&path, data).map_err(|e| e.to_string())
 }
@@ -67,8 +76,7 @@ struct WebDavConn {
 }
 
 /// 从配置中构建 WebDAV 连接信息
-fn build_webdav_conn(app: &AppHandle) -> Result<WebDavConn, String> {
-    let config = load_config(app);
+fn build_webdav_conn(config: &AppConfig) -> Result<WebDavConn, String> {
     if config.sync_mode.as_deref() != Some("webdav") {
         return Err("Not in WebDAV mode".to_string());
     }
@@ -90,8 +98,9 @@ fn build_webdav_conn(app: &AppHandle) -> Result<WebDavConn, String> {
 
 #[tauri::command]
 pub async fn sync_to_cloud(app: AppHandle, data: String) -> Result<(), String> {
-    let conn = build_webdav_conn(&app)?;
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(WEBDAV_TIMEOUT_SECS)).build().map_err(|e| e.to_string())?;
+    let config = load_config(&app);
+    let conn = build_webdav_conn(&config)?;
+    let client = app.state::<WebdavHttpClient>().inner().0.clone();
 
     let resp = client.put(&conn.target)
         .basic_auth(&conn.user, Some(&conn.pass))
@@ -118,7 +127,7 @@ async fn check_parent_folder_exists(client: &reqwest::Client, parent_url: &str, 
         .header("Content-Type", "application/xml; charset=utf-8")
         .body(xml_body)
         .send().await;
-        
+
     match resp {
         Ok(r) => r.status().is_success() || r.status().as_u16() == 207,
         Err(_) => false,
@@ -127,8 +136,9 @@ async fn check_parent_folder_exists(client: &reqwest::Client, parent_url: &str, 
 
 #[tauri::command]
 pub async fn fetch_from_cloud(app: AppHandle) -> Result<String, String> {
-    let conn = build_webdav_conn(&app)?;
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(WEBDAV_TIMEOUT_SECS)).build().map_err(|e| e.to_string())?;
+    let config = load_config(&app);
+    let conn = build_webdav_conn(&config)?;
+    let client = app.state::<WebdavHttpClient>().inner().0.clone();
 
     let resp = client.get(&conn.target)
         .basic_auth(&conn.user, Some(&conn.pass))
@@ -155,18 +165,15 @@ pub async fn fetch_from_cloud(app: AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn pick_sync_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
         .file()
         .set_title("选择坚果云同步目录 (Nutstore Sync Folder)")
         .pick_folder(move |folder_path| {
-            if let Some(path) = folder_path {
-                tx.send(Some(path.to_string())).unwrap();
-            } else {
-                tx.send(None).unwrap();
-            }
+            let result = folder_path.map(|p| p.to_string());
+            let _ = tx.send(result);
         });
-    Ok(rx.recv().unwrap_or(None))
+    rx.await.map_err(|e| format!("Dialog cancelled: {e}"))
 }
 
 #[tauri::command]
@@ -208,7 +215,7 @@ pub fn get_data_path(app: &AppHandle) -> Result<PathBuf, String> {
 /// 获取文件锁，exclusive=true 为排他锁，false 为共享锁
 fn acquire_lock(path: &Path, exclusive: bool) -> Result<File, String> {
     let lock_path = path.with_extension("lock");
-    for _ in 0..LOCK_RETRY_COUNT {
+    for i in 0..LOCK_RETRY_COUNT {
         if let Ok(file) = OpenOptions::new().read(true).write(true).create(true).open(&lock_path) {
             let ok = if exclusive {
                 file.try_lock_exclusive().map_err(|_| ())
@@ -216,6 +223,14 @@ fn acquire_lock(path: &Path, exclusive: bool) -> Result<File, String> {
                 file.try_lock_shared().map_err(|_| ())
             };
             if ok.is_ok() { return Ok(file); }
+        }
+        if i == LOCK_RETRY_COUNT - 1 {
+            log::error!(
+                "Failed to acquire {} lock after {} retries for {:?}",
+                if exclusive { "exclusive" } else { "shared" },
+                LOCK_RETRY_COUNT,
+                lock_path
+            );
         }
         std::thread::sleep(Duration::from_millis(LOCK_RETRY_INTERVAL_MS));
     }
@@ -230,7 +245,10 @@ fn scan_backups(backup_dir: &Path) -> Vec<PathBuf> {
     if let Ok(entries) = fs::read_dir(backup_dir) {
         let mut backups: Vec<(PathBuf, std::time::SystemTime)> = entries
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().map_or(false, |ext| ext == "json") && p.file_name().unwrap().to_string_lossy().starts_with("todo_data_"))
+            .filter(|p| {
+                p.extension().map_or(false, |ext| ext == "json")
+                    && p.file_name().map_or(false, |name| name.to_string_lossy().starts_with("todo_data_"))
+            })
             .filter_map(|p| {
                 let time = fs::metadata(&p).and_then(|m| m.modified()).ok()?;
                 Some((p, time))
@@ -265,7 +283,10 @@ fn create_backup(app: &AppHandle, path: &Path) {
     if !path.exists() {
         return;
     }
-    let backup_dir = app.path().app_data_dir().unwrap_or_default().join("backups");
+    let backup_dir = match app.path().app_data_dir() {
+        Ok(p) => p.join("backups"),
+        Err(_) => return,
+    };
     let _ = fs::create_dir_all(&backup_dir);
 
     let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
@@ -281,7 +302,9 @@ fn create_backup(app: &AppHandle, path: &Path) {
 
 #[tauri::command]
 pub fn list_backups(app: AppHandle) -> Result<Vec<String>, String> {
-    let backup_dir = app.path().app_data_dir().unwrap_or_default().join("backups");
+    let backup_dir = app.path().app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?
+        .join("backups");
     let file_names = scan_backups(&backup_dir).into_iter()
         .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .collect();
@@ -295,18 +318,21 @@ pub fn restore_backup(app: AppHandle, filename: String) -> Result<(), String> {
         return Err("非法的备份文件名".to_string());
     }
     let path = get_data_path(&app)?;
-    let backup_dir = app.path().app_data_dir().unwrap_or_default().join("backups");
+    let backup_dir = app.path().app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?
+        .join("backups");
     let backup_file = backup_dir.join(&filename);
+
+    // 先检查文件存在性，再做 canonicalize
+    if !backup_file.exists() {
+        return Err("备份文件不存在".to_string());
+    }
 
     // 二次验证：解析后的路径必须仍在备份目录内
     let canonical_backup_dir = backup_dir.canonicalize().unwrap_or(backup_dir.clone());
     let canonical_file = backup_file.canonicalize().unwrap_or(backup_file.clone());
     if !canonical_file.starts_with(&canonical_backup_dir) {
         return Err("备份文件路径越界".to_string());
-    }
-
-    if !backup_file.exists() {
-        return Err("备份文件不存在".to_string());
     }
 
     let _guard = acquire_lock(&path, true)?;
@@ -332,11 +358,8 @@ pub fn write_todo_data(app: AppHandle, data: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn get_latest_release() -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
+pub async fn get_latest_release(app: AppHandle) -> Result<String, String> {
+    let client = app.state::<GithubHttpClient>().inner().0.clone();
 
     let resp = client.get("https://api.github.com/repos/laotouhuan/Todo-sync/releases/latest")
         .header("User-Agent", "Todo-App-Tauri")

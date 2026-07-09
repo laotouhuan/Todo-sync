@@ -3,10 +3,10 @@ package com.todo.app.widget
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 
-class TodoCompactWidgetProvider : GlanceAppWidgetReceiver() {
-    override val glanceAppWidget: GlanceAppWidget = TodoCompactWidget()
+abstract class BaseTodoWidgetProvider(private val widget: GlanceAppWidget) : GlanceAppWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget get() = widget
 }
 
-class TodoNormalWidgetProvider : GlanceAppWidgetReceiver() {
-    override val glanceAppWidget: GlanceAppWidget = TodoNormalWidget()
-}
+class TodoCompactWidgetProvider : BaseTodoWidgetProvider(TodoCompactWidget())
+
+class TodoNormalWidgetProvider : BaseTodoWidgetProvider(TodoNormalWidget())

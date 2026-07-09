@@ -11,38 +11,46 @@ const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
 // ====== State ======
-let todoData = {
-    version: 1,
-    last_updated: new Date().toISOString(),
-    todos: []
+const appState = {
+    todoData: { version: 1, last_updated: new Date().toISOString(), todos: [] },
+    saveVersion: 0, // 递增版本号，防止自身写入触发的文件变更重载
+    currentView: 'list', // 'list' | 'stats'
+    appConfig: {},
+    isPinned: false,
+    statsPeriod: 'day', // 'day' | 'week' | 'month'
+    statsStatus: 'all', // 'all' | 'completed' | 'uncompleted'
+    statsTargetDate: new Date(),
+    statsSubTab: 'insights', // 'insights' | 'health'
+    healthThroughputDays: 30, // 吞吐量统计天数，默认30天
+    todayCollapsed: false,
+    weekCollapsed: true,
+    monthCollapsed: true,
+    currentEditingTodo: null,
+    editCachedDate: '',
+    dateFilter: 'today', // 'today' | 'all'
+    searchQuery: '',
+    allTabMode: 'uncompleted', // 'uncompleted' | 'completed'
+    showAllHistory: false,
+    currentEditingSubtasks: [],
+    currentImportType: null,
+    currentImportCandidates: [],
+    expandedTaskIds: new Set(),
+    completedCollapsed: {},
+    futureCollapsed: true,
+    noDateCollapsed: true,
+    pastCollapsed: true,
 };
 
-let saveVersion = 0; // 递增版本号，防止自身写入触发的文件变更重载
-let currentView = 'list'; // 'list' | 'stats'
-let appConfig = {};
-let isPinned = false;
-let statsPeriod = 'day'; // 'day' | 'week' | 'month'
-let statsStatus = 'all'; // 'all' | 'completed' | 'uncompleted'
-let statsTargetDate = new Date();
-let statsSubTab = 'insights'; // 'insights' | 'health'
-let healthThroughputDays = 30; // 吞吐量统计天数，默认30天
-let todayCollapsed = false;
-let weekCollapsed = true;
-let monthCollapsed = true;
-let currentEditingTodo = null;
-let editCachedDate = '';
-let dateFilter = 'today'; // 'today' | 'all'
-let searchQuery = '';
-let allTabMode = 'uncompleted'; // 'uncompleted' | 'completed'
-let showAllHistory = false;
-let currentEditingSubtasks = [];
-let currentImportType = null;
-let currentImportCandidates = [];
-let expandedTaskIds = new Set();
-let completedCollapsed = {};
-let futureCollapsed = true;
-let noDateCollapsed = true;
-let pastCollapsed = true;
+// 模块级拖拽状态（替代 window 全局属性）
+let _currentlyDraggedTodoId = null;
+let _currentlyHoveredHeaderType = null;
+
+// 渲染差异检测
+let _lastRenderedHash = '';
+
+// 保存队列（串行化并发写入）
+let _saveQueue = Promise.resolve();
+let _pendingMidnightRefresh = false;
 
 // ====== 共享常量 ======
 const PURGE_DELETED_AFTER_DAYS = 7;
@@ -63,9 +71,14 @@ function debounce(fn, ms) {
 
 /** 将用户数据转义为安全 HTML，防止 XSS */
 function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    if (!str) return '';
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    return String(str).replace(/[&<>"']/g, c => map[c]);
+}
+
+/** 深拷贝工具（替代 JSON.parse(JSON.stringify(...))） */
+function deepClone(obj) {
+    return structuredClone(obj);
 }
 
 const SyncState = { IDLE: 'idle', SYNCING: 'syncing', ERROR: 'error' };
@@ -265,10 +278,10 @@ function mergeTodoData(localData, cloudData) {
             const cTime = new Date(cTodo.updated_at || cTodo.created_at || 0).getTime();
             let merged;
             if (cTime > lTime) {
-                merged = JSON.parse(JSON.stringify(cTodo));
+                merged = deepClone(cTodo);
                 changed = true;
             } else {
-                merged = JSON.parse(JSON.stringify(lTodo));
+                merged = deepClone(lTodo);
             }
             // completed_dates 合并取并集去重
             const mergedDates = [...new Set([
@@ -320,19 +333,19 @@ function mergeTodoData(localData, cloudData) {
 async function loadData() {
     try {
         setSyncStatus(SyncState.SYNCING);
-        appConfig = await invoke("get_app_config");
+        appState.appConfig = await invoke("get_app_config");
 
         let localJsonStr = await invoke("read_todo_data").catch(() => "{}");
         let localData = null;
         try { localData = JSON.parse(localJsonStr); } catch (e) {}
 
-        if (appConfig.sync_mode === 'webdav') {
+        if (appState.appConfig.sync_mode === 'webdav') {
             try {
                 let cloudJsonStr = await invoke("fetch_from_cloud");
                 let cloudData = JSON.parse(cloudJsonStr);
 
                 let { data: mergedData, changed } = mergeTodoData(localData, cloudData);
-                todoData = mergedData;
+                appState.todoData = mergedData;
                 // migrateAndNormalize 已在 mergeTodoData 内部对所有 todo 调用，无需重复
                 render();
 
@@ -344,24 +357,24 @@ async function loadData() {
                 if (e === "FILE_NOT_FOUND") {
                     console.log("Cloud file not found, but parent folder exists. Initializing cloud database with local data...");
                     if (localData && localData.todos) {
-                        todoData = localData;
-                        todoData.todos.forEach(migrateAndNormalize);
+                        appState.todoData = localData;
+                        appState.todoData.todos.forEach(migrateAndNormalize);
                         render();
                     } else {
-                        todoData = { version: 1, last_updated: new Date().toISOString(), todos: [] };
+                        appState.todoData = { version: 1, last_updated: new Date().toISOString(), todos: [] };
                         render();
                     }
                     await saveData();
                 } else {
                     console.error("WebDAV pull failed, using local cache:", e);
                     if (localData && localData.todos) {
-                        todoData = localData;
-                        todoData.todos.forEach(migrateAndNormalize);
+                        appState.todoData = localData;
+                        appState.todoData.todos.forEach(migrateAndNormalize);
                         render();
                     }
                     setSyncStatus(SyncState.ERROR);
                     if (typeof e === 'string' && e.includes("云端同步目录不存在")) {
-                        alert(e);
+                        showToast(e);
                     } else {
                         showToast("云端同步失败，请检查网络或配置");
                     }
@@ -369,8 +382,8 @@ async function loadData() {
             }
         } else {
             if (localData && localData.todos) {
-                todoData = localData;
-                todoData.todos.forEach(migrateAndNormalize);
+                appState.todoData = localData;
+                appState.todoData.todos.forEach(migrateAndNormalize);
                 render();
             }
         }
@@ -384,16 +397,14 @@ async function loadData() {
     }
 }
 
-let _savingPromise = null;
-
 // ====== 方案二：定期物理清理过期（已删除超 7 天）的任务 ======
 function purgeOldDeletedTodos() {
-    if (!todoData || !todoData.todos) return;
+    if (!appState.todoData || !appState.todoData.todos) return;
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - PURGE_DELETED_AFTER_DAYS);
     
-    const originalCount = todoData.todos.length;
-    todoData.todos = todoData.todos.filter(t => {
+    const originalCount = appState.todoData.todos.length;
+    appState.todoData.todos = appState.todoData.todos.filter(t => {
         if (t.deleted) {
             const updateTime = t.updated_at ? new Date(t.updated_at) : new Date(t.created_at);
             if (isNaN(updateTime.getTime()) || updateTime < sevenDaysAgo) {
@@ -404,17 +415,15 @@ function purgeOldDeletedTodos() {
         return true;
     });
     
-    const purgedCount = originalCount - todoData.todos.length;
+    const purgedCount = originalCount - appState.todoData.todos.length;
     if (purgedCount > 0) {
         console.log(`[Purge] 自动物理清理了 ${purgedCount} 个已删除超过 7 天的旧任务记录。`);
     }
 }
 
-async function saveData() {
-    // Promise 锁：防止多个 saveData 并发执行
-    if (_savingPromise) await _savingPromise;
-    _savingPromise = _doSaveData();
-    try { await _savingPromise; } finally { _savingPromise = null; }
+function saveData() {
+    _saveQueue = _saveQueue.then(() => _doSaveData()).catch(e => console.error('Save failed:', e));
+    return _saveQueue;
 }
 
 async function _doSaveData() {
@@ -423,17 +432,17 @@ async function _doSaveData() {
         // 执行物理清理，将删除超 7 天的旧任务彻底抹除，维持 JSON 大小
         purgeOldDeletedTodos();
         
-        todoData.last_updated = new Date().toISOString();
-        const jsonStr = JSON.stringify(todoData, null, 2);
-        saveVersion++;
+        appState.todoData.last_updated = new Date().toISOString();
+        const jsonStr = JSON.stringify(appState.todoData, null, 2);
+        appState.saveVersion++;
         await invoke("write_todo_data", { data: jsonStr });
 
-        if (appConfig.sync_mode === 'webdav') {
+        if (appState.appConfig.sync_mode === 'webdav') {
             try {
                 await invoke("sync_to_cloud", { data: jsonStr });
             } catch (e) {
                 console.error("WebDAV push failed:", e);
-                alert("推送至云端失败: " + e);
+                showToast("推送至云端失败: " + e);
                 setSyncStatus(SyncState.ERROR);
                 return;
             }
@@ -452,7 +461,7 @@ function getMetaHtml(todo, todayStr, tomorrowStr) {
     if (todo.date) {
         const dateLabel = getDateLabel(todo.date, todayStr, tomorrowStr);
         const overdue = isOverdue(todo, todayStr);
-        const dateClass = (overdue && dateFilter === 'today') ? 'overdue' : '';
+        const dateClass = (overdue && appState.dateFilter === 'today') ? 'overdue' : '';
 
         // 已完成和未完成任务都显示截止日期，确保已完成历史中保留原始截止信息
         html += `<span class="meta-item date ${dateClass}">📅 ${escapeHtml(dateLabel)}</span>`;
@@ -479,7 +488,7 @@ function getMetaHtml(todo, todayStr, tomorrowStr) {
 function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) {
     const li = document.createElement('li');
     const isCheckinCompletedToday = (todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin')
-        && todo.completed_dates && todo.completed_dates.includes(todayStr);
+        && todo.completed_dates && todo.completed_dates.some(dStr => dStr.startsWith(todayStr));
     const isVisualCompleted = checkinDate !== null ? true : (todo.completed || isCheckinCompletedToday);
     li.className = `todo-item ${isVisualCompleted ? 'completed' : ''}`;
     li.id = checkinDate !== null ? `todo-${todo.id}-${checkinDate}` : `todo-${todo.id}`;
@@ -494,7 +503,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
             <span class="todo-content"></span>
             <div class="todo-meta">${getMetaHtml(todo, todayStr, tomorrowStr)}</div>
             <div class="read-only-checkin-container" style="margin-top: 6px;"></div>
-            <ul class="inline-subtasks-list" style="display: ${expandedTaskIds.has(todo.id) ? 'block' : 'none'}; padding-left: 0; list-style: none; margin-top: 8px; width: 100%;"></ul>
+            <ul class="inline-subtasks-list" style="display: ${appState.expandedTaskIds.has(todo.id) ? 'block' : 'none'}; padding-left: 0; list-style: none; margin-top: 8px; width: 100%;"></ul>
         </div>
         <button class="edit-btn" aria-label="修改">
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
@@ -567,7 +576,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
 
         const monthCalendarGrid = document.createElement('div');
         monthCalendarGrid.className = 'checkin-grid-container compact-checkin-grid';
-        monthCalendarGrid.style.display = expandedTaskIds.has(todo.id) ? 'grid' : 'none';
+        monthCalendarGrid.style.display = appState.expandedTaskIds.has(todo.id) ? 'grid' : 'none';
         monthCalendarGrid.style.marginTop = '6px';
 
         renderMonthCalendar(monthCalendarGrid, todo, false, todayStr);
@@ -618,10 +627,10 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
     li.querySelector('.checkbox').addEventListener('click', async (e) => {
         e.stopPropagation();
         if (checkinDate !== null) {
-            const index = todoData.todos.findIndex(t => t.id === todo.id);
+            const index = appState.todoData.todos.findIndex(t => t.id === todo.id);
             if (index !== -1) {
-                const t = todoData.todos[index];
-                const dateIdx = t.completed_dates.indexOf(checkinDate);
+                const t = appState.todoData.todos[index];
+                const dateIdx = t.completed_dates.findIndex(d => d.startsWith(checkinDate));
                 if (dateIdx > -1) {
                     t.completed_dates.splice(dateIdx, 1);
                 }
@@ -638,9 +647,9 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
             }
             return;
         }
-        const index = todoData.todos.findIndex(t => t.id === todo.id);
+        const index = appState.todoData.todos.findIndex(t => t.id === todo.id);
         if (index !== -1) {
-            const t = todoData.todos[index];
+            const t = appState.todoData.todos[index];
 
             // 周/月打卡任务处理分支
             if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
@@ -654,13 +663,13 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
                 }
 
                 // 2. 今天已打过卡
-                if (t.completed_dates.includes(todayISO)) {
+                if (t.completed_dates.some(d => d.startsWith(todayISO))) {
                     showToast('今天已打卡！如需消卡，请点击文本进入编辑弹窗。');
                     return;
                 }
 
-                // 3. 执行打卡
-                t.completed_dates.push(todayISO);
+                // 3. 执行打卡 (正常打卡保存完整 ISO 时间戳)
+                t.completed_dates.push(new Date().toISOString());
                 t.completed_dates.sort();
 
                 // 检查是否达标
@@ -680,7 +689,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
 
             if (!t.completed && t.recurring === 'daily_repeat') {
                 const tomorrowStr = getTomorrowString();
-                const existsClone = todoData.todos.some(
+                const existsClone = appState.todoData.todos.some(
                     x => x.content === t.content && x.date === tomorrowStr 
                          && x.recurring === 'daily_repeat' && !x.deleted
                 );
@@ -689,14 +698,14 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
                     clone.recurring = 'daily_repeat';
                     clone.order = -Date.now(); // 负数确保排在最前面
                     clone.subtasks = t.subtasks
-                        ? JSON.parse(JSON.stringify(t.subtasks)).map(s => {
+                        ? deepClone(t.subtasks).map(s => {
                             s.id = crypto.randomUUID();
                             s.completed = false;
                             s.completed_at = null;
                             return s;
                         })
                         : [];
-                    todoData.todos.push(clone);
+                    appState.todoData.todos.push(clone);
                 }
             }
             t.completed = !t.completed;
@@ -726,12 +735,12 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
         
         if (hasSubtasks || isMonthlyCheckin) {
             const monthGrid = li.querySelector('.compact-checkin-grid');
-            if (expandedTaskIds.has(todo.id)) {
-                expandedTaskIds.delete(todo.id);
+            if (appState.expandedTaskIds.has(todo.id)) {
+                appState.expandedTaskIds.delete(todo.id);
                 subtasksList.style.display = 'none';
                 if (monthGrid) monthGrid.style.display = 'none';
             } else {
-                expandedTaskIds.add(todo.id);
+                appState.expandedTaskIds.add(todo.id);
                 if (hasSubtasks) subtasksList.style.display = 'block';
                 if (monthGrid) monthGrid.style.display = 'grid';
             }
@@ -744,7 +753,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
         openEditModal(todo);
     });
 
-    if (dateFilter === 'today') {
+    if (appState.dateFilter === 'today') {
         li.dataset.id = todo.id;
     }
 
@@ -828,7 +837,7 @@ function renderMonthCalendar(container, todo, isInteractive, todayStr) {
     for (let d = 1; d <= daysInMonth; d++) {
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const cell = document.createElement('div');
-        const isChecked = completedDates.includes(dateStr);
+        const isChecked = completedDates.some(d => d.startsWith(dateStr));
         const isToday = dateStr === todayStr;
         
         if (isInteractive) {
@@ -859,13 +868,18 @@ function renderMonthCalendar(container, todo, isInteractive, todayStr) {
 
 // ====== Edit Checkin Grid ======
 function toggleCheckinDate(todo, dateStr) {
-    const index = todo.completed_dates.indexOf(dateStr);
+    const index = todo.completed_dates.findIndex(d => d.startsWith(dateStr));
     if (index > -1) {
         // 消卡
         todo.completed_dates.splice(index, 1);
     } else {
-        // 补卡
-        todo.completed_dates.push(dateStr);
+        // 补卡 / 打卡
+        const todayStr = getTodayString();
+        if (dateStr === todayStr) {
+            todo.completed_dates.push(new Date().toISOString());
+        } else {
+            todo.completed_dates.push(dateStr);
+        }
     }
     todo.completed_dates.sort();
 
@@ -923,8 +937,8 @@ function renderEditCheckinGrid(todo) {
             current.setDate(monday.getDate() + i);
             const dateStr = formatDate(current);
 
-            const cell = document.createElement('div');
-            cell.className = `checkin-grid-cell${completedDates.includes(dateStr) ? ' checked' : ''}${dateStr === todayStr ? ' today-cell' : ''}`;
+            const isChecked = completedDates.some(d => d.startsWith(dateStr));
+            cell.className = `checkin-grid-cell${isChecked ? ' checked' : ''}${dateStr === todayStr ? ' today-cell' : ''}`;
             cell.textContent = labels[i];
             cell.title = dateStr;
             cell.addEventListener('click', () => {
@@ -943,7 +957,7 @@ function renderEditSubtasks() {
     const listEl = document.getElementById('edit-subtasks-list');
     if (!listEl) return;
     listEl.innerHTML = '';
-    currentEditingSubtasks.forEach((sub, idx) => {
+    appState.currentEditingSubtasks.forEach((sub, idx) => {
         const li = document.createElement('li');
         li.className = `subtask-item ${sub.completed ? 'completed' : ''}`;
         li.dataset.index = idx;
@@ -982,6 +996,7 @@ function renderEditSubtasks() {
 
         checkbox.addEventListener('click', () => {
             sub.completed = !sub.completed;
+            sub.completed_at = sub.completed ? new Date().toISOString() : null;
             if (sub.completed) {
                 li.classList.add('completed');
                 checkbox.style.background = 'var(--accent-color)';
@@ -1038,7 +1053,7 @@ function renderEditSubtasks() {
         });
 
         deleteBtn.addEventListener('click', () => {
-            currentEditingSubtasks.splice(idx, 1);
+            appState.currentEditingSubtasks.splice(idx, 1);
             renderEditSubtasks();
             autoSaveEdit();
         });
@@ -1051,7 +1066,7 @@ function renderEditSubtasks() {
             listEl._sortableInstance.destroy();
             listEl._sortableInstance = null;
         }
-        if (currentEditingSubtasks.length > 1) {
+        if (appState.currentEditingSubtasks.length > 1) {
             listEl._sortableInstance = new Sortable(listEl, {
                 animation: 150,
                 delay: 300,
@@ -1071,8 +1086,8 @@ function renderEditSubtasks() {
                 onEnd: function(evt) {
                     const { oldIndex, newIndex } = evt;
                     if (oldIndex !== newIndex && oldIndex != null && newIndex != null) {
-                        const moved = currentEditingSubtasks.splice(oldIndex, 1)[0];
-                        currentEditingSubtasks.splice(newIndex, 0, moved);
+                        const moved = appState.currentEditingSubtasks.splice(oldIndex, 1)[0];
+                        appState.currentEditingSubtasks.splice(newIndex, 0, moved);
                         renderEditSubtasks();
                         autoSaveEdit();
                     }
@@ -1085,30 +1100,30 @@ function renderEditSubtasks() {
 let _autoSaveTimer = null;
 
 async function _doAutoSave() {
-    if (!currentEditingTodo) return;
+    if (!appState.currentEditingTodo) return;
     const newContent = document.getElementById('edit-content').value.trim();
     // 空内容时不更新 content 字段，但仍允许保存其他字段（date、time、subtasks 等）
     const hasContent = !!newContent;
 
-    const index = todoData.todos.findIndex(t => t.id === currentEditingTodo.id);
+    const index = appState.todoData.todos.findIndex(t => t.id === appState.currentEditingTodo.id);
     if (index !== -1) {
-        if (hasContent) todoData.todos[index].content = newContent;
+        if (hasContent) appState.todoData.todos[index].content = newContent;
 
         const taskTypeSelect = document.getElementById('edit-task-type');
         if (taskTypeSelect) {
             const taskTypeVal = taskTypeSelect.value;
             if (taskTypeVal === 'daily_repeat') {
-                todoData.todos[index].task_type = 'normal';
-                todoData.todos[index].recurring = 'daily_repeat';
-                todoData.todos[index].time = null;
+                appState.todoData.todos[index].task_type = 'normal';
+                appState.todoData.todos[index].recurring = 'daily_repeat';
+                appState.todoData.todos[index].time = null;
                 // 确保每天重复任务拥有有效的今日/现有日期
-                const existingDate = todoData.todos[index].date;
+                const existingDate = appState.todoData.todos[index].date;
                 if (!existingDate || isWeekDate(existingDate) || isMonthDate(existingDate)) {
-                    todoData.todos[index].date = getTodayString();
+                    appState.todoData.todos[index].date = getTodayString();
                 }
             } else {
-                todoData.todos[index].task_type = taskTypeVal;
-                todoData.todos[index].recurring = 'none';
+                appState.todoData.todos[index].task_type = taskTypeVal;
+                appState.todoData.todos[index].recurring = 'none';
 
                 if (taskTypeVal === 'normal') {
                     const hasDateSwitch = document.getElementById('edit-has-date-switch');
@@ -1121,34 +1136,34 @@ async function _doAutoSave() {
                             const isMonth = isMonthDate(dateVal);
                             if (!isDay && !isWeek && !isMonth) {
                                 // 格式不合规时，恢复为上一合法值或空
-                                dateVal = currentEditingTodo.date || null;
+                                dateVal = appState.currentEditingTodo.date || null;
                                 document.getElementById('edit-date').value = dateVal || '';
                             } else if (isWeek) {
                                 // 强转为周打卡任务
-                                todoData.todos[index].task_type = 'weekly_checkin';
+                                appState.todoData.todos[index].task_type = 'weekly_checkin';
                                 if (taskTypeSelect) taskTypeSelect.value = 'weekly_checkin';
                                 updateEditModalFields('weekly_checkin');
                             } else if (isMonth) {
                                 // 强转为月打卡任务
-                                todoData.todos[index].task_type = 'monthly_checkin';
+                                appState.todoData.todos[index].task_type = 'monthly_checkin';
                                 if (taskTypeSelect) taskTypeSelect.value = 'monthly_checkin';
                                 updateEditModalFields('monthly_checkin');
                             }
                         }
-                        todoData.todos[index].date = dateVal;
+                        appState.todoData.todos[index].date = dateVal;
                     } else {
-                        todoData.todos[index].date = null;
+                        appState.todoData.todos[index].date = null;
                     }
-                    todoData.todos[index].time = null;
+                    appState.todoData.todos[index].time = null;
                 } else {
-                    todoData.todos[index].time = null;
+                    appState.todoData.todos[index].time = null;
                     if (taskTypeVal === 'weekly_checkin') {
-                        if (!isWeekDate(todoData.todos[index].date)) {
-                            todoData.todos[index].date = getThisWeekString();
+                        if (!isWeekDate(appState.todoData.todos[index].date)) {
+                            appState.todoData.todos[index].date = getThisWeekString();
                         }
                     } else if (taskTypeVal === 'monthly_checkin') {
-                        if (!isMonthDate(todoData.todos[index].date)) {
-                            todoData.todos[index].date = getThisMonthString();
+                        if (!isMonthDate(appState.todoData.todos[index].date)) {
+                            appState.todoData.todos[index].date = getThisMonthString();
                         }
                     }
                 }
@@ -1158,15 +1173,15 @@ async function _doAutoSave() {
         const targetCountInput = document.getElementById('edit-target-count');
         if (targetCountInput) {
             const val = parseInt(targetCountInput.value, 10);
-            todoData.todos[index].target_count = (isNaN(val) || val <= 0) ? null : val;
+            appState.todoData.todos[index].target_count = (isNaN(val) || val <= 0) ? null : val;
         }
-        todoData.todos[index].subtasks = JSON.parse(JSON.stringify(currentEditingSubtasks));
-        todoData.todos[index].updated_at = new Date().toISOString();
+        appState.todoData.todos[index].subtasks = deepClone(appState.currentEditingSubtasks);
+        appState.todoData.todos[index].updated_at = new Date().toISOString();
 
-        const allCompleted = todoData.todos[index].subtasks.length > 0 && todoData.todos[index].subtasks.every(s => s.completed);
-        if (allCompleted && !todoData.todos[index].completed) {
-            todoData.todos[index].completed = true;
-            todoData.todos[index].completed_at = new Date().toISOString();
+        const allCompleted = appState.todoData.todos[index].subtasks.length > 0 && appState.todoData.todos[index].subtasks.every(s => s.completed);
+        if (allCompleted && !appState.todoData.todos[index].completed) {
+            appState.todoData.todos[index].completed = true;
+            appState.todoData.todos[index].completed_at = new Date().toISOString();
         }
 
         render();
@@ -1205,7 +1220,7 @@ function updateEditModalFields(taskTypeVal) {
 }
 
 function openEditModal(todo) {
-    currentEditingTodo = todo;
+    appState.currentEditingTodo = todo;
 
     const modal = document.getElementById('edit-modal');
     const input = document.getElementById('edit-content');
@@ -1234,12 +1249,12 @@ function openEditModal(todo) {
         hasDateSwitch.checked = true;
         dateContainer.style.display = 'flex';
         dateInput.value = dateVal;
-        editCachedDate = dateVal;
+        appState.editCachedDate = dateVal;
     } else {
         hasDateSwitch.checked = false;
         dateContainer.style.display = 'none';
         dateInput.value = '';
-        editCachedDate = (todo.task_type === 'normal' && todo.date && !isWeekDate(todo.date) && !isMonthDate(todo.date)) ? todo.date : getTodayString();
+        appState.editCachedDate = (todo.task_type === 'normal' && todo.date && !isWeekDate(todo.date) && !isMonthDate(todo.date)) ? todo.date : getTodayString();
     }
 
     const targetCountInput = document.getElementById('edit-target-count');
@@ -1247,7 +1262,7 @@ function openEditModal(todo) {
         targetCountInput.value = todo.target_count || '';
     }
 
-    currentEditingSubtasks = todo.subtasks ? JSON.parse(JSON.stringify(todo.subtasks)) : [];
+    appState.currentEditingSubtasks = todo.subtasks ? deepClone(todo.subtasks) : [];
     renderEditSubtasks();
     renderEditCheckinGrid(todo);
 
@@ -1258,9 +1273,9 @@ function openEditModal(todo) {
 function closeEditModal() {
     autoSaveEditImmediate().finally(() => {
         document.getElementById('edit-modal').classList.remove('active');
-        currentEditingTodo = null;
-        if (window._pendingMidnightRefresh) {
-            window._pendingMidnightRefresh = false;
+        appState.currentEditingTodo = null;
+        if (_pendingMidnightRefresh) {
+            _pendingMidnightRefresh = false;
             render();
         }
     });
@@ -1272,7 +1287,7 @@ function renderStats(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     const insightsEl = document.getElementById('stats-insights');
     const healthEl = document.getElementById('stats-health');
 
-    if (statsSubTab === 'insights') {
+    if (appState.statsSubTab === 'insights') {
         if (insightsEl) insightsEl.classList.remove('hidden');
         if (healthEl) healthEl.classList.add('hidden');
         renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr);
@@ -1287,56 +1302,78 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     const statsList = document.getElementById('stats-list');
     statsList.innerHTML = '';
 
-    const targetDayStr = formatDate(statsTargetDate);
-    const targetWeekStr = getISOWeekString(statsTargetDate);
-    const targetMonthStr = `${statsTargetDate.getFullYear()}-${String(statsTargetDate.getMonth() + 1).padStart(2, '0')}`;
+    const targetDayStr = formatDate(appState.statsTargetDate);
+    const targetWeekStr = getISOWeekString(appState.statsTargetDate);
+    const targetMonthStr = `${appState.statsTargetDate.getFullYear()}-${String(appState.statsTargetDate.getMonth() + 1).padStart(2, '0')}`;
     const labelEl = document.getElementById('stats-date-label');
 
-    const activeTodos = todoData.todos.filter(t => !t.deleted);
+    const activeTodos = appState.todoData.todos.filter(t => !t.deleted);
     let periodTodos = [];
-    if (statsPeriod === 'day') {
+    if (appState.statsPeriod === 'day') {
         labelEl.textContent = targetDayStr;
         periodTodos = activeTodos.filter(t => {
-            if (t.date === targetDayStr) return true;
-            if (!t.date && t.completed && t.completed_at) {
-                return t.completed_at.substring(0, 10) === targetDayStr;
+            if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
+                return (t.completed_dates || []).some(dStr => dStr.startsWith(targetDayStr));
+            } else {
+                if (t.completed && t.completed_at) {
+                    return t.completed_at.substring(0, 10) === targetDayStr;
+                } else {
+                    return t.date === targetDayStr;
+                }
             }
-            return false;
         });
-    } else if (statsPeriod === 'week') {
+    } else if (appState.statsPeriod === 'week') {
         const parts = targetWeekStr.split('-W');
         labelEl.textContent = `${parts[0]}年 第${parts[1]}周`;
         periodTodos = activeTodos.filter(t => {
-            if (!t.date) {
+            if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
+                const hasCheckin = (t.completed_dates || []).some(dStr => {
+                    const checkDate = new Date(dStr);
+                    return !isNaN(checkDate.getTime()) && getISOWeekString(checkDate) === targetWeekStr;
+                });
+                if (t.task_type === 'weekly_checkin' && t.date === targetWeekStr) {
+                    return t.target_count !== null ? true : hasCheckin;
+                }
+                return hasCheckin;
+            } else {
                 if (t.completed && t.completed_at) {
                     const compDate = new Date(t.completed_at);
                     if (!isNaN(compDate.getTime())) {
                         return getISOWeekString(compDate) === targetWeekStr;
                     }
+                    return false;
+                } else {
+                    if (!t.date) return false;
+                    if (t.date === targetWeekStr) return true;
+                    if (t.date.length === 10) {
+                        const checkDate = new Date(t.date);
+                        if (isNaN(checkDate.getTime())) return false;
+                        return getISOWeekString(checkDate) === targetWeekStr;
+                    }
+                    return false;
                 }
-                return false;
             }
-            if (t.date === targetWeekStr) return true;
-            if (t.date.length === 10) {
-                const checkDate = new Date(t.date);
-                if (isNaN(checkDate.getTime())) return false;
-                return getISOWeekString(checkDate) === targetWeekStr;
-            }
-            return false;
         });
     } else {
         const parts = targetMonthStr.split('-');
         labelEl.textContent = `${parts[0]}年 ${parts[1]}月`;
         periodTodos = activeTodos.filter(t => {
-            if (!t.date) {
+            if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
+                const hasCheckin = (t.completed_dates || []).some(dStr => dStr.startsWith(targetMonthStr));
+                if (t.task_type === 'monthly_checkin' && t.date === targetMonthStr) {
+                    return t.target_count !== null ? true : hasCheckin;
+                }
+                return hasCheckin;
+            } else {
                 if (t.completed && t.completed_at) {
                     return t.completed_at.substring(0, 7) === targetMonthStr;
+                } else {
+                    if (!t.date) return false;
+                    if (t.date === targetMonthStr) return true;
+                    if (t.date.length === 10) return t.date.startsWith(targetMonthStr);
+                    return false;
                 }
-                return false;
             }
-            if (t.date === targetMonthStr) return true;
-            if (t.date.length === 10) return t.date.startsWith(targetMonthStr);
-            return false;
         });
     }
 
@@ -1344,15 +1381,13 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     let completedCountSum = 0;
 
     periodTodos.forEach(t => {
-        totalCountSum += 1.0;
-        
         if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
             let periodCheckinCount = 0;
             const completedDates = t.completed_dates || [];
             completedDates.forEach(dStr => {
-                if (statsPeriod === 'day') {
-                    if (dStr === targetDayStr) periodCheckinCount++;
-                } else if (statsPeriod === 'week') {
+                if (appState.statsPeriod === 'day') {
+                    if (dStr.startsWith(targetDayStr)) periodCheckinCount++;
+                } else if (appState.statsPeriod === 'week') {
                     const checkDate = new Date(dStr);
                     if (!isNaN(checkDate.getTime()) && getISOWeekString(checkDate) === targetWeekStr) {
                         periodCheckinCount++;
@@ -1362,12 +1397,15 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
                 }
             });
 
-            if (t.target_count) {
-                completedCountSum += Math.min(1.0, periodCheckinCount / t.target_count);
+            if (t.target_count !== null) {
+                completedCountSum += Math.min(t.target_count, periodCheckinCount);
+                totalCountSum += t.target_count;
             } else {
-                completedCountSum += (periodCheckinCount >= 1 ? 1.0 : 0.0);
+                completedCountSum += periodCheckinCount;
+                totalCountSum += periodCheckinCount;
             }
         } else {
+            totalCountSum += 1.0;
             if (t.completed) completedCountSum += 1.0;
         }
     });
@@ -1378,16 +1416,49 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     document.getElementById('stats-summary-text').textContent = `共 ${formatVal(totalCountSum)} 项，已完成 ${formatVal(completedCountSum)} 项，进度 ${progress}%`;
     document.getElementById('stats-progress-fill').style.width = `${progress}%`;
 
-    // 时段分布渲染
-    const completedNormalTodos = periodTodos.filter(t => t.completed && t.completed_at);
+    // 时段分布渲染 (打卡任务包含有时间戳记录的正常打卡，排除无时分秒的补打卡)
     let morningCount = 0, afternoonCount = 0, eveningCount = 0, nightCount = 0;
-    completedNormalTodos.forEach(t => {
-        const slot = categorizeByTimeSlot(t.completed_at);
-        if (slot === 'morning') morningCount++;
-        else if (slot === 'afternoon') afternoonCount++;
-        else if (slot === 'evening') eveningCount++;
-        else if (slot === 'night') nightCount++;
+    let makeupCheckinCount = 0;
+
+    periodTodos.forEach(t => {
+        if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
+            const completedDates = t.completed_dates || [];
+            completedDates.forEach(dStr => {
+                let inPeriod = false;
+                if (appState.statsPeriod === 'day') {
+                    inPeriod = dStr.startsWith(targetDayStr);
+                } else if (appState.statsPeriod === 'week') {
+                    const checkDate = new Date(dStr);
+                    inPeriod = !isNaN(checkDate.getTime()) && getISOWeekString(checkDate) === targetWeekStr;
+                } else {
+                    inPeriod = dStr.startsWith(targetMonthStr);
+                }
+
+                if (inPeriod) {
+                    if (dStr.length > 10) {
+                        // 正常打卡计入时段分布
+                        const slot = categorizeByTimeSlot(dStr);
+                        if (slot === 'morning') morningCount++;
+                        else if (slot === 'afternoon') afternoonCount++;
+                        else if (slot === 'evening') eveningCount++;
+                        else if (slot === 'night') nightCount++;
+                    } else {
+                        // 补打卡（长度为10，如 YYYY-MM-DD）不计入时段，计为补打卡数
+                        makeupCheckinCount++;
+                    }
+                }
+            });
+        } else {
+            if (t.completed && t.completed_at) {
+                const slot = categorizeByTimeSlot(t.completed_at);
+                if (slot === 'morning') morningCount++;
+                else if (slot === 'afternoon') afternoonCount++;
+                else if (slot === 'evening') eveningCount++;
+                else if (slot === 'night') nightCount++;
+            }
+        }
     });
+
     const totalSlots = morningCount + afternoonCount + eveningCount + nightCount;
     
     const morningPct = totalSlots === 0 ? 0 : Math.round((morningCount / totalSlots) * 100);
@@ -1404,6 +1475,20 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     document.querySelector('.segment-afternoon').style.flex = afternoonCount || 1;
     document.querySelector('.segment-evening').style.flex = eveningCount || 1;
     document.querySelector('.segment-night').style.flex = nightCount || 1;
+
+    const tipEl = document.getElementById('time-distribution-tip');
+    if (tipEl) {
+        if (makeupCheckinCount > 0) {
+            let periodText = '本日';
+            if (appState.statsPeriod === 'week') periodText = '本周';
+            else if (appState.statsPeriod === 'month') periodText = '本月';
+            tipEl.textContent = `* ${periodText}包含 ${makeupCheckinCount} 项补打卡，不计入时段分布统计`;
+            tipEl.classList.remove('hidden');
+        } else {
+            tipEl.textContent = '';
+            tipEl.classList.add('hidden');
+        }
+    }
 
     const insightTextEl = document.getElementById('time-insight-text');
     if (totalSlots === 0) {
@@ -1449,8 +1534,22 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
 }
 
 function renderHealth(todayStr, tomorrowStr) {
-    const activeTodos = todoData.todos.filter(t => !t.deleted);
-    const incompleteTodos = activeTodos.filter(t => !t.completed);
+    const activeTodos = appState.todoData.todos.filter(t => !t.deleted);
+    const incompleteTodos = activeTodos.filter(t => {
+        if (t.completed) return false;
+        // 排除过期的周/月打卡任务
+        if (t.task_type === 'weekly_checkin' && t.date && t.date < getThisWeekString()) {
+            return false;
+        }
+        if (t.task_type === 'monthly_checkin' && t.date && t.date < getThisMonthString()) {
+            return false;
+        }
+        // 排除没有设定次数目标的打卡任务
+        if ((t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') && !t.target_count) {
+            return false;
+        }
+        return true;
+    });
     
     // 1. 计算未完成任务的平均寿命
     const now = new Date();
@@ -1476,13 +1575,17 @@ function renderHealth(todayStr, tomorrowStr) {
     gradeTextEl.textContent = `“${healthGrade.text}”`;
 
     // 3. 吞吐量对比
-    const thresholdMs = now.getTime() - (healthThroughputDays * 86400000);
+    const thresholdMs = now.getTime() - (appState.healthThroughputDays * 86400000);
     const thresholdDate = new Date(thresholdMs);
     
     let addedCount = 0;
     let completedCount = 0;
     
     activeTodos.forEach(t => {
+        // 排除周/月打卡任务
+        if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
+            return;
+        }
         if (t.created_at) {
             const createdDate = new Date(t.created_at);
             if (!isNaN(createdDate.getTime()) && createdDate >= thresholdDate) {
@@ -1494,14 +1597,6 @@ function renderHealth(todayStr, tomorrowStr) {
             if (!isNaN(completedDate.getTime()) && completedDate >= thresholdDate) {
                 completedCount++;
             }
-        } else if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
-            const completedDates = t.completed_dates || [];
-            completedDates.forEach(dStr => {
-                const checkDate = new Date(dStr + 'T00:00:00');
-                if (!isNaN(checkDate.getTime()) && checkDate >= thresholdDate) {
-                    completedCount++;
-                }
-            });
         }
     });
 
@@ -1518,10 +1613,13 @@ function renderHealth(todayStr, tomorrowStr) {
     const verdictEl = document.getElementById('throughput-verdict');
     if (completedCount > addedCount) {
         verdictEl.textContent = '清单正在变轻盈 ✨';
+        verdictEl.style.display = 'block';
     } else if (completedCount === addedCount) {
         verdictEl.textContent = '收支平衡，保持节奏';
+        verdictEl.style.display = 'block';
     } else {
-        verdictEl.textContent = '任务在积压，试试清理一下？';
+        verdictEl.textContent = '';
+        verdictEl.style.display = 'none';
     }
 
     // 4. 沉睡待办
@@ -1598,15 +1696,15 @@ function renderCollapsibleGroup(group, label, isCollapsed, type, themeColor, tod
 
     // 为拖拽悬停增加交互反馈与目标捕获（用于在折叠状态下拖入并自动下拉）
     header.addEventListener('mouseenter', () => {
-        if (window.currentlyDraggedTodoId && (type === 'today' || type === 'weekly' || type === 'monthly')) {
-            window.currentlyHoveredHeaderType = type;
+        if (_currentlyDraggedTodoId && (type === 'today' || type === 'weekly' || type === 'monthly')) {
+            _currentlyHoveredHeaderType = type;
             header.classList.add('drag-hover-header');
         }
     });
 
     header.addEventListener('mouseleave', () => {
-        if (window.currentlyHoveredHeaderType === type) {
-            window.currentlyHoveredHeaderType = null;
+        if (_currentlyHoveredHeaderType === type) {
+            _currentlyHoveredHeaderType = null;
         }
         header.classList.remove('drag-hover-header');
     });
@@ -1614,16 +1712,16 @@ function renderCollapsibleGroup(group, label, isCollapsed, type, themeColor, tod
     header.addEventListener('click', () => {
         // 折叠状态 Map 映射：type 前缀 → 对应的状态变量访问器
         const collapseMap = {
-            today: () => { todayCollapsed = !todayCollapsed; },
-            weekly: () => { weekCollapsed = !weekCollapsed; },
-            monthly: () => { monthCollapsed = !monthCollapsed; },
-            future: () => { futureCollapsed = !futureCollapsed; },
-            nodate: () => { noDateCollapsed = !noDateCollapsed; },
-            past: () => { pastCollapsed = !pastCollapsed; },
+            today: () => { appState.todayCollapsed = !appState.todayCollapsed; },
+            weekly: () => { appState.weekCollapsed = !appState.weekCollapsed; },
+            monthly: () => { appState.monthCollapsed = !appState.monthCollapsed; },
+            future: () => { appState.futureCollapsed = !appState.futureCollapsed; },
+            nodate: () => { appState.noDateCollapsed = !appState.noDateCollapsed; },
+            past: () => { appState.pastCollapsed = !appState.pastCollapsed; },
         };
         const baseType = type.replace('_uncompleted', '');
         if (type.startsWith('completed_')) {
-            completedCollapsed[type] = !completedCollapsed[type];
+            appState.completedCollapsed[type] = !appState.completedCollapsed[type];
         } else if (collapseMap[baseType]) {
             collapseMap[baseType]();
         }
@@ -1697,19 +1795,38 @@ function renderFlatPendingGroup(group, label, themeColor, todayStr, tomorrowStr,
 
 // ====== Main Render Function ======
 function render() {
+    // 差异更新：如果 todo 数据和 UI 状态均未变化则跳过渲染
+    const uiStateHash = [
+        appState.dateFilter,
+        appState.currentView,
+        appState.allTabMode,
+        appState.searchQuery,
+        appState.todayCollapsed,
+        appState.weekCollapsed,
+        appState.monthCollapsed,
+        appState.statsPeriod,
+        appState.statsTargetDate.getTime(),
+        appState.statsSubTab,
+        appState.healthThroughputDays,
+        appState.showAllHistory
+    ].join('|');
+    const _hash = appState.todoData.todos.map(t => `${t.id}:${t.updated_at}:${t.completed}`).join('|') + '|' + uiStateHash;
+    if (_hash === _lastRenderedHash) return;
+    _lastRenderedHash = _hash;
+
     const todayStr = getTodayString();
     const tomorrowStr = getTomorrowString();
     const thisWeekStr = getThisWeekString();
     const thisMonthStr = getThisMonthString();
 
-    // 根据 dateFilter 过滤数据
-    let filteredTodos = [...todoData.todos].filter(t => !t.deleted);
-    if (searchQuery) {
-        const queryLower = searchQuery.toLowerCase();
+    // 根据 appState.dateFilter 过滤数据
+    let filteredTodos = [...appState.todoData.todos].filter(t => !t.deleted);
+    if (appState.searchQuery) {
+        const queryLower = appState.searchQuery.toLowerCase();
         filteredTodos = filteredTodos.filter(t => t.content.toLowerCase().includes(queryLower));
     }
 
-    if (dateFilter === 'today') {
+    if (appState.dateFilter === 'today') {
         filteredTodos = filteredTodos.filter(t => {
             const completedToday = t.completed && t.completed_at && t.completed_at.substring(0, 10) === todayStr;
             const wasOverdue = t.date && t.date < todayStr && !isWeekDate(t.date) && !isMonthDate(t.date);
@@ -1723,24 +1840,24 @@ function render() {
         });
     }
 
-    if (currentView === 'stats') {
+    if (appState.currentView === 'stats') {
         renderStats(todayStr, tomorrowStr, thisWeekStr, thisMonthStr);
         return;
     }
 
-    if (currentView === 'list') {
+    if (appState.currentView === 'list') {
         listEl.innerHTML = '';
 
-        if (dateFilter === 'today') {
+        if (appState.dateFilter === 'today') {
             const monthGroup = filteredTodos.filter(t => t.date === thisMonthStr).sort(sortFunc);
             const weekGroup = filteredTodos.filter(t => t.date === thisWeekStr && !monthGroup.includes(t)).sort(sortFunc);
             const todayGroup = filteredTodos.filter(t => !monthGroup.includes(t) && !weekGroup.includes(t)).sort(sortFunc);
 
-            renderCollapsibleGroup(todayGroup, '今日任务', todayCollapsed, 'today', 'var(--accent-color)', todayStr, tomorrowStr);
-            renderCollapsibleGroup(weekGroup, '本周任务', weekCollapsed, 'weekly', '#fadb14', todayStr, tomorrowStr);
-            renderCollapsibleGroup(monthGroup, '本月任务', monthCollapsed, 'monthly', '#ff7a45', todayStr, tomorrowStr);
+            renderCollapsibleGroup(todayGroup, '今日任务', appState.todayCollapsed, 'today', 'var(--accent-color)', todayStr, tomorrowStr);
+            renderCollapsibleGroup(weekGroup, '本周任务', appState.weekCollapsed, 'weekly', '#fadb14', todayStr, tomorrowStr);
+            renderCollapsibleGroup(monthGroup, '本月任务', appState.monthCollapsed, 'monthly', '#ff7a45', todayStr, tomorrowStr);
         } else {
-            if (allTabMode === 'uncompleted') {
+            if (appState.allTabMode === 'uncompleted') {
                 // 1. 过滤未完成任务（未达标的打卡任务 + 未完成的普通任务）
                 const uncompletedTodos = filteredTodos.filter(t => !t.completed);
                 const groups = groupTodosByDate(uncompletedTodos, todayStr);
@@ -1765,7 +1882,7 @@ function render() {
                     if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
                         (t.completed_dates || []).forEach(dStr => {
                             if (!completedGroupsMap[dStr]) completedGroupsMap[dStr] = [];
-                            const clone = JSON.parse(JSON.stringify(t));
+                            const clone = deepClone(t);
                             clone.checkinDate = dStr;
                             clone.completed = true;
                             completedGroupsMap[dStr].push(clone);
@@ -1782,7 +1899,7 @@ function render() {
                 const sortedCompletionDates = Object.keys(completedGroupsMap).sort((a, b) => b.localeCompare(a));
                 
                 // 任务截断：默认只显示最近3天有记录的已完成日期，其他展开
-                const showDates = showAllHistory ? sortedCompletionDates : sortedCompletionDates.slice(0, DEFAULT_HISTORY_VISIBLE_DAYS);
+                const showDates = appState.showAllHistory ? sortedCompletionDates : sortedCompletionDates.slice(0, DEFAULT_HISTORY_VISIBLE_DAYS);
                 
                 showDates.forEach(dateStr => {
                     const list = completedGroupsMap[dateStr];
@@ -1810,9 +1927,9 @@ function render() {
                     const btn = document.createElement('button');
                     btn.className = 'archive-btn';
                     btn.id = 'toggle-archive-btn';
-                    btn.textContent = showAllHistory ? '收起历史归档' : `展开历史归档 (共 ${sortedCompletionDates.length} 天)`;
+                    btn.textContent = appState.showAllHistory ? '收起历史归档' : `展开历史归档 (共 ${sortedCompletionDates.length} 天)`;
                     btn.addEventListener('click', () => {
-                        showAllHistory = !showAllHistory;
+                        appState.showAllHistory = !appState.showAllHistory;
                         render();
                     });
                     wrapper.appendChild(btn);
@@ -1822,7 +1939,7 @@ function render() {
         }
         
         // Initialize SortableJS — 仅对"今天聚焦"启用拖动排序
-        if (dateFilter === 'today' && window.Sortable) {
+        if (appState.dateFilter === 'today' && window.Sortable) {
             // 销毁旧 Sortable 实例，防止内存泄漏
             document.querySelectorAll('.collapsible-content').forEach(el => {
                 if (el._sortableInstance) {
@@ -1855,41 +1972,41 @@ function render() {
                 ...window._sortableConfigTemplate,
                 scroll: document.getElementById('main-content'),
                 onStart: function(evt) {
-                    window.currentlyDraggedTodoId = evt.item.dataset.id;
+                    _currentlyDraggedTodoId = evt.item.dataset.id;
                 },
                 onEnd: async function(evt) {
-                        const targetHeaderType = window.currentlyHoveredHeaderType;
+                        const targetHeaderType = _currentlyHoveredHeaderType;
                         // 清理全局拖拽状态与头部悬停高亮类
-                        window.currentlyDraggedTodoId = null;
-                        window.currentlyHoveredHeaderType = null;
+                        _currentlyDraggedTodoId = null;
+                        _currentlyHoveredHeaderType = null;
                         document.querySelectorAll('.collapsible-header').forEach(el => el.classList.remove('drag-hover-header'));
 
                         const draggedId = evt.item.dataset.id;
-                        const todoMap = new Map(todoData.todos.map(t => [t.id, t]));
+                        const todoMap = new Map(appState.todoData.todos.map(t => [t.id, t]));
                         const t = todoMap.get(draggedId);
 
                         // 1. 如果拖动到了折叠头上方松手
                         if (targetHeaderType && t) {
                             let stateChanged = false;
                             if (targetHeaderType === 'today') {
-                                if (todayCollapsed) {
-                                    todayCollapsed = false;
+                                if (appState.todayCollapsed) {
+                                    appState.todayCollapsed = false;
                                     stateChanged = true;
                                 }
                                 t.task_type = 'normal';
                                 t.recurring = 'none';
                                 t.date = todayStr;
                             } else if (targetHeaderType === 'weekly') {
-                                if (weekCollapsed) {
-                                    weekCollapsed = false;
+                                if (appState.weekCollapsed) {
+                                    appState.weekCollapsed = false;
                                     stateChanged = true;
                                 }
                                 t.task_type = 'weekly_checkin';
                                 t.recurring = 'none';
                                 t.date = thisWeekStr;
                             } else if (targetHeaderType === 'monthly') {
-                                if (monthCollapsed) {
-                                    monthCollapsed = false;
+                                if (appState.monthCollapsed) {
+                                    appState.monthCollapsed = false;
                                     stateChanged = true;
                                 }
                                 t.task_type = 'monthly_checkin';
@@ -1986,7 +2103,7 @@ function render() {
         }
 
         // Initialize SortableJS — 全部待办 -> 待完成分组内拖动排序
-        if (dateFilter === 'all' && allTabMode === 'uncompleted' && window.Sortable) {
+        if (appState.dateFilter === 'all' && appState.allTabMode === 'uncompleted' && window.Sortable) {
             document.querySelectorAll('.pending-timeline-items').forEach(el => {
                 if (el._sortableInstance) {
                     el._sortableInstance.destroy();
@@ -2014,11 +2131,11 @@ function render() {
                     scrollSpeed: 12,
                     scroll: document.getElementById('main-content'),
                     onStart: function(evt) {
-                        window.currentlyDraggedTodoId = evt.item.dataset.id;
+                        _currentlyDraggedTodoId = evt.item.dataset.id;
                     },
                     onEnd: async function(evt) {
-                        window.currentlyDraggedTodoId = null;
-                        const todoMap = new Map(todoData.todos.map(t => [t.id, t]));
+                        _currentlyDraggedTodoId = null;
+                        const todoMap = new Map(appState.todoData.todos.map(t => [t.id, t]));
                         let stateChanged = false;
                         
                         const items = Array.from(container.querySelectorAll('.todo-item'));
@@ -2047,7 +2164,7 @@ function render() {
 
 // ====== Import Modal ======
 window.openImportModal = function(type) {
-    currentImportType = type;
+    appState.currentImportType = type;
     const importListEl = document.getElementById('import-tasks-list');
     const titleEl = document.getElementById('import-modal-title');
     importListEl.innerHTML = '';
@@ -2055,20 +2172,20 @@ window.openImportModal = function(type) {
     titleEl.textContent = type === 'weekly' ? '从上周导入' : '从上月导入';
     const currentPeriodStr = type === 'weekly' ? getThisWeekString() : getThisMonthString();
     const existingTitles = new Set(
-        todoData.todos
+        appState.todoData.todos
             .filter(t => !t.deleted && t.date === currentPeriodStr)
             .map(t => t.content)
     );
-    currentImportCandidates = todoData.todos.filter(t => 
+    appState.currentImportCandidates = appState.todoData.todos.filter(t => 
         !t.deleted &&
         (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') &&
         t.date === targetDateStr &&
         !existingTitles.has(t.content)
     );
-    if (currentImportCandidates.length === 0) {
+    if (appState.currentImportCandidates.length === 0) {
         importListEl.innerHTML = '<li style="text-align:center;color:var(--text-secondary);padding:24px 10px;">上个周期没有可导入的任务</li>';
     } else {
-        currentImportCandidates.forEach((todo, idx) => {
+        appState.currentImportCandidates.forEach((todo, idx) => {
             const li = document.createElement('li');
             li.className = 'subtask-item';
             li.setAttribute('data-selected', 'true');
@@ -2118,14 +2235,14 @@ window.addEventListener("DOMContentLoaded", () => {
     const pinBtn = document.getElementById('pin-btn');
     if (pinBtn) {
         pinBtn.addEventListener('click', async () => {
-            isPinned = !isPinned;
+            appState.isPinned = !appState.isPinned;
             try {
-                await invoke('set_always_on_top', { alwaysOnTop: isPinned });
-                pinBtn.classList.toggle('active', isPinned);
-                pinBtn.title = isPinned ? "取消置顶" : "固定置顶";
+                await invoke('set_always_on_top', { alwaysOnTop: appState.isPinned });
+                pinBtn.classList.toggle('active', appState.isPinned);
+                pinBtn.title = appState.isPinned ? "取消置顶" : "固定置顶";
             } catch (e) {
                 console.error("Failed to set always on top:", e);
-                isPinned = !isPinned;
+                appState.isPinned = !appState.isPinned;
             }
         });
     }
@@ -2160,13 +2277,13 @@ window.addEventListener("DOMContentLoaded", () => {
 
     if (settingsBtn) {
         settingsBtn.addEventListener('click', async () => {
-            appConfig = await invoke("get_app_config");
-            settingSyncMode.value = appConfig.sync_mode || 'local';
-            settingSyncPath.value = appConfig.sync_path || '';
-            settingWebdavUrl.value = appConfig.webdav_url || 'https://dav.jianguoyun.com/dav/';
-            settingWebdavUser.value = appConfig.webdav_username || '';
-            settingWebdavPass.value = appConfig.webdav_password || '';
-            settingWebdavFilepath.value = appConfig.webdav_filepath || '我的坚果云/to-do/todo_data.json';
+            appState.appConfig = await invoke("get_app_config");
+            settingSyncMode.value = appState.appConfig.sync_mode || 'local';
+            settingSyncPath.value = appState.appConfig.sync_path || '';
+            settingWebdavUrl.value = appState.appConfig.webdav_url || 'https://dav.jianguoyun.com/dav/';
+            settingWebdavUser.value = appState.appConfig.webdav_username || '';
+            settingWebdavPass.value = appState.appConfig.webdav_password || '';
+            settingWebdavFilepath.value = appState.appConfig.webdav_filepath || '我的坚果云/to-do/todo_data.json';
             
             // 获取并显示当前版本号
             try {
@@ -2228,7 +2345,7 @@ window.addEventListener("DOMContentLoaded", () => {
                 webdav_filepath: settingWebdavFilepath.value,
             };
             await invoke("save_app_config", { config: newConfig });
-            appConfig = newConfig;
+            appState.appConfig = newConfig;
             
             settingsModal.classList.remove('active');
             await loadData();
@@ -2296,7 +2413,7 @@ window.addEventListener("DOMContentLoaded", () => {
                         userConfirmed = confirm(`发现新版本 v${latestVersion}！\n\n更新日志：\n${release.body || '无'}\n\n是否立即前往下载页面下载最新安装包？`);
                     } catch (confirmErr) {
                         // 兼容 WebView2 在透明无边框模式下可能导致的 confirm 崩溃
-                        alert(`发现新版本 v${latestVersion}！\n由于系统限制无法弹出确认框，即将尝试直接打开下载页面。\n如未自动打开，请手动访问: ${release.html_url}`);
+                        showToast(`发现新版本 v${latestVersion}！即将尝试打开下载页面。`);
                         userConfirmed = true;
                     }
 
@@ -2308,11 +2425,11 @@ window.addEventListener("DOMContentLoaded", () => {
                         }
                     }
                 } else {
-                    alert('当前已是最新版本！');
+                    showToast('当前已是最新版本！');
                 }
             } catch (err) {
                 console.error('检查更新失败:', err);
-                alert(`检查更新失败。\n\n${err.message || String(err) || '未知错误，请稍后重试。'}`);
+                showToast(`检查更新失败: ${err.message || String(err) || '未知错误'}`);
             } finally {
                 checkUpdateBtn.textContent = oldText;
                 checkUpdateBtn.disabled = false;
@@ -2347,11 +2464,11 @@ window.addEventListener("DOMContentLoaded", () => {
                             if (confirm(`确定要恢复备份 ${b} 吗？当前数据会被覆盖（覆盖前会自动保存一个新快照）。`)) {
                                 try {
                                     await invoke('restore_backup', { filename: b });
-                                    alert('恢复成功！');
+                                    showToast('恢复成功！');
                                     backupModal.classList.remove('active');
                                     loadData();
                                 } catch (e) {
-                                    alert('恢复失败: ' + e);
+                                    showToast('恢复失败: ' + e);
                                 }
                             }
                         });
@@ -2379,9 +2496,9 @@ window.addEventListener("DOMContentLoaded", () => {
 
     const toggleStatsView = (enterStats) => {
         if (enterStats) {
-            currentView = 'stats';
-            statsTargetDate = new Date();
-            statsSubTab = 'insights';
+            appState.currentView = 'stats';
+            appState.statsTargetDate = new Date();
+            appState.statsSubTab = 'insights';
             document.querySelectorAll('.stats-sub-tabs .tab-btn').forEach(btn => {
                 if (btn.dataset.subtab === 'insights') btn.classList.add('active');
                 else btn.classList.remove('active');
@@ -2396,9 +2513,9 @@ window.addEventListener("DOMContentLoaded", () => {
             const searchBar = document.getElementById('search-bar');
             if (searchBar) searchBar.style.display = 'none';
             const allSubTabs = document.getElementById('all-sub-tabs');
-            if (allSubTabs) allSubTabs.style.display = 'none';
+            if (allSubTabs) allSubTabs.classList.add('hidden');
         } else {
-            currentView = 'list';
+            appState.currentView = 'list';
             mainContentEl.classList.remove('hidden');
             mainContentEl.className = 'list-view';
             if (tabsContainerEl) tabsContainerEl.classList.remove('hidden');
@@ -2408,12 +2525,12 @@ window.addEventListener("DOMContentLoaded", () => {
 
             // 返回主列表时，如果是在“全部待办”选项卡，恢复显示二级页签
             const allSubTabs = document.getElementById('all-sub-tabs');
-            if (allSubTabs && dateFilter === 'all') {
-                allSubTabs.style.display = 'flex';
+            if (allSubTabs && appState.dateFilter === 'all') {
+                allSubTabs.classList.remove('hidden');
             }
             // 如果处于搜索状态，恢复显示搜索栏
             const searchBar = document.getElementById('search-bar');
-            if (searchBar && searchQuery) {
+            if (searchBar && appState.searchQuery) {
                 searchBar.style.display = 'block';
             }
         }
@@ -2422,14 +2539,14 @@ window.addEventListener("DOMContentLoaded", () => {
 
     if (statsBtn) {
         statsBtn.addEventListener('click', () => {
-            toggleStatsView(currentView !== 'stats');
+            toggleStatsView(appState.currentView !== 'stats');
         });
     }
 
     // 统计二级子页签切换
     document.querySelectorAll('.stats-sub-tabs .tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            statsSubTab = btn.dataset.subtab;
+            appState.statsSubTab = btn.dataset.subtab;
             document.querySelectorAll('.stats-sub-tabs .tab-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             render();
@@ -2440,7 +2557,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const throughputSelect = document.getElementById('throughput-period-select');
     if (throughputSelect) {
         throughputSelect.addEventListener('change', (e) => {
-            healthThroughputDays = parseInt(e.target.value, 10);
+            appState.healthThroughputDays = parseInt(e.target.value, 10);
             render();
         });
     }
@@ -2452,7 +2569,7 @@ window.addEventListener("DOMContentLoaded", () => {
             const btn = e.target;
             if (!btn.classList.contains('sleeping-action-btn')) return;
             const id = btn.getAttribute('data-id');
-            const todo = todoData.todos.find(t => t.id === id);
+            const todo = appState.todoData.todos.find(t => t.id === id);
             if (!todo) return;
 
             if (btn.classList.contains('btn-postpone')) {
@@ -2474,7 +2591,7 @@ window.addEventListener("DOMContentLoaded", () => {
     // 统计周期切换（统一事件绑定）
     document.querySelectorAll('.stats-period-tabs .tab-btn[data-period]').forEach(btn => {
         btn.addEventListener('click', () => {
-            statsPeriod = btn.dataset.period;
+            appState.statsPeriod = btn.dataset.period;
             document.querySelectorAll('.stats-period-tabs .tab-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             render();
@@ -2482,16 +2599,16 @@ window.addEventListener("DOMContentLoaded", () => {
     });
 
     document.getElementById('stats-prev-btn').addEventListener('click', () => {
-        if (statsPeriod === 'day') statsTargetDate.setDate(statsTargetDate.getDate() - 1);
-        else if (statsPeriod === 'week') statsTargetDate.setDate(statsTargetDate.getDate() - 7);
-        else statsTargetDate.setMonth(statsTargetDate.getMonth() - 1);
+        if (appState.statsPeriod === 'day') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() - 1);
+        else if (appState.statsPeriod === 'week') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() - 7);
+        else appState.statsTargetDate.setMonth(appState.statsTargetDate.getMonth() - 1);
         render();
     });
 
     document.getElementById('stats-next-btn').addEventListener('click', () => {
-        if (statsPeriod === 'day') statsTargetDate.setDate(statsTargetDate.getDate() + 1);
-        else if (statsPeriod === 'week') statsTargetDate.setDate(statsTargetDate.getDate() + 7);
-        else statsTargetDate.setMonth(statsTargetDate.getMonth() + 1);
+        if (appState.statsPeriod === 'day') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() + 1);
+        else if (appState.statsPeriod === 'week') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() + 7);
+        else appState.statsTargetDate.setMonth(appState.statsTargetDate.getMonth() + 1);
         render();
     });
 
@@ -2508,21 +2625,21 @@ window.addEventListener("DOMContentLoaded", () => {
     const clearSearchBtn = document.getElementById('clear-search-btn');
 
     tabToday.addEventListener('click', () => {
-        dateFilter = 'today';
+        appState.dateFilter = 'today';
         tabToday.classList.add('active');
         tabAll.classList.remove('active');
-        if (allSubTabs) allSubTabs.style.display = 'none';
+        if (allSubTabs) allSubTabs.classList.add('hidden');
         render();
     });
 
     tabAll.addEventListener('click', () => {
-        dateFilter = 'all';
+        appState.dateFilter = 'all';
         tabAll.classList.add('active');
         tabToday.classList.remove('active');
         if (allSubTabs) {
-            allSubTabs.style.display = 'flex';
+            allSubTabs.classList.remove('hidden');
             // 同步选中样式
-            if (allTabMode === 'uncompleted') {
+            if (appState.allTabMode === 'uncompleted') {
                 subTabUncompleted.classList.add('active');
                 subTabCompleted.classList.remove('active');
             } else {
@@ -2542,7 +2659,7 @@ window.addEventListener("DOMContentLoaded", () => {
             } else {
                 searchBar.style.display = 'none';
                 if (searchInput) searchInput.value = '';
-                searchQuery = '';
+                appState.searchQuery = '';
                 if (clearSearchBtn) clearSearchBtn.style.display = 'none';
                 render();
             }
@@ -2552,9 +2669,9 @@ window.addEventListener("DOMContentLoaded", () => {
     // 搜索输入过滤（150ms 防抖，避免每次击键触发全量 DOM 重建）
     if (searchInput) {
         const debouncedSearch = debounce(() => {
-            searchQuery = searchInput.value.trim();
+            appState.searchQuery = searchInput.value.trim();
             if (clearSearchBtn) {
-                clearSearchBtn.style.display = searchQuery ? 'block' : 'none';
+                clearSearchBtn.style.display = appState.searchQuery ? 'block' : 'none';
             }
             render();
         }, 150);
@@ -2565,7 +2682,7 @@ window.addEventListener("DOMContentLoaded", () => {
     if (clearSearchBtn && searchInput) {
         clearSearchBtn.addEventListener('click', () => {
             searchInput.value = '';
-            searchQuery = '';
+            appState.searchQuery = '';
             clearSearchBtn.style.display = 'none';
             render();
             searchInput.focus();
@@ -2575,14 +2692,14 @@ window.addEventListener("DOMContentLoaded", () => {
     // 全部待办子选项卡切换
     if (subTabUncompleted && subTabCompleted) {
         subTabUncompleted.addEventListener('click', () => {
-            allTabMode = 'uncompleted';
+            appState.allTabMode = 'uncompleted';
             subTabUncompleted.classList.add('active');
             subTabCompleted.classList.remove('active');
             render();
         });
 
         subTabCompleted.addEventListener('click', () => {
-            allTabMode = 'completed';
+            appState.allTabMode = 'completed';
             subTabCompleted.classList.add('active');
             subTabUncompleted.classList.remove('active');
             render();
@@ -2594,8 +2711,8 @@ window.addEventListener("DOMContentLoaded", () => {
         const input = document.getElementById('add-subtask-input');
         if (!input) return;
         const content = input.value.trim();
-        if (content && currentEditingTodo) {
-            currentEditingSubtasks.push({ id: crypto.randomUUID(), content, completed: false });
+        if (content && appState.currentEditingTodo) {
+            appState.currentEditingSubtasks.push({ id: crypto.randomUUID(), content, completed: false });
             input.value = '';
             renderEditSubtasks();
             autoSaveEdit();
@@ -2617,23 +2734,23 @@ window.addEventListener("DOMContentLoaded", () => {
 
     document.getElementById('import-confirm-btn').addEventListener('click', async () => {
         const listItems = document.querySelectorAll('#import-tasks-list .subtask-item');
-        const targetDateStr = currentImportType === 'weekly' ? getThisWeekString() : getThisMonthString();
+        const targetDateStr = appState.currentImportType === 'weekly' ? getThisWeekString() : getThisMonthString();
         let imported = false;
         listItems.forEach((li, idx) => {
             if (li.getAttribute('data-selected') === 'true') {
-                const orig = currentImportCandidates[idx];
+                const orig = appState.currentImportCandidates[idx];
                 const newTodo = createTodo(orig.content, targetDateStr);
                 newTodo.task_type = orig.task_type;
                 newTodo.target_count = orig.target_count || null;
                 newTodo.time = orig.time || null;
                 newTodo.recurring = orig.recurring || 'none';
-                newTodo.subtasks = orig.subtasks ? JSON.parse(JSON.stringify(orig.subtasks)).map(s => {
+                newTodo.subtasks = orig.subtasks ? deepClone(orig.subtasks).map(s => {
                     s.id = crypto.randomUUID();
                     s.completed = false;
                     s.completed_at = null;
                     return s;
                 }) : [];
-                todoData.todos.push(newTodo);
+                appState.todoData.todos.push(newTodo);
                 imported = true;
             }
         });
@@ -2658,20 +2775,20 @@ window.addEventListener("DOMContentLoaded", () => {
     if (taskTypeSelect) {
         taskTypeSelect.addEventListener('change', () => {
             updateEditModalFields(taskTypeSelect.value);
-            if (currentEditingTodo) {
+            if (appState.currentEditingTodo) {
                 // 如果是“每天重复”，底层映射为 normal + recurring = daily_repeat
                 if (taskTypeSelect.value === 'daily_repeat') {
-                    currentEditingTodo.task_type = 'normal';
-                    currentEditingTodo.recurring = 'daily_repeat';
+                    appState.currentEditingTodo.task_type = 'normal';
+                    appState.currentEditingTodo.recurring = 'daily_repeat';
                 } else {
-                    currentEditingTodo.task_type = taskTypeSelect.value;
-                    currentEditingTodo.recurring = 'none';
+                    appState.currentEditingTodo.task_type = taskTypeSelect.value;
+                    appState.currentEditingTodo.recurring = 'none';
                     if (taskTypeSelect.value === 'normal') {
-                        if (isWeekDate(currentEditingTodo.date) || isMonthDate(currentEditingTodo.date)) {
-                            currentEditingTodo.date = getTodayString();
+                        if (isWeekDate(appState.currentEditingTodo.date) || isMonthDate(appState.currentEditingTodo.date)) {
+                            appState.currentEditingTodo.date = getTodayString();
                             const dateInput = document.getElementById('edit-date');
                             if (dateInput) {
-                                dateInput.value = currentEditingTodo.date;
+                                dateInput.value = appState.currentEditingTodo.date;
                                 dateInput.type = 'date';
                                 const typeBtn = document.getElementById('edit-date-type-btn');
                                 if (typeBtn) typeBtn.textContent = '文本格式';
@@ -2679,7 +2796,7 @@ window.addEventListener("DOMContentLoaded", () => {
                         }
                     }
                 }
-                renderEditCheckinGrid(currentEditingTodo);
+                renderEditCheckinGrid(appState.currentEditingTodo);
             }
         });
     }
@@ -2692,7 +2809,7 @@ window.addEventListener("DOMContentLoaded", () => {
         hasDateSwitch.addEventListener('change', () => {
             if (hasDateSwitch.checked) {
                 dateContainer.style.display = 'flex';
-                dateInput.value = editCachedDate || getTodayString();
+                dateInput.value = appState.editCachedDate || getTodayString();
             } else {
                 dateContainer.style.display = 'none';
                 dateInput.value = '';
@@ -2702,7 +2819,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
         dateInput.addEventListener('input', () => {
             if (dateInput.value) {
-                editCachedDate = dateInput.value;
+                appState.editCachedDate = dateInput.value;
             }
         });
     }
@@ -2719,7 +2836,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
     document.getElementById('modal-delete-btn').addEventListener('click', (e) => {
         e.stopPropagation();
-        if (!currentEditingTodo) return;
+        if (!appState.currentEditingTodo) return;
         const confirmModal = document.getElementById('delete-confirm-modal');
         confirmModal.classList.add('active');
     });
@@ -2731,11 +2848,11 @@ window.addEventListener("DOMContentLoaded", () => {
 
     document.getElementById('delete-confirm-btn').addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!currentEditingTodo) return;
-        const index = todoData.todos.findIndex(t => t.id === currentEditingTodo.id);
+        if (!appState.currentEditingTodo) return;
+        const index = appState.todoData.todos.findIndex(t => t.id === appState.currentEditingTodo.id);
         if (index !== -1) {
-            todoData.todos[index].deleted = true;
-            todoData.todos[index].updated_at = new Date().toISOString();
+            appState.todoData.todos[index].deleted = true;
+            appState.todoData.todos[index].updated_at = new Date().toISOString();
             render();
             await saveData();
         }
@@ -2744,7 +2861,7 @@ window.addEventListener("DOMContentLoaded", () => {
     });
 
     document.getElementById('modal-tomorrow-btn').addEventListener('click', async () => {
-        if (!currentEditingTodo) return;
+        if (!appState.currentEditingTodo) return;
         document.getElementById('edit-date').value = getTomorrowString();
         await autoSaveEdit();
         closeEditModal();
@@ -2758,18 +2875,25 @@ window.addEventListener("DOMContentLoaded", () => {
     // 复制子步骤逻辑
     const copyModal = document.getElementById('copy-modal');
     document.getElementById('sort-subtasks-btn').addEventListener('click', () => {
-        if (!currentEditingSubtasks || currentEditingSubtasks.length === 0) return;
-        currentEditingSubtasks.sort((a, b) => {
-            if (a.completed === b.completed) return 0;
-            return a.completed ? 1 : -1;
+        if (!appState.currentEditingSubtasks || appState.currentEditingSubtasks.length === 0) return;
+        appState.currentEditingSubtasks.sort((a, b) => {
+            if (a.completed !== b.completed) {
+                return a.completed ? 1 : -1;
+            }
+            if (a.completed) {
+                const timeA = a.completed_at || '';
+                const timeB = b.completed_at || '';
+                return timeB.localeCompare(timeA);
+            }
+            return 0;
         });
         renderEditSubtasks();
         autoSaveEdit();
     });
 
     document.getElementById('copy-subtasks-btn').addEventListener('click', () => {
-        if (!currentEditingSubtasks || currentEditingSubtasks.length === 0) {
-            alert('没有子步骤可复制');
+        if (!appState.currentEditingSubtasks || appState.currentEditingSubtasks.length === 0) {
+            showToast('没有子步骤可复制');
             return;
         }
         copyModal.style.display = 'flex';
@@ -2782,7 +2906,7 @@ window.addEventListener("DOMContentLoaded", () => {
         const copyOnlyUncompleted = document.getElementById('copy-only-uncompleted-switch').checked;
         let textToCopy = '';
         let indexForNumberedList = 1;
-        currentEditingSubtasks.forEach((sub, i) => {
+        appState.currentEditingSubtasks.forEach((sub, i) => {
             if (copyOnlyUncompleted && sub.completed) {
                 return;
             }
@@ -2812,37 +2936,43 @@ window.addEventListener("DOMContentLoaded", () => {
         setTimeout(() => copyModal.style.display = 'none', 200);
     });
 
+
+// ====== 创建并添加待办的统一逻辑 ======
+async function createAndAddTodo(raw) {
+    const { content, taskDate, taskType, targetCount } = parseInputSyntax(raw);
+    if (!content) return false;
+
+    const finalDate = taskDate || null;
+    let minOrder = Date.now();
+    appState.todoData.todos.forEach(t => {
+        if (!t.deleted && !t.completed && typeof t.order === 'number' && t.order < minOrder) {
+            minOrder = t.order;
+        }
+    });
+    const todo = createTodo(content, finalDate);
+    todo.order = minOrder - 1;
+    applyTaskType(todo, taskType, targetCount);
+
+    appState.todoData.todos.push(todo);
+    render();
+    await saveData();
+    return true;
+}
     // 添加新待办表单
     formEl.addEventListener("submit", async (e) => {
         e.preventDefault();
         const raw = inputEl.value;
-        const { content, taskDate, taskType, targetCount } = parseInputSyntax(raw);
-        if (!content) return;
-
-        const finalDate = taskDate || null;
-        let minOrder = Date.now();
-        todoData.todos.forEach(t => {
-            if (!t.deleted && !t.completed && typeof t.order === 'number' && t.order < minOrder) {
-                minOrder = t.order;
-            }
-        });
-        const todo = createTodo(content, finalDate);
-        todo.order = minOrder - 1;
-        applyTaskType(todo, taskType, targetCount);
-
-        todoData.todos.push(todo);
-        inputEl.value = '';
-        render();
-        await saveData();
+        const ok = await createAndAddTodo(raw);
+        if (ok) inputEl.value = '';
     });
 
     // Watch file changes
     listen("todo_data_changed", () => {
-        if (saveVersion > 0) {
-            saveVersion--; // 消耗掉自身写入产生的文件变更事件
+        if (appState.saveVersion > 0) {
+            appState.saveVersion--; // 消耗掉自身写入产生的文件变更事件
             return;
         }
-        if (appConfig.sync_mode === 'webdav') return; // WebDAV 模式下避免死循环
+        if (appState.appConfig.sync_mode === 'webdav') return; // WebDAV 模式下避免死循环
         loadData();
     });
 
@@ -2866,24 +2996,8 @@ window.addEventListener("DOMContentLoaded", () => {
         } else if (e.key === 'Enter') {
             e.preventDefault();
             const raw = quickAddInput.value.trim();
-            const { content, taskDate, taskType, targetCount } = parseInputSyntax(raw);
-            if (!content) return;
-
-            const finalDate = taskDate || null;
-            let minOrder = Date.now();
-            todoData.todos.forEach(t => {
-                if (!t.deleted && !t.completed && typeof t.order === 'number' && t.order < minOrder) {
-                    minOrder = t.order;
-                }
-            });
-            const todo = createTodo(content, finalDate);
-            todo.order = minOrder - 1;
-            applyTaskType(todo, taskType, targetCount);
-
-            todoData.todos.push(todo);
-            quickAddModal.classList.remove('active');
-            render();
-            await saveData();
+            const ok = await createAndAddTodo(raw);
+            if (ok) quickAddModal.classList.remove('active');
         }
     });
 
@@ -2905,7 +3019,7 @@ window.addEventListener("DOMContentLoaded", () => {
         const today = getTodayString();
         if (today !== lastRenderDate) {
             lastRenderDate = today;
-            if (!window._pendingMidnightRefresh) {
+            if (!_pendingMidnightRefresh) {
                 render();
             }
         }
@@ -2935,7 +3049,7 @@ function scheduleMidnightRefresh() {
             || document.activeElement === document.getElementById('todo-input'));
 
         if (isEditing) {
-            window._pendingMidnightRefresh = true;
+            _pendingMidnightRefresh = true;
         } else {
             render();
         }
@@ -2955,73 +3069,4 @@ function showToast(msg) {
         toast.classList.remove('show');
         setTimeout(() => toast.remove(), 300);
     }, 3000);
-}
-
-async function importFromLastPeriod(type) {
-    const todayStr = getTodayString();
-    const thisWeekStr = getThisWeekString();
-    const thisMonthStr = getThisMonthString();
-
-    let sourcePeriodStr = '';
-    let targetPeriodStr = '';
-
-    if (type === 'weekly') {
-        sourcePeriodStr = getLastWeekString();
-        targetPeriodStr = thisWeekStr;
-    } else {
-        sourcePeriodStr = getLastMonthString();
-        targetPeriodStr = thisMonthStr;
-    }
-
-    // 找出上一周期所有未完成或被标记为完成的打卡计划
-    const candidates = todoData.todos.filter(t => 
-        !t.deleted && 
-        (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') &&
-        t.date === sourcePeriodStr
-    );
-
-    if (candidates.length === 0) {
-        showToast('上一周期没有打卡任务可供导入');
-        return;
-    }
-
-    // 检查是否已经在目标周期内有同名任务
-    const existingTitles = new Set(
-        todoData.todos
-            .filter(t => !t.deleted && t.date === targetPeriodStr)
-            .map(t => t.content)
-    );
-
-    let importCount = 0;
-    candidates.forEach(src => {
-        if (existingTitles.has(src.content)) return; // 避免重复导入
-
-        const clone = createTodo(src.content, targetPeriodStr);
-        clone.task_type = src.task_type;
-        clone.target_count = src.target_count;
-        clone.completed = false;
-        clone.completed_at = null;
-        clone.completed_dates = [];
-
-        // 深度复制并重置子步骤
-        clone.subtasks = src.subtasks 
-            ? JSON.parse(JSON.stringify(src.subtasks)).map(sub => {
-                sub.id = crypto.randomUUID();
-                sub.completed = false;
-                sub.completed_at = null;
-                return sub;
-              })
-            : [];
-
-        todoData.todos.push(clone);
-        importCount++;
-    });
-
-    if (importCount > 0) {
-        showToast(`成功导入 ${importCount} 个打卡任务`);
-        render();
-        await saveData();
-    } else {
-        showToast('任务已存在，无需重复导入');
-    }
 }

@@ -39,7 +39,23 @@ import com.todo.app.data.model.isOverdue
 import java.time.LocalDate
 import java.util.Locale
 
-// 全局唯一的 Key 常量，保证 actionRunCallback 绑定时和 ToggleActionCallback 取值时用同一个实例
+// ====== Widget Theme (extracted colors) ======
+
+object WidgetTheme {
+    val Background = Color(0xB3121212)
+    val Surface = Color(0x26FFFFFF)
+    val TextPrimary = Color.White
+    val TextVariant = Color(0xFFAAAAAA)
+    val StatusSyncing = Color(0xFF1890FF)
+    val StatusError = Color(0xFFFA8C16)
+    val StatusSuccess = Color(0xFF52C41A)
+    val SeparatorLine = Color(0x33FFFFFF)
+    val OpenButtonBg = Color(0x33FFFFFF)
+    val SubtaskDone = Color(0xFF666666)
+}
+
+// ====== Glance key constants ======
+
 val TodoIdKey = ActionParameters.Key<String>("todoId")
 
 /** Widget 渲染模型：区分真实 Todo 和 UI 分隔线，避免污染领域模型 */
@@ -52,25 +68,21 @@ sealed class WidgetItem {
 private val VERSION_KEY = intPreferencesKey("widget_data_version")
 val EXPANDED_TODOS_KEY = stringSetPreferencesKey("expanded_todos")
 
+// ====== Base widget ======
+
 abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader: Boolean) : GlanceAppWidget() {
     companion object {
         private val DATE_FORMATTER = java.time.format.DateTimeFormatter.ofPattern("M月d日 EEEE", Locale.CHINESE)
     }
 
-    // 使用 Glance 内置的 Preferences 状态定义
     override val stateDefinition = PreferencesGlanceStateDefinition
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
-            // 读取 Glance Preferences 状态 —— 这是关键！
-            // currentState 返回一个 Compose State 对象，Compose 运行时会跟踪它。
-            // 当 ToggleActionCallback 通过 updateAppWidgetState 修改版本号后，
-            // Compose 运行时检测到状态变化，会真正重新执行这个 composable 函数体。
             val prefs = currentState<Preferences>()
             @Suppress("UNUSED_VARIABLE")
             val version = prefs[VERSION_KEY] ?: 0
 
-            // 从内存中同步读取最新数据
             val repository = TodoApplication.instance.repository
             val currentData = try {
                 repository.getCurrentData()
@@ -104,19 +116,19 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                 list.take(maxItems)
             }
 
-            val widgetBackground = ColorProvider(Color(0xB3121212))
-            val surfaceColor = ColorProvider(Color(0x26FFFFFF))
-            val textColor = ColorProvider(Color.White)
-            val textVariantColor = ColorProvider(Color(0xFFAAAAAA))
+            val widgetBackground = ColorProvider(WidgetTheme.Background)
+            val surfaceColor = ColorProvider(WidgetTheme.Surface)
+            val textColor = ColorProvider(WidgetTheme.TextPrimary)
+            val textVariantColor = ColorProvider(WidgetTheme.TextVariant)
 
             val dateObj = LocalDate.now()
             val dateString = dateObj.format(DATE_FORMATTER)
 
             val syncStatus = repository.syncStatus.value
             val statusColor = ColorProvider(when (syncStatus) {
-                1 -> Color(0xFF1890FF)
-                2 -> Color(0xFFFA8C16)
-                else -> Color(0xFF52C41A)
+                1 -> WidgetTheme.StatusSyncing
+                2 -> WidgetTheme.StatusError
+                else -> WidgetTheme.StatusSuccess
             })
 
             Column(
@@ -142,14 +154,14 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                                 style = TextStyle(color = textVariantColor, fontSize = 12.sp)
                             )
                         }
-                        
+
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 text = "打开",
                                 style = TextStyle(color = textColor, fontSize = 12.sp, fontWeight = FontWeight.Bold),
                                 modifier = GlanceModifier
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
-                                    .background(ColorProvider(Color(0x33FFFFFF)))
+                                    .background(ColorProvider(WidgetTheme.OpenButtonBg))
                                     .cornerRadius(8.dp)
                                     .clickable(actionStartActivity<MainActivity>())
                             )
@@ -197,7 +209,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                             style = TextStyle(color = textColor, fontSize = 12.sp, fontWeight = FontWeight.Bold),
                             modifier = GlanceModifier
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
-                                .background(ColorProvider(Color(0x33FFFFFF)))
+                                .background(ColorProvider(WidgetTheme.OpenButtonBg))
                                 .cornerRadius(8.dp)
                                 .clickable(actionStartActivity<MainActivity>())
                         )
@@ -227,7 +239,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                                             modifier = GlanceModifier
                                                 .fillMaxWidth()
                                                 .height(1.dp)
-                                                .background(ColorProvider(Color(0x33FFFFFF)))
+                                                .background(ColorProvider(WidgetTheme.SeparatorLine))
                                         ) {}
                                         Spacer(modifier = GlanceModifier.height(8.dp))
                                     }
@@ -289,10 +301,10 @@ fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProv
         if (isExpanded && todo.subtasks.isNotEmpty()) {
             Column(modifier = GlanceModifier.padding(start = 38.dp, top = 4.dp, bottom = 4.dp, end = 12.dp)) {
                 todo.subtasks.forEach { sub ->
-                    val color = if (sub.completed) ColorProvider(Color(0xFF666666)) else textVariantColor
+                    val color = if (sub.completed) ColorProvider(WidgetTheme.SubtaskDone) else textVariantColor
                     val decoration = if (sub.completed) androidx.glance.text.TextDecoration.LineThrough else androidx.glance.text.TextDecoration.None
                     Text(
-                        text = "- ${sub.content}", 
+                        text = "- ${sub.content}",
                         style = TextStyle(color = color, fontSize = 13.sp, textDecoration = decoration),
                         modifier = GlanceModifier.padding(vertical = 2.dp)
                     )
@@ -303,8 +315,12 @@ fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProv
     }
 }
 
+// ====== Widget concrete classes ======
+
 class TodoCompactWidget : BaseTodoWidget(maxItems = 3, showHeader = false)
 class TodoNormalWidget : BaseTodoWidget(maxItems = 20, showHeader = true)
+
+// ====== Action callbacks ======
 
 class ToggleActionCallback : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
@@ -333,8 +349,7 @@ class ExpandActionCallback : ActionCallback {
                     this[EXPANDED_TODOS_KEY] = currentSet
                 }
             }
-            try { TodoNormalWidget().update(context, glanceId) } catch (_: Exception) {}
-            try { TodoCompactWidget().update(context, glanceId) } catch (_: Exception) {}
+            refreshAllWidgets(context)
         } catch (e: Exception) {
             android.util.Log.e("TodoWidget", "ExpandActionCallback onAction 失败: ${e.message}", e)
         }
@@ -352,38 +367,35 @@ class SyncActionCallback : ActionCallback {
     }
 }
 
-/** 递增所有小组件的版本号并触发刷新，供 ToggleActionCallback 和 TodoRepository 共用 */
+// ====== Generic widget refresh ======
+
+/** 递增所有小组件的版本号并触发刷新 */
 suspend fun refreshAllWidgets(context: Context) {
     try {
         val manager = GlanceAppWidgetManager(context)
-
-        for (id in manager.getGlanceIds(TodoCompactWidget::class.java)) {
-            try {
-                updateAppWidgetState(context, PreferencesGlanceStateDefinition, id) { prefs ->
-                    prefs.toMutablePreferences().apply {
-                        this[VERSION_KEY] = (prefs[VERSION_KEY] ?: 0) + 1
-                    }
-                }
-                TodoCompactWidget().update(context, id)
-            } catch (e: Exception) {
-                android.util.Log.e("TodoWidget", "刷新 CompactWidget 失败: ${e.message}", e)
-            }
-        }
-
-        for (id in manager.getGlanceIds(TodoNormalWidget::class.java)) {
-            try {
-                updateAppWidgetState(context, PreferencesGlanceStateDefinition, id) { prefs ->
-                    prefs.toMutablePreferences().apply {
-                        this[VERSION_KEY] = (prefs[VERSION_KEY] ?: 0) + 1
-                    }
-                }
-                TodoNormalWidget().update(context, id)
-            } catch (e: Exception) {
-                android.util.Log.e("TodoWidget", "刷新 NormalWidget 失败: ${e.message}", e)
-            }
-        }
+        refreshWidgetType(context, manager, TodoCompactWidget::class.java, "CompactWidget")
+        refreshWidgetType(context, manager, TodoNormalWidget::class.java, "NormalWidget")
     } catch (e: Exception) {
         android.util.Log.e("TodoWidget", "refreshAllWidgets 失败: ${e.message}", e)
     }
 }
 
+private suspend fun refreshWidgetType(
+    context: Context,
+    manager: GlanceAppWidgetManager,
+    widgetClass: Class<out GlanceAppWidget>,
+    label: String
+) {
+    for (id in manager.getGlanceIds(widgetClass)) {
+        try {
+            updateAppWidgetState(context, PreferencesGlanceStateDefinition, id) { prefs ->
+                prefs.toMutablePreferences().apply {
+                    this[VERSION_KEY] = (prefs[VERSION_KEY] ?: 0) + 1
+                }
+            }
+            widgetClass.getDeclaredConstructor().newInstance().update(context, id)
+        } catch (e: Exception) {
+            android.util.Log.e("TodoWidget", "刷新 ${label} 失败: ${e.message}", e)
+        }
+    }
+}

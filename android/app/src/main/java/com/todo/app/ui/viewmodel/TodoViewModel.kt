@@ -11,24 +11,43 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class TodoViewModel(val repository: TodoRepository, val configManager: ConfigManager) : ViewModel() {
-    
+class TodoViewModel(private val repository: TodoRepository, private val configManager: ConfigManager) : ViewModel() {
+
     private val _todayDate = MutableStateFlow(java.time.LocalDate.now().toString())
-    val todayDate = _todayDate.asStateFlow()
+    val todayDate: StateFlow<String> = _todayDate.asStateFlow()
 
+    private val _isEditingDialogShowing = MutableStateFlow(false)
+    val isEditingDialogShowing: StateFlow<Boolean> = _isEditingDialogShowing.asStateFlow()
 
-    val isEditingDialogShowing = MutableStateFlow(false)
+    private var pendingMidnightRefresh = false
 
-    var pendingMidnightRefresh = false
+    private val _uiEvent = MutableSharedFlow<String>()
+    val uiEvent: SharedFlow<String> = _uiEvent.asSharedFlow()
 
     fun refreshTodayDate() {
         _todayDate.value = java.time.LocalDate.now().toString()
     }
-    
-    val todos = repository.getTodoData().map { data -> 
+
+    fun setEditingDialogShowing(showing: Boolean) {
+        _isEditingDialogShowing.value = showing
+    }
+
+    fun consumePendingMidnightRefresh(): Boolean {
+        if (pendingMidnightRefresh) {
+            pendingMidnightRefresh = false
+            return true
+        }
+        return false
+    }
+
+    val todos = repository.getTodoData().map { data ->
         data.todos.filter { !it.deleted }
     }.stateIn(
         scope = viewModelScope,
@@ -45,25 +64,41 @@ class TodoViewModel(val repository: TodoRepository, val configManager: ConfigMan
 
     fun toggleTodoStatus(id: String) {
         viewModelScope.launch {
-            repository.toggleTodoStatus(id)
+            try {
+                repository.toggleTodoStatus(id)
+            } catch (e: Exception) {
+                _uiEvent.emit("切换状态失败: ${e.message}")
+            }
         }
     }
 
     fun updateTodo(todo: Todo) {
         viewModelScope.launch {
-            repository.updateTodo(todo)
+            try {
+                repository.updateTodo(todo)
+            } catch (e: Exception) {
+                _uiEvent.emit("更新失败: ${e.message}")
+            }
         }
     }
 
     fun batchUpdateTodos(todos: List<Todo>) {
         viewModelScope.launch {
-            repository.batchUpdateTodos(todos)
+            try {
+                repository.batchUpdateTodos(todos)
+            } catch (e: Exception) {
+                _uiEvent.emit("批量更新失败: ${e.message}")
+            }
         }
     }
 
     fun deleteTodo(id: String) {
         viewModelScope.launch {
-            repository.deleteTodo(id)
+            try {
+                repository.deleteTodo(id)
+            } catch (e: Exception) {
+                _uiEvent.emit("删除失败: ${e.message}")
+            }
         }
     }
 
@@ -75,39 +110,59 @@ class TodoViewModel(val repository: TodoRepository, val configManager: ConfigMan
         if (parsed.content.isBlank()) return
 
         viewModelScope.launch {
-            val currentList = todos.value
-            val minOrder = currentList.filter { !it.completed }.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()
-            val todo = Todo.create(parsed.content, parsed.date).copy(
-                task_type = parsed.taskType,
-                target_count = parsed.targetCount,
-                recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
-                order = minOrder - 1.0
-            )
-            repository.addTodo(todo)
+            try {
+                val currentList = todos.value
+                val minOrder = currentList.filter { !it.completed }.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()
+                val todo = Todo.create(parsed.content, parsed.date).copy(
+                    task_type = parsed.taskType,
+                    target_count = parsed.targetCount,
+                    recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
+                    order = minOrder - 1.0
+                )
+                repository.addTodo(todo)
+            } catch (e: Exception) {
+                _uiEvent.emit("添加失败: ${e.message}")
+            }
         }
     }
 
     fun syncWithCloud() {
         viewModelScope.launch {
-            repository.syncWithCloud()
+            try {
+                repository.syncWithCloud()
+            } catch (e: Exception) {
+                _uiEvent.emit("同步失败: ${e.message}")
+            }
         }
     }
 
-    fun importSelectedFromLastPeriod(type: String, selectedIds: List<String>, context: android.content.Context) {
+    fun importSelectedFromLastPeriod(type: String, selectedIds: List<String>) {
         viewModelScope.launch {
-            repository.importSelectedFromLastPeriod(type, selectedIds, context)
+            try {
+                repository.importSelectedFromLastPeriod(type, selectedIds)
+            } catch (e: Exception) {
+                _uiEvent.emit("导入失败: ${e.message}")
+            }
         }
     }
 
-    fun importFromLastPeriod(type: String, context: android.content.Context) {
+    fun importFromLastPeriod(type: String) {
         viewModelScope.launch {
-            repository.importFromLastPeriod(type, context)
+            try {
+                repository.importFromLastPeriod(type)
+            } catch (e: Exception) {
+                _uiEvent.emit("导入失败: ${e.message}")
+            }
         }
     }
 
     fun forcePullCloud() {
         viewModelScope.launch {
-            repository.forcePullCloud()
+            try {
+                repository.forcePullCloud()
+            } catch (e: Exception) {
+                _uiEvent.emit("强制拉取失败: ${e.message}")
+            }
         }
     }
 
@@ -115,7 +170,15 @@ class TodoViewModel(val repository: TodoRepository, val configManager: ConfigMan
         repository.resetWebDavClient()
     }
 
-    fun listBackups(): List<String> {
+    fun saveConfig(serverUrl: String, username: String, appPassword: String, filePath: String) {
+        configManager.webDavUrl = serverUrl
+        configManager.username = username
+        configManager.appPassword = appPassword
+        configManager.filePath = filePath
+        repository.resetWebDavClient()
+    }
+
+    suspend fun listBackups(): List<String> {
         return repository.listBackups()
     }
 

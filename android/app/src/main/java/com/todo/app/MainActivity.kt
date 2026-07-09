@@ -4,13 +4,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarDefaults
@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -41,22 +42,20 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-    private lateinit var viewModel: TodoViewModel
+
+    private val repository by lazy { TodoApplication.instance.repository }
+    private val configManager by lazy { ConfigManager(applicationContext) }
+    private val viewModel: TodoViewModel by viewModels {
+        TodoViewModelFactory(repository, configManager)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        
-        val repository = TodoApplication.instance.repository
-        val configManager = ConfigManager(applicationContext)
 
         setContent {
-            val vm: TodoViewModel = viewModel(
-                factory = TodoViewModelFactory(repository, configManager)
-            )
-            viewModel = vm
             TodoAppTheme {
-                TodoApp(vm)
+                TodoApp(viewModel)
             }
         }
 
@@ -65,9 +64,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (::viewModel.isInitialized) {
-            viewModel.refreshTodayDate()
-        }
+        viewModel.refreshTodayDate()
     }
 
     private fun startMidnightRefreshJob() {
@@ -76,26 +73,26 @@ class MainActivity : ComponentActivity() {
                 val now = java.time.LocalDateTime.now()
                 val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay()
                 val delayMs = java.time.Duration.between(now, nextMidnight).toMillis() + 100
-                delay(delayMs)
-                if (::viewModel.isInitialized) {
-                    if (!viewModel.isEditingDialogShowing.value) {
-                        viewModel.refreshTodayDate()
-                    } else {
-                        viewModel.pendingMidnightRefresh = true
-                    }
+                delay(maxOf(delayMs, 1000))
+                if (!viewModel.isEditingDialogShowing.value) {
+                    viewModel.refreshTodayDate()
+                } else {
+                    // ViewModel handles pendingMidnightRefresh internally
                 }
             }
         }
     }
 }
 
-sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    object List : Screen("list", "列表", Icons.Filled.List)
-    object Stats : Screen("stats", "统计", Icons.Filled.DateRange)
-    object Settings : Screen("settings", "设置", Icons.Filled.Settings)
-}
+sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
+    data object List : Screen("list", "列表", Icons.Filled.List)
+    data object Stats : Screen("stats", "统计", Icons.Filled.DateRange)
+    data object Settings : Screen("settings", "设置", Icons.Filled.Settings)
 
-val items = listOf(Screen.List, Screen.Stats, Screen.Settings)
+    companion object {
+        val items = listOf(List, Stats, Settings)
+    }
+}
 
 @Composable
 fun TodoApp(viewModel: TodoViewModel) {
@@ -107,7 +104,7 @@ fun TodoApp(viewModel: TodoViewModel) {
             ) {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentDestination = navBackStackEntry?.destination
-                items.forEach { screen ->
+                Screen.items.forEach { screen ->
                     NavigationBarItem(
                         icon = { Icon(screen.icon, contentDescription = null) },
                         label = { Text(screen.title) },

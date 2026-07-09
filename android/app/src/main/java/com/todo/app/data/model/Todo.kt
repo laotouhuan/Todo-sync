@@ -1,5 +1,6 @@
 package com.todo.app.data.model
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.util.UUID
 
@@ -8,7 +9,7 @@ data class Subtask(
     val id: String,
     var content: String,
     var completed: Boolean,
-    var completed_at: String? = null
+    @SerialName("completed_at") var completedAt: String? = null
 )
 
 @Serializable
@@ -18,15 +19,15 @@ data class Todo(
     var date: String? = null,
     var time: String? = null,
     var completed: Boolean = false,
-    val created_at: String,
-    var completed_at: String? = null,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("completed_at") var completedAt: String? = null,
     var order: Double = 0.0,
-    var updated_at: String = created_at,
+    @SerialName("updated_at") var updatedAt: String = createdAt,
     var deleted: Boolean = false,
     var recurring: String = "none", // none, daily_repeat
-    var task_type: String = "normal", // normal, weekly_checkin, monthly_checkin
-    var completed_dates: List<String> = emptyList(),
-    var target_count: Int? = null,
+    @SerialName("task_type") var taskType: String = "normal", // normal, weekly_checkin, monthly_checkin
+    @SerialName("completed_dates") var completedDates: List<String> = emptyList(),
+    @SerialName("target_count") var targetCount: Int? = null,
     var subtasks: List<Subtask> = emptyList()
 ) {
     companion object {
@@ -41,12 +42,10 @@ data class Todo(
                 id = UUID.randomUUID().toString(),
                 content = content,
                 date = date,
-                created_at = now,
+                createdAt = now,
                 order = System.currentTimeMillis().toDouble(),
-                updated_at = now
+                updatedAt = now
             )
         }
     }
 }
-
-

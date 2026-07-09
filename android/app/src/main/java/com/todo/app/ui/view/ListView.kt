@@ -66,8 +66,90 @@ import com.todo.app.data.model.getThisWeekDates
 import com.todo.app.data.model.getThisMonthDates
 import com.todo.app.data.model.withToggledCheckinDate
 import com.todo.app.data.model.classifyForTodayFocus
+import com.todo.app.data.model.TaskType
+import com.todo.app.data.model.RecurringType
+import com.todo.app.data.model.weekStringOf
+import com.todo.app.data.model.monthStringOf
 import com.todo.app.ui.viewmodel.TodoViewModel
 import java.time.LocalDate
+
+// ====== Section-to-type resolution (extracted from onDragEnd) ======
+
+private data class SectionTaskResolution(
+    val date: String?,
+    val taskType: String,
+    val recurring: String
+)
+
+private fun resolveTaskForSection(
+    section: String,
+    todo: Todo,
+    todayStr: String,
+    thisWeekStr: String,
+    thisMonthStr: String
+): SectionTaskResolution {
+    return when (section) {
+        "today" -> {
+            val targetType = TaskType.NORMAL
+            val targetRecurring = if (todo.task_type == TaskType.WEEKLY_CHECKIN || todo.task_type == TaskType.MONTHLY_CHECKIN) {
+                RecurringType.NONE
+            } else {
+                todo.recurring
+            }
+            val targetDate = if (todo.date == null || isWeekDate(todo.date!!) || isMonthDate(todo.date!!)) {
+                todayStr
+            } else {
+                todo.date
+            }
+            SectionTaskResolution(targetDate, targetType, targetRecurring)
+        }
+        "nodate" -> {
+            val targetType = TaskType.NORMAL
+            val targetRecurring = if (todo.task_type == TaskType.WEEKLY_CHECKIN || todo.task_type == TaskType.MONTHLY_CHECKIN) {
+                RecurringType.NONE
+            } else {
+                todo.recurring
+            }
+            SectionTaskResolution(null, targetType, targetRecurring)
+        }
+        "week" -> {
+            val targetDate = if (todo.date == null || !isWeekDate(todo.date!!)) {
+                thisWeekStr
+            } else {
+                todo.date
+            }
+            SectionTaskResolution(targetDate, TaskType.WEEKLY_CHECKIN, RecurringType.NONE)
+        }
+        "month" -> {
+            val targetDate = if (todo.date == null || !isMonthDate(todo.date!!)) {
+                thisMonthStr
+            } else {
+                todo.date
+            }
+            SectionTaskResolution(targetDate, TaskType.MONTHLY_CHECKIN, RecurringType.NONE)
+        }
+        else -> SectionTaskResolution(todo.date, todo.task_type, todo.recurring)
+    }
+}
+
+private fun resolveTaskForDropHeader(
+    header: String,
+    todo: Todo,
+    todayStr: String,
+    thisWeekStr: String,
+    thisMonthStr: String
+): SectionTaskResolution {
+    val section = when (header) {
+        "HEADER_TODAY" -> "today"
+        "HEADER_NODATE" -> "nodate"
+        "HEADER_WEEK" -> "week"
+        "HEADER_MONTH" -> "month"
+        else -> return SectionTaskResolution(todo.date, todo.task_type, todo.recurring)
+    }
+    return resolveTaskForSection(section, todo, todayStr, thisWeekStr, thisMonthStr)
+}
+
+// ====== Sealed class for focus items ======
 
 sealed class FocusItem {
     abstract val key: String
@@ -75,7 +157,7 @@ sealed class FocusItem {
     data class Header(
         override val key: String,
         val title: String,
-        val color: androidx.compose.ui.graphics.Color,
+        val color: Color,
         val isExpanded: Boolean,
         val onToggleExpand: () -> Unit
     ) : FocusItem()
@@ -93,10 +175,33 @@ sealed class FocusItem {
     ) : FocusItem()
 }
 
+// ====== Sealed class for all-todos items ======
+
+sealed class AllTodoItem {
+    data class Header(
+        val id: String,
+        val title: String,
+        val color: Color,
+        val isExpanded: Boolean,
+        val onToggleExpand: () -> Unit
+    ) : AllTodoItem()
+    data class Task(val todo: Todo, val groupPrefix: String) : AllTodoItem()
+
+    val key: String
+        get() = when (this) {
+            is Header -> id
+            is Task -> "${groupPrefix}_${todo.id}"
+        }
+}
+
+// ====== Entry point ======
+
 @Composable
 fun ListView(viewModel: TodoViewModel) {
     ClassicListView(viewModel)
 }
+
+// ====== ClassicListView ======
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -136,10 +241,10 @@ fun ClassicListView(viewModel: TodoViewModel) {
             val wasOverdue = it.date != null && it.date!! < todayStr && !isWeekDate(it.date!!) && !isMonthDate(it.date!!)
             val isOverdueCompletedToday = completedToday && wasOverdue
 
-            it.date == todayStr 
-                || it.isOverdue(todayStr) 
-                || it.date == thisWeekStr 
-                || it.date == thisMonthStr 
+            it.date == todayStr
+                || it.isOverdue(todayStr)
+                || it.date == thisWeekStr
+                || it.date == thisMonthStr
                 || isOverdueCompletedToday
         }.sortedWith(TodoComparator)
     }
@@ -159,9 +264,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
             list.addAll(todayTasks.map { FocusItem.Task(it) })
         }
 
-
-
-        // 3. Week Tasks
+        // 2. Week Tasks
         list.add(FocusItem.Header("HEADER_WEEK", "本周任务", Color(0xFFFADB14), expandWeek, { expandWeek = !expandWeek }))
         if (expandWeek) {
             if (weekTasks.isEmpty()) {
@@ -171,7 +274,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
             }
         }
 
-        // 4. Month Tasks
+        // 3. Month Tasks
         list.add(FocusItem.Header("HEADER_MONTH", "本月任务", Color(0xFFFF7A45), expandMonth, { expandMonth = !expandMonth }))
         if (expandMonth) {
             if (monthTasks.isEmpty()) {
@@ -225,47 +328,11 @@ fun ClassicListView(viewModel: TodoViewModel) {
 
                 val targetTodo = todos.find { it.id == draggedKey }
                 if (targetTodo != null) {
-                    var targetDate = targetTodo.date
-                    var targetType = targetTodo.task_type
-                    var targetRecurring = targetTodo.recurring
-
-                    when (droppedHeader) {
-                        "HEADER_TODAY" -> {
-                            targetType = "normal"
-                            if (targetTodo.task_type == "weekly_checkin" || targetTodo.task_type == "monthly_checkin") {
-                                targetRecurring = "none"
-                            }
-                            if (targetDate == null || isWeekDate(targetDate) || isMonthDate(targetDate)) {
-                                targetDate = todayStr
-                            }
-                        }
-                        "HEADER_NODATE" -> {
-                            targetType = "normal"
-                            if (targetTodo.task_type == "weekly_checkin" || targetTodo.task_type == "monthly_checkin") {
-                                targetRecurring = "none"
-                            }
-                            targetDate = null
-                        }
-                        "HEADER_WEEK" -> {
-                            targetType = "weekly_checkin"
-                            targetRecurring = "none"
-                            if (targetDate == null || !isWeekDate(targetDate)) {
-                                targetDate = thisWeekStr
-                            }
-                        }
-                        "HEADER_MONTH" -> {
-                            targetType = "monthly_checkin"
-                            targetRecurring = "none"
-                            if (targetDate == null || !isMonthDate(targetDate)) {
-                                targetDate = thisMonthStr
-                            }
-                        }
-                    }
-
+                    val resolution = resolveTaskForDropHeader(droppedHeader, targetTodo, todayStr, thisWeekStr, thisMonthStr)
                     viewModel.updateTodo(targetTodo.copy(
-                        date = targetDate,
-                        task_type = targetType,
-                        recurring = targetRecurring,
+                        date = resolution.date,
+                        task_type = resolution.taskType,
+                        recurring = resolution.recurring,
                         updated_at = nowIso()
                     ))
                 }
@@ -287,50 +354,14 @@ fun ClassicListView(viewModel: TodoViewModel) {
                         }
                         is FocusItem.Task -> {
                             val todo = item.todo
-                            var targetDate = todo.date
-                            var targetType = todo.task_type
-                            var targetRecurring = todo.recurring
-
-                            when (currentSection) {
-                                "today" -> {
-                                    targetType = "normal"
-                                    if (todo.task_type == "weekly_checkin" || todo.task_type == "monthly_checkin") {
-                                        targetRecurring = "none"
-                                    }
-                                    if (targetDate == null || isWeekDate(targetDate) || isMonthDate(targetDate)) {
-                                        targetDate = todayStr
-                                    }
-                                }
-                                "nodate" -> {
-                                    targetType = "normal"
-                                    if (todo.task_type == "weekly_checkin" || todo.task_type == "monthly_checkin") {
-                                        targetRecurring = "none"
-                                    }
-                                    targetDate = null
-                                }
-                                "week" -> {
-                                    targetType = "weekly_checkin"
-                                    targetRecurring = "none"
-                                    if (targetDate == null || !isWeekDate(targetDate)) {
-                                        targetDate = thisWeekStr
-                                    }
-                                }
-                                "month" -> {
-                                    targetType = "monthly_checkin"
-                                    targetRecurring = "none"
-                                    if (targetDate == null || !isMonthDate(targetDate)) {
-                                        targetDate = thisMonthStr
-                                    }
-                                }
-                            }
-
+                            val resolution = resolveTaskForSection(currentSection, todo, todayStr, thisWeekStr, thisMonthStr)
                             val newOrder = index.toDouble()
-                            if (todo.order != newOrder || todo.date != targetDate || todo.task_type != targetType || todo.recurring != targetRecurring) {
+                            if (todo.order != newOrder || todo.date != resolution.date || todo.task_type != resolution.taskType || todo.recurring != resolution.recurring) {
                                 updatedList.add(todo.copy(
                                     order = newOrder,
-                                    date = targetDate,
-                                    task_type = targetType,
-                                    recurring = targetRecurring,
+                                    date = resolution.date,
+                                    task_type = resolution.taskType,
+                                    recurring = resolution.recurring,
                                     updated_at = nowIso()
                                 ))
                             }
@@ -366,13 +397,13 @@ fun ClassicListView(viewModel: TodoViewModel) {
                 Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("全部待办") })
             }
             // Search toggle button
-            IconButton(onClick = { 
-                showSearchBar = !showSearchBar 
+            IconButton(onClick = {
+                showSearchBar = !showSearchBar
                 if (!showSearchBar) searchQuery = ""
             }) {
                 Icon(
-                    imageVector = if (showSearchBar) Icons.Filled.Close else Icons.Filled.Search, 
-                    contentDescription = "搜索", 
+                    imageVector = if (showSearchBar) Icons.Filled.Close else Icons.Filled.Search,
+                    contentDescription = "搜索",
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
@@ -404,7 +435,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                 shape = RoundedCornerShape(12.dp)
             )
         }
-        
+
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             val uncompletedTodos = remember(filteredTodos) { filteredTodos.filter { !it.completed } }
             val sortedUncompletedGroups = remember(uncompletedTodos, todayStr) {
@@ -421,7 +452,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                 }
                 groups.copy(
                     future = groups.future.sortedWith(dateComparatorAsc),
-                    past = groups.past.sortedWith(dateComparatorDesc) // 逾期任务按日期降序，最近逾期优先
+                    past = groups.past.sortedWith(dateComparatorDesc)
                 )
             }
 
@@ -435,7 +466,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
             val uncompletedPast = sortedUncompletedGroups.past
 
             val uncompletedFutureTasks = remember(uncompletedFuture) {
-                uncompletedFuture.filter { it.task_type == "normal" }.sortedWith { a, b ->
+                uncompletedFuture.filter { it.task_type == TaskType.NORMAL }.sortedWith { a, b ->
                     val da = a.date ?: ""
                     val db = b.date ?: ""
                     if (da != db) {
@@ -448,37 +479,37 @@ fun ClassicListView(viewModel: TodoViewModel) {
 
             val allTodosItemsOriginal = remember(uncompletedNoDate, uncompletedFutureTasks, expandNoDate, expandFuture) {
                 val list = mutableListOf<AllTodoItem>()
-                
+
                 // 1. 无日期任务 (Now on top!)
                 list.add(AllTodoItem.Header("HEADER_ALL_NODATE", "无日期", Color.Gray, expandNoDate, { expandNoDate = !expandNoDate }))
                 if (expandNoDate) {
                     list.addAll(uncompletedNoDate.map { AllTodoItem.Task(it, "uncompleted_nodate") })
                 }
-                
+
                 // 2. 未来任务
                 list.add(AllTodoItem.Header("HEADER_ALL_FUTURE", "未来任务", Color(0xFF1890FF), expandFuture, { expandFuture = !expandFuture }))
                 if (expandFuture) {
                     list.addAll(uncompletedFutureTasks.map { AllTodoItem.Task(it, "uncompleted_future") })
                 }
-                
+
                 list
             }
-            
+
             var reorderableAllTodosItems by remember { mutableStateOf<List<AllTodoItem>>(emptyList()) }
-            
+
             val reorderStateAllTodos = rememberReorderableLazyListState(
                 onMove = { from, to ->
                     val fromKey = from.key as? String ?: return@rememberReorderableLazyListState
                     val toKey = to.key as? String ?: return@rememberReorderableLazyListState
-                    
+
                     val isFromNoDate = fromKey.startsWith("uncompleted_nodate_")
                     val isToNoDate = toKey.startsWith("uncompleted_nodate_")
                     val isFromFuture = fromKey.startsWith("uncompleted_future_")
                     val isToFuture = toKey.startsWith("uncompleted_future_")
-                    
+
                     val canMove = (isFromNoDate && isToNoDate) || (isFromFuture && isToFuture)
                     if (!canMove) return@rememberReorderableLazyListState
-                    
+
                     val fromIndex = from.index
                     val toIndex = to.index
                     if (fromIndex in reorderableAllTodosItems.indices && toIndex in reorderableAllTodosItems.indices) {
@@ -493,7 +524,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                     val updatedList = mutableListOf<Todo>()
                     var currentNoDateIndex = 0.0
                     var currentFutureIndex = 0.0
-                    
+
                     reorderableAllTodosItems.forEach { item ->
                         if (item is AllTodoItem.Task) {
                             val todo = item.todo
@@ -517,7 +548,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                     }
                 }
             )
-            
+
             val isDraggingAll = reorderStateAllTodos.draggingItemKey != null
             LaunchedEffect(allTodosItemsOriginal, isDraggingAll) {
                 if (!isDraggingAll) {
@@ -528,9 +559,9 @@ fun ClassicListView(viewModel: TodoViewModel) {
             val completedMap = remember(filteredTodos, todayStr) {
                 val map = mutableMapOf<String, MutableList<Pair<Todo, String?>>>()
                 filteredTodos.forEach { todo ->
-                    if (todo.task_type == "weekly_checkin" || todo.task_type == "monthly_checkin") {
+                    if (todo.task_type == TaskType.WEEKLY_CHECKIN || todo.task_type == TaskType.MONTHLY_CHECKIN) {
                         todo.completed_dates.forEach { checkinDate ->
-                            val label = checkinDate
+                            val label = checkinDate.take(10)
                             map.getOrPut(label) { mutableListOf() }.add(Pair(todo, checkinDate))
                         }
                     } else if (todo.completed) {
@@ -662,7 +693,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                             // "completed" tab
                             val sortedCompletionDates = completedMap.keys.toList()
                             val showDates = if (showAllHistory) sortedCompletionDates else sortedCompletionDates.take(3)
-                            
+
                             showDates.forEach { dateStr ->
                                 val itemsList = completedMap[dateStr] ?: emptyList()
                                 item {
@@ -673,7 +704,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                                         modifier = Modifier.padding(vertical = 12.dp)
                                     )
                                 }
-                                
+
                                 items(
                                     items = itemsList,
                                     key = { (todo, checkinDate) ->
@@ -691,7 +722,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                                     )
                                 }
                             }
-                            
+
                             if (sortedCompletionDates.size > 3) {
                                 item {
                                     Box(
@@ -709,7 +740,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                 }
             }
         }
-        
+
         // Smart Add Input
         var addInput by remember { mutableStateOf("") }
         var isInputFocused by remember { mutableStateOf(false) }
@@ -776,11 +807,10 @@ fun ClassicListView(viewModel: TodoViewModel) {
 
     showEditDialogFor?.let { todo ->
         DisposableEffect(todo.id) {
-            viewModel.isEditingDialogShowing.value = true
+            viewModel.setEditingDialogShowing(true)
             onDispose {
-                viewModel.isEditingDialogShowing.value = false
-                if (viewModel.pendingMidnightRefresh) {
-                    viewModel.pendingMidnightRefresh = false
+                viewModel.setEditingDialogShowing(false)
+                if (viewModel.consumePendingMidnightRefresh()) {
                     viewModel.refreshTodayDate()
                 }
             }
@@ -789,7 +819,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
         EditTodoDialog(
             todo = todo,
             onDismiss = { showEditDialogFor = null },
-            onAutoSave = { updated -> 
+            onAutoSave = { updated ->
                 viewModel.updateTodo(updated)
                 showEditDialogFor = updated
             },
@@ -801,12 +831,14 @@ fun ClassicListView(viewModel: TodoViewModel) {
     }
 }
 
+// ====== GroupHeader ======
+
 @Composable
 fun GroupHeader(
-    title: String, 
-    color: Color, 
-    isExpanded: Boolean = true, 
-    isHovered: Boolean = false, 
+    title: String,
+    color: Color,
+    isExpanded: Boolean = true,
+    isHovered: Boolean = false,
     onClick: (() -> Unit)? = null
 ) {
     Surface(
@@ -824,8 +856,8 @@ fun GroupHeader(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = title, 
-                color = color, 
+                text = title,
+                color = color,
                 style = MaterialTheme.typography.titleMedium
             )
             if (onClick != null) {
@@ -838,6 +870,8 @@ fun GroupHeader(
         }
     }
 }
+
+// ====== TodoItemRow ======
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -871,9 +905,9 @@ fun TodoItemRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(
-                onClick = { 
+                onClick = {
                     coroutineScope.launch { offsetX.animateTo(0f) }
-                    onEdit() 
+                    onEdit()
                 },
                 modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
             ) {
@@ -889,7 +923,6 @@ fun TodoItemRow(
                     detectHorizontalDragGestures(
                         onDragEnd = {
                             coroutineScope.launch {
-                                // 降低触发阈值，用户只要滑动 20% 即可自动弹开
                                 if (offsetX.value < maxSwipePx / 5) {
                                     offsetX.animateTo(maxSwipePx)
                                 } else {
@@ -913,7 +946,7 @@ fun TodoItemRow(
                 val isVisualCompleted = if (checkinDate != null) {
                     true
                 } else {
-                    todo.completed || ((todo.task_type == "weekly_checkin" || todo.task_type == "monthly_checkin") && todo.completed_dates.contains(todayStr))
+                    todo.completed || ((todo.task_type == TaskType.WEEKLY_CHECKIN || todo.task_type == TaskType.MONTHLY_CHECKIN) && todo.completed_dates.any { it.startsWith(todayStr) })
                 }
                 Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(
@@ -926,8 +959,8 @@ fun TodoItemRow(
                             }
                         }
                     )
-                    Column(modifier = Modifier.weight(1f).clickable { 
-                        if (todo.task_type == "monthly_checkin") {
+                    Column(modifier = Modifier.weight(1f).clickable {
+                        if (todo.task_type == TaskType.MONTHLY_CHECKIN) {
                             calendarExpanded = !calendarExpanded
                         } else if (todo.subtasks.isNotEmpty()) {
                             expanded = !expanded
@@ -935,13 +968,13 @@ fun TodoItemRow(
                     }) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = todo.content, 
+                                text = todo.content,
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = if (isVisualCompleted) Color.Gray else MaterialTheme.colorScheme.onSurface,
                                 textDecoration = if (isVisualCompleted) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
                                 modifier = Modifier.weight(1f, fill = false)
                             )
-                            if (todo.recurring == "daily_repeat") {
+                            if (todo.recurring == RecurringType.DAILY_REPEAT) {
                                 Spacer(Modifier.width(6.dp))
                                 Box(
                                     modifier = Modifier
@@ -959,7 +992,7 @@ fun TodoItemRow(
                                     Text(
                                         text = "每天重复",
                                         color = MaterialTheme.colorScheme.primary,
-                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Medium)
                                     )
                                 }
                             }
@@ -978,27 +1011,27 @@ fun TodoItemRow(
                                 meta.add("✓ 完成于 $mmdd")
                             }
                         }
-                        if (todo.recurring != "none") meta.add("🔄")
+                        if (todo.recurring != RecurringType.NONE) meta.add("🔄")
                         if (todo.subtasks.isNotEmpty()) meta.add("📋 ${todo.subtasks.count { it.completed }}/${todo.subtasks.size}")
                         if (meta.isNotEmpty()) {
                             Text(text = meta.joinToString(" | "), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                         }
 
-                        if (todo.task_type == "weekly_checkin") {
+                        if (todo.task_type == TaskType.WEEKLY_CHECKIN) {
                             Spacer(Modifier.height(6.dp))
                             val dates = remember { getThisWeekDates() }
                             val labels = listOf("一", "二", "三", "四", "五", "六", "日")
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 dates.forEachIndexed { idx, date ->
                                     val dateStr = date.toString()
-                                    val isChecked = todo.completed_dates.contains(dateStr)
+                                    val isChecked = todo.completed_dates.any { it.startsWith(dateStr) }
                                     val isToday = dateStr == todayStr
                                     Box(
                                         modifier = Modifier
                                             .size(20.dp)
                                             .clip(RoundedCornerShape(4.dp))
                                             .background(
-                                                if (isChecked) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f) 
+                                                if (isChecked) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
                                                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
                                             )
                                             .border(
@@ -1019,12 +1052,12 @@ fun TodoItemRow(
                                     }
                                 }
                             }
-                        } else if (todo.task_type == "monthly_checkin") {
+                        } else if (todo.task_type == TaskType.MONTHLY_CHECKIN) {
                             Spacer(Modifier.height(6.dp))
                             val count = todo.getMonthlyCompletedCount()
                             val target = todo.target_count ?: 30
                             val progress = if (target > 0) count.toFloat() / target.toFloat() else 0f
-                            
+
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 LinearProgressIndicator(
                                     progress = { progress.coerceIn(0f, 1f) },
@@ -1038,11 +1071,11 @@ fun TodoItemRow(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            
+
                             if (calendarExpanded) {
                                 Spacer(Modifier.height(6.dp))
                                 val dates = remember(todo.date) { getMonthCalendarDates(todo.date) }
-                                
+
                                 val targetMonth = remember(todo.date) {
                                     try {
                                         val parts = (todo.date ?: "").split("-")
@@ -1051,10 +1084,10 @@ fun TodoItemRow(
                                         LocalDate.now().monthValue
                                     }
                                 }
-                                
+
                                 val chunks = dates.chunked(7)
                                 val weekLabels = listOf("一", "二", "三", "四", "五", "六", "日")
-                                
+
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     // Weekday Headers
                                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1071,15 +1104,15 @@ fun TodoItemRow(
                                             }
                                         }
                                     }
-                                    
+
                                     chunks.forEach { rowDates ->
                                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                             rowDates.forEach { date ->
                                                 val dateStr = date.toString()
-                                                val isChecked = todo.completed_dates.contains(dateStr)
+                                                val isChecked = todo.completed_dates.any { it.startsWith(dateStr) }
                                                 val isToday = dateStr == todayStr
                                                 val isCurrentMonth = date.monthValue == targetMonth
-                                                
+
                                                 Box(
                                                     modifier = Modifier
                                                         .size(20.dp)
@@ -1130,7 +1163,7 @@ fun TodoItemRow(
                         }
                     }
                 }
-                
+
                 if (expanded && todo.subtasks.isNotEmpty()) {
                     Divider(modifier = Modifier.padding(horizontal = 12.dp))
                     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -1180,6 +1213,8 @@ fun TodoItemRow(
 
 // getThisWeekDates() / getThisMonthDates() 已移至 TodoDateUtils.kt 共享
 
+// ====== ImportLastPeriodCard ======
+
 @Composable
 fun ImportLastPeriodCard(
     message: String,
@@ -1194,23 +1229,23 @@ fun ImportLastPeriodCard(
     val today = java.time.LocalDate.now()
     val sourcePeriodStr = remember(type, today) {
         if (type == "weekly") {
-            com.todo.app.data.model.weekStringOf(today.minusWeeks(1))
+            weekStringOf(today.minusWeeks(1))
         } else {
-            com.todo.app.data.model.monthStringOf(today.minusMonths(1))
+            monthStringOf(today.minusMonths(1))
         }
     }
     val targetPeriodStr = remember(type, today) {
         if (type == "weekly") {
-            com.todo.app.data.model.weekStringOf(today)
+            weekStringOf(today)
         } else {
-            com.todo.app.data.model.monthStringOf(today)
+            monthStringOf(today)
         }
     }
     val candidates = remember(todos, sourcePeriodStr, targetPeriodStr) {
         val existingTitles = todos.filter { !it.deleted && it.date == targetPeriodStr }.map { it.content }.toSet()
         todos.filter {
             !it.deleted &&
-            (it.task_type == "weekly_checkin" || it.task_type == "monthly_checkin") &&
+            (it.task_type == TaskType.WEEKLY_CHECKIN || it.task_type == TaskType.MONTHLY_CHECKIN) &&
             it.date == sourcePeriodStr &&
             !existingTitles.contains(it.content)
         }
@@ -1286,7 +1321,7 @@ fun ImportLastPeriodCard(
                         val chosenIds = selectedIds.filter { it.value }.keys.toList()
                         if (chosenIds.isNotEmpty()) {
                             coroutineScope.launch {
-                                viewModel.importSelectedFromLastPeriod(type, chosenIds, context)
+                                viewModel.importSelectedFromLastPeriod(type, chosenIds)
                             }
                         }
                         showDialog = false
@@ -1302,21 +1337,4 @@ fun ImportLastPeriodCard(
             }
         )
     }
-}
-
-sealed class AllTodoItem {
-    data class Header(
-        val id: String,
-        val title: String,
-        val color: Color,
-        val isExpanded: Boolean,
-        val onToggleExpand: () -> Unit
-    ) : AllTodoItem()
-    data class Task(val todo: Todo, val groupPrefix: String) : AllTodoItem()
-    
-    val key: String
-        get() = when (this) {
-            is Header -> id
-            is Task -> "${groupPrefix}_${todo.id}"
-        }
 }
