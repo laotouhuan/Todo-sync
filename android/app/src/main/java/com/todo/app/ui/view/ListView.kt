@@ -91,7 +91,7 @@ private fun resolveTaskForSection(
     return when (section) {
         "today" -> {
             val targetType = TaskType.NORMAL
-            val targetRecurring = if (todo.task_type == TaskType.WEEKLY_CHECKIN || todo.task_type == TaskType.MONTHLY_CHECKIN) {
+            val targetRecurring = if (todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) {
                 RecurringType.NONE
             } else {
                 todo.recurring
@@ -105,7 +105,7 @@ private fun resolveTaskForSection(
         }
         "nodate" -> {
             val targetType = TaskType.NORMAL
-            val targetRecurring = if (todo.task_type == TaskType.WEEKLY_CHECKIN || todo.task_type == TaskType.MONTHLY_CHECKIN) {
+            val targetRecurring = if (todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) {
                 RecurringType.NONE
             } else {
                 todo.recurring
@@ -128,7 +128,7 @@ private fun resolveTaskForSection(
             }
             SectionTaskResolution(targetDate, TaskType.MONTHLY_CHECKIN, RecurringType.NONE)
         }
-        else -> SectionTaskResolution(todo.date, todo.task_type, todo.recurring)
+        else -> SectionTaskResolution(todo.date, todo.taskType, todo.recurring)
     }
 }
 
@@ -144,7 +144,7 @@ private fun resolveTaskForDropHeader(
         "HEADER_NODATE" -> "nodate"
         "HEADER_WEEK" -> "week"
         "HEADER_MONTH" -> "month"
-        else -> return SectionTaskResolution(todo.date, todo.task_type, todo.recurring)
+        else -> return SectionTaskResolution(todo.date, todo.taskType, todo.recurring)
     }
     return resolveTaskForSection(section, todo, todayStr, thisWeekStr, thisMonthStr)
 }
@@ -237,7 +237,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
 
     val filtered = remember(filteredTodos, todayStr, thisWeekStr, thisMonthStr) {
         filteredTodos.filter {
-            val completedToday = it.completed && it.completed_at?.startsWith(todayStr) == true
+            val completedToday = it.completed && it.completedAt?.startsWith(todayStr) == true
             val wasOverdue = it.date != null && it.date!! < todayStr && !isWeekDate(it.date!!) && !isMonthDate(it.date!!)
             val isOverdueCompletedToday = completedToday && wasOverdue
 
@@ -331,9 +331,9 @@ fun ClassicListView(viewModel: TodoViewModel) {
                     val resolution = resolveTaskForDropHeader(droppedHeader, targetTodo, todayStr, thisWeekStr, thisMonthStr)
                     viewModel.updateTodo(targetTodo.copy(
                         date = resolution.date,
-                        task_type = resolution.taskType,
+                        taskType = resolution.taskType,
                         recurring = resolution.recurring,
-                        updated_at = nowIso()
+                        updatedAt = nowIso()
                     ))
                 }
             } else {
@@ -356,13 +356,13 @@ fun ClassicListView(viewModel: TodoViewModel) {
                             val todo = item.todo
                             val resolution = resolveTaskForSection(currentSection, todo, todayStr, thisWeekStr, thisMonthStr)
                             val newOrder = index.toDouble()
-                            if (todo.order != newOrder || todo.date != resolution.date || todo.task_type != resolution.taskType || todo.recurring != resolution.recurring) {
+                            if (todo.order != newOrder || todo.date != resolution.date || todo.taskType != resolution.taskType || todo.recurring != resolution.recurring) {
                                 updatedList.add(todo.copy(
                                     order = newOrder,
                                     date = resolution.date,
-                                    task_type = resolution.taskType,
+                                    taskType = resolution.taskType,
                                     recurring = resolution.recurring,
-                                    updated_at = nowIso()
+                                    updatedAt = nowIso()
                                 ))
                             }
                         }
@@ -466,7 +466,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
             val uncompletedPast = sortedUncompletedGroups.past
 
             val uncompletedFutureTasks = remember(uncompletedFuture) {
-                uncompletedFuture.filter { it.task_type == TaskType.NORMAL }.sortedWith { a, b ->
+                uncompletedFuture.filter { it.taskType == TaskType.NORMAL }.sortedWith { a, b ->
                     val da = a.date ?: ""
                     val db = b.date ?: ""
                     if (da != db) {
@@ -532,13 +532,13 @@ fun ClassicListView(viewModel: TodoViewModel) {
                                 val newOrder = currentNoDateIndex
                                 currentNoDateIndex += 1.0
                                 if (todo.order != newOrder) {
-                                    updatedList.add(todo.copy(order = newOrder, updated_at = nowIso()))
+                                    updatedList.add(todo.copy(order = newOrder, updatedAt = nowIso()))
                                 }
                             } else if (item.groupPrefix == "uncompleted_future") {
                                 val newOrder = currentFutureIndex
                                 currentFutureIndex += 1.0
                                 if (todo.order != newOrder) {
-                                    updatedList.add(todo.copy(order = newOrder, updated_at = nowIso()))
+                                    updatedList.add(todo.copy(order = newOrder, updatedAt = nowIso()))
                                 }
                             }
                         }
@@ -559,21 +559,21 @@ fun ClassicListView(viewModel: TodoViewModel) {
             val completedMap = remember(filteredTodos, todayStr) {
                 val map = mutableMapOf<String, MutableList<Pair<Todo, String?>>>()
                 filteredTodos.forEach { todo ->
-                    if (todo.task_type == TaskType.WEEKLY_CHECKIN || todo.task_type == TaskType.MONTHLY_CHECKIN) {
-                        todo.completed_dates.forEach { checkinDate ->
+                    if (todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) {
+                        todo.completedDates.forEach { checkinDate ->
                             val label = checkinDate.take(10)
                             map.getOrPut(label) { mutableListOf() }.add(Pair(todo, checkinDate))
                         }
                     } else if (todo.completed) {
-                        val completedAt = todo.completed_at ?: todo.created_at
+                        val completedAt = todo.completedAt ?: todo.createdAt
                         val dateLabel = if (completedAt.length >= 10) completedAt.substring(0, 10) else "未知日期"
                         map.getOrPut(dateLabel) { mutableListOf() }.add(Pair(todo, null))
                     }
                 }
                 map.mapValues { (_, list) ->
                     list.sortedWith { a, b ->
-                        val ua = a.first.updated_at ?: a.first.created_at
-                        val ub = b.first.updated_at ?: b.first.created_at
+                        val ua = a.first.updatedAt ?: a.first.createdAt
+                        val ub = b.first.updatedAt ?: b.first.createdAt
                         ub.compareTo(ua)
                     }
                 }.toSortedMap(reverseOrder())
@@ -946,7 +946,7 @@ fun TodoItemRow(
                 val isVisualCompleted = if (checkinDate != null) {
                     true
                 } else {
-                    todo.completed || ((todo.task_type == TaskType.WEEKLY_CHECKIN || todo.task_type == TaskType.MONTHLY_CHECKIN) && todo.completed_dates.any { it.startsWith(todayStr) })
+                    todo.completed || ((todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) && todo.completedDates.any { it.startsWith(todayStr) })
                 }
                 Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(
@@ -960,7 +960,7 @@ fun TodoItemRow(
                         }
                     )
                     Column(modifier = Modifier.weight(1f).clickable {
-                        if (todo.task_type == TaskType.MONTHLY_CHECKIN) {
+                        if (todo.taskType == TaskType.MONTHLY_CHECKIN) {
                             calendarExpanded = !calendarExpanded
                         } else if (todo.subtasks.isNotEmpty()) {
                             expanded = !expanded
@@ -1004,8 +1004,8 @@ fun TodoItemRow(
                             val label = if (statusLabel != null) "📅 $dateLabel ($statusLabel)" else "📅 $dateLabel"
                             meta.add(label)
                         }
-                        if (todo.completed && todo.completed_at != null) {
-                            val completedAt = todo.completed_at!!
+                        if (todo.completed && todo.completedAt != null) {
+                            val completedAt = todo.completedAt!!
                             if (completedAt.length >= 10) {
                                 val mmdd = completedAt.substring(5, 10)
                                 meta.add("✓ 完成于 $mmdd")
@@ -1017,14 +1017,14 @@ fun TodoItemRow(
                             Text(text = meta.joinToString(" | "), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                         }
 
-                        if (todo.task_type == TaskType.WEEKLY_CHECKIN) {
+                        if (todo.taskType == TaskType.WEEKLY_CHECKIN) {
                             Spacer(Modifier.height(6.dp))
                             val dates = remember { getThisWeekDates() }
                             val labels = listOf("一", "二", "三", "四", "五", "六", "日")
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 dates.forEachIndexed { idx, date ->
                                     val dateStr = date.toString()
-                                    val isChecked = todo.completed_dates.any { it.startsWith(dateStr) }
+                                    val isChecked = todo.completedDates.any { it.startsWith(dateStr) }
                                     val isToday = dateStr == todayStr
                                     Box(
                                         modifier = Modifier
@@ -1052,10 +1052,10 @@ fun TodoItemRow(
                                     }
                                 }
                             }
-                        } else if (todo.task_type == TaskType.MONTHLY_CHECKIN) {
+                        } else if (todo.taskType == TaskType.MONTHLY_CHECKIN) {
                             Spacer(Modifier.height(6.dp))
                             val count = todo.getMonthlyCompletedCount()
-                            val target = todo.target_count ?: 30
+                            val target = todo.targetCount ?: 30
                             val progress = if (target > 0) count.toFloat() / target.toFloat() else 0f
 
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1175,26 +1175,26 @@ fun TodoItemRow(
                                         val newSubs = todo.subtasks.toMutableList()
                                         newSubs[index] = sub.copy(
                                             completed = isChecked,
-                                            completed_at = if (isChecked) nowIso() else null
+                                            completedAt = if (isChecked) nowIso() else null
                                         )
 
                                         val allCompleted = newSubs.isNotEmpty() && newSubs.all { s -> s.completed }
                                         val parentCompleted = if (allCompleted && !todo.completed) true else todo.completed
-                                        val parentCompletedAt = if (allCompleted && !todo.completed) nowInstant() else todo.completed_at
+                                        val parentCompletedAt = if (allCompleted && !todo.completed) nowInstant() else todo.completedAt
 
                                         viewModel.updateTodo(todo.copy(
                                             subtasks = newSubs,
                                             completed = parentCompleted,
-                                            completed_at = parentCompletedAt,
-                                            updated_at = nowIso()
+                                            completedAt = parentCompletedAt,
+                                            updatedAt = nowIso()
                                         ))
                                     },
                                     modifier = Modifier.size(24.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = if (sub.completed && sub.completed_at != null && sub.completed_at!!.length >= 10) {
-                                        "${sub.content} (完成于 ${sub.completed_at!!.substring(5, 10)})"
+                                    text = if (sub.completed && sub.completedAt != null && sub.completedAt!!.length >= 10) {
+                                        "${sub.content} (完成于 ${sub.completedAt!!.substring(5, 10)})"
                                     } else {
                                         sub.content
                                     },
@@ -1245,7 +1245,7 @@ fun ImportLastPeriodCard(
         val existingTitles = todos.filter { !it.deleted && it.date == targetPeriodStr }.map { it.content }.toSet()
         todos.filter {
             !it.deleted &&
-            (it.task_type == TaskType.WEEKLY_CHECKIN || it.task_type == TaskType.MONTHLY_CHECKIN) &&
+            (it.taskType == TaskType.WEEKLY_CHECKIN || it.taskType == TaskType.MONTHLY_CHECKIN) &&
             it.date == sourcePeriodStr &&
             !existingTitles.contains(it.content)
         }

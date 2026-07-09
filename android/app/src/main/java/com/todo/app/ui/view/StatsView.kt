@@ -91,19 +91,19 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     val periodTodos = remember(todos, period, targetDate) {
         when (period) {
             "day" -> todos.filter { t ->
-                if (t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) {
-                    t.completed_dates.any { it.startsWith(targetDate.toString()) }
+                if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
+                    t.completedDates.any { it.startsWith(targetDate.toString()) }
                 } else {
-                    if (t.completed && !t.completed_at.isNullOrEmpty()) {
-                        t.completed_at?.take(10) == targetDate.toString()
+                    if (t.completed && !t.completedAt.isNullOrEmpty()) {
+                        t.completedAt?.take(10) == targetDate.toString()
                     } else {
                         t.date == targetDate.toString()
                     }
                 }
             }
             "week" -> todos.filter { t ->
-                if (t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) {
-                    val hasCheckin = t.completed_dates.any { dStr ->
+                if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
+                    val hasCheckin = t.completedDates.any { dStr ->
                         try {
                             val checkDate = LocalDate.parse(dStr.take(10))
                             checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
@@ -112,14 +112,14 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                             false
                         }
                     }
-                    if (t.task_type == TaskType.WEEKLY_CHECKIN && t.date == targetWeekStr) {
-                        if (t.target_count != null) true else hasCheckin
+                    if (t.taskType == TaskType.WEEKLY_CHECKIN && t.date == targetWeekStr) {
+                        if (t.targetCount != null) true else hasCheckin
                     } else {
                         hasCheckin
                     }
                 } else {
-                    if (t.completed && !t.completed_at.isNullOrEmpty()) {
-                        t.completed_at?.take(10)?.let { completedDateStr ->
+                    if (t.completed && !t.completedAt.isNullOrEmpty()) {
+                        t.completedAt?.take(10)?.let { completedDateStr ->
                             try {
                                 val checkDate = LocalDate.parse(completedDateStr)
                                 checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
@@ -141,16 +141,16 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                 }
             }
             else -> todos.filter { t ->
-                if (t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) {
-                    val hasCheckin = t.completed_dates.any { dStr -> dStr.startsWith(targetMonthStr) }
-                    if (t.task_type == TaskType.MONTHLY_CHECKIN && t.date == targetMonthStr) {
-                        if (t.target_count != null) true else hasCheckin
+                if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
+                    val hasCheckin = t.completedDates.any { dStr -> dStr.startsWith(targetMonthStr) }
+                    if (t.taskType == TaskType.MONTHLY_CHECKIN && t.date == targetMonthStr) {
+                        if (t.targetCount != null) true else hasCheckin
                     } else {
                         hasCheckin
                     }
                 } else {
-                    if (t.completed && !t.completed_at.isNullOrEmpty()) {
-                        t.completed_at?.take(7) == targetMonthStr
+                    if (t.completed && !t.completedAt.isNullOrEmpty()) {
+                        t.completedAt?.take(7) == targetMonthStr
                     } else {
                         val dateStr = t.date
                         if (!dateStr.isNullOrEmpty()) {
@@ -168,9 +168,9 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     var completedDouble = 0.0
 
     periodTodos.forEach { t ->
-        if (t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) {
+        if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
             var periodCheckinCount = 0
-            t.completed_dates.forEach { dStr ->
+            t.completedDates.forEach { dStr ->
                 when (period) {
                     "day" -> {
                         if (dStr.startsWith(targetDate.toString())) periodCheckinCount++
@@ -189,9 +189,9 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     }
                 }
             }
-            if (t.target_count != null) {
-                completedDouble += Math.min(t.target_count!!.toDouble(), periodCheckinCount.toDouble())
-                totalDouble += t.target_count!!.toDouble()
+            if (t.targetCount != null) {
+                completedDouble += Math.min(t.targetCount!!.toDouble(), periodCheckinCount.toDouble())
+                totalDouble += t.targetCount!!.toDouble()
             } else {
                 completedDouble += periodCheckinCount.toDouble()
                 totalDouble += periodCheckinCount.toDouble()
@@ -253,8 +253,8 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
         var makeupCheckinCount = 0
 
         periodTodos.forEach { t ->
-            if (t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) {
-                t.completed_dates.forEach { dStr ->
+            if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
+                t.completedDates.forEach { dStr ->
                     val inPeriod = when (period) {
                         "day" -> dStr.startsWith(targetDate.toString())
                         "week" -> {
@@ -282,8 +282,8 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     }
                 }
             } else {
-                if (t.completed && !t.completed_at.isNullOrEmpty()) {
-                    val slot = categorizeByTimeSlot(t.completed_at)
+                if (t.completed && !t.completedAt.isNullOrEmpty()) {
+                    val slot = categorizeByTimeSlot(t.completedAt)
                     if (slot == "morning") morningCount++
                     else if (slot == "afternoon") afternoonCount++
                     else if (slot == "evening") eveningCount++
@@ -403,7 +403,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     viewModel = viewModel,
                     onEdit = { onEditTodo(todo) },
                     onMoveToTomorrow = {
-                        viewModel.updateTodo(todo.copy(date = tomorrowStr, updated_at = nowIso()))
+                        viewModel.updateTodo(todo.copy(date = tomorrowStr, updatedAt = nowIso()))
                     },
                     todayStr = todayStr,
                     tomorrowStr = tomorrowStr
@@ -428,13 +428,13 @@ fun HealthContent(viewModel: TodoViewModel) {
                 false
             } else {
                 // 排除过期的周/月打卡任务 (不管是否限定了次数)
-                if (t.task_type == TaskType.WEEKLY_CHECKIN && t.date != null && t.date!! < currentWeekStr) {
+                if (t.taskType == TaskType.WEEKLY_CHECKIN && t.date != null && t.date!! < currentWeekStr) {
                     false
-                } else if (t.task_type == TaskType.MONTHLY_CHECKIN && t.date != null && t.date!! < currentMonthStr) {
+                } else if (t.taskType == TaskType.MONTHLY_CHECKIN && t.date != null && t.date!! < currentMonthStr) {
                     false
                 } else {
                     // 排除没有设定次数目标的打卡任务 (未过期时)
-                    !((t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) && t.target_count == null)
+                    !((t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) && t.targetCount == null)
                 }
             }
         }
@@ -443,7 +443,7 @@ fun HealthContent(viewModel: TodoViewModel) {
     val nowTime = OffsetDateTime.now()
 
     // 1. Average age
-    val totalAge = incompleteTodos.sumOf { calcTaskAgeDays(it.created_at, nowTime).toDouble() }
+    val totalAge = incompleteTodos.sumOf { calcTaskAgeDays(it.createdAt, nowTime).toDouble() }
     val avgAge = if (incompleteTodos.isEmpty()) 0.0 else totalAge / incompleteTodos.size
 
     // 2. Health Grade
@@ -456,23 +456,23 @@ fun HealthContent(viewModel: TodoViewModel) {
     
     activeTodos.forEach { t ->
         // 排除周/月打卡任务
-        if (t.task_type == TaskType.WEEKLY_CHECKIN || t.task_type == TaskType.MONTHLY_CHECKIN) {
+        if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
             return@forEach
         }
         val createdDateTime = try {
-            OffsetDateTime.parse(t.created_at)
+            OffsetDateTime.parse(t.createdAt)
         } catch (e: Exception) {
-            try { OffsetDateTime.ofInstant(java.time.Instant.parse(t.created_at), java.time.ZoneId.systemDefault()) } catch (ex: Exception) { null }
+            try { OffsetDateTime.ofInstant(java.time.Instant.parse(t.createdAt), java.time.ZoneId.systemDefault()) } catch (ex: Exception) { null }
         }
         if (createdDateTime != null && createdDateTime.isAfter(thresholdDate)) {
             addedCount++
         }
 
-        if (t.completed && !t.completed_at.isNullOrEmpty()) {
+        if (t.completed && !t.completedAt.isNullOrEmpty()) {
             val completedDateTime = try {
-                OffsetDateTime.parse(t.completed_at)
+                OffsetDateTime.parse(t.completedAt)
             } catch (e: Exception) {
-                try { OffsetDateTime.ofInstant(java.time.Instant.parse(t.completed_at), java.time.ZoneId.systemDefault()) } catch (ex: Exception) { null }
+                try { OffsetDateTime.ofInstant(java.time.Instant.parse(t.completedAt), java.time.ZoneId.systemDefault()) } catch (ex: Exception) { null }
             }
             if (completedDateTime != null && completedDateTime.isAfter(thresholdDate)) {
                 completedCount++
@@ -482,9 +482,9 @@ fun HealthContent(viewModel: TodoViewModel) {
 
     // 4. Sleeping tasks (survived >= 7 days)
     val sleepingTodos = incompleteTodos.filter {
-        calcTaskAgeDays(it.created_at, nowTime) >= 7
+        calcTaskAgeDays(it.createdAt, nowTime) >= 7
     }.sortedByDescending {
-        calcTaskAgeDays(it.created_at, nowTime)
+        calcTaskAgeDays(it.createdAt, nowTime)
     }
 
     LazyColumn(
@@ -505,14 +505,14 @@ fun HealthContent(viewModel: TodoViewModel) {
                     Text("清单健康度", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = healthGrade.first,
+                        text = healthGrade.grade,
                         style = MaterialTheme.typography.displayMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color(healthGrade.third)
+                        color = Color(healthGrade.color)
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "“${healthGrade.second}”",
+                        text = "“${healthGrade.text}”",
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center
                     )
@@ -665,7 +665,7 @@ fun HealthContent(viewModel: TodoViewModel) {
             }
         } else {
             items(sleepingTodos, key = { it.id }) { todo ->
-                val age = calcTaskAgeDays(todo.created_at, nowTime)
+                val age = calcTaskAgeDays(todo.createdAt, nowTime)
                 ElevatedCard(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp)
@@ -684,7 +684,7 @@ fun HealthContent(viewModel: TodoViewModel) {
                             TextButton(
                                 onClick = {
                                     val tomorrowStr = LocalDate.now().plusDays(1).toString()
-                                    viewModel.updateTodo(todo.copy(date = tomorrowStr, updated_at = nowIso()))
+                                    viewModel.updateTodo(todo.copy(date = tomorrowStr, updatedAt = nowIso()))
                                 },
                                 colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF7B61FF))
                             ) {

@@ -116,9 +116,9 @@ private fun buildUpdatedTodo(
         }
     } else if (mappedTaskType == TaskType.NORMAL && finalDate != null && (isWeekDate(finalDate) || isMonthDate(finalDate))) {
         if (isWeekDate(finalDate)) {
-            return todo.copy(task_type = TaskType.WEEKLY_CHECKIN, recurring = RecurringType.NONE, date = finalDate, updated_at = nowIso())
+            return todo.copy(taskType = TaskType.WEEKLY_CHECKIN, recurring = RecurringType.NONE, date = finalDate, updatedAt = nowIso())
         } else {
-            return todo.copy(task_type = TaskType.MONTHLY_CHECKIN, recurring = RecurringType.NONE, date = finalDate, updated_at = nowIso())
+            return todo.copy(taskType = TaskType.MONTHLY_CHECKIN, recurring = RecurringType.NONE, date = finalDate, updatedAt = nowIso())
         }
     } else if (selectedTypeUi == TaskType.WEEKLY_CHECKIN) {
         finalTime = null
@@ -133,7 +133,7 @@ private fun buildUpdatedTodo(
     }
 
     val isCompletedNow = if (mappedTaskType == TaskType.WEEKLY_CHECKIN || mappedTaskType == TaskType.MONTHLY_CHECKIN) {
-        val tempTodo = todo.copy(completed_dates = completedDates, date = finalDate)
+        val tempTodo = todo.copy(completedDates = completedDates, date = finalDate)
         val completedCount = if (mappedTaskType == TaskType.WEEKLY_CHECKIN) {
             tempTodo.getWeeklyCompletedCount()
         } else {
@@ -148,19 +148,19 @@ private fun buildUpdatedTodo(
         date = finalDate,
         time = finalTime,
         recurring = mappedRecurring,
-        task_type = mappedTaskType,
-        target_count = targetCount,
-        completed_dates = completedDates,
+        taskType = mappedTaskType,
+        targetCount = targetCount,
+        completedDates = completedDates,
         completed = isCompletedNow,
-        completed_at = if (isCompletedNow) {
+        completedAt = if (isCompletedNow) {
             if (mappedTaskType == TaskType.WEEKLY_CHECKIN || mappedTaskType == TaskType.MONTHLY_CHECKIN) {
-                todo.completed_at ?: nowIso()
+                todo.completedAt ?: nowIso()
             } else {
-                parentCompletedAt ?: todo.completed_at ?: nowIso()
+                parentCompletedAt ?: todo.completedAt ?: nowIso()
             }
         } else null,
         subtasks = subtasks,
-        updated_at = nowIso()
+        updatedAt = nowIso()
     )
 }
 
@@ -194,15 +194,15 @@ fun EditTodoDialog(
             cachedDate = date
         }
     }
-    var completedDates by remember(todo.completed_dates) { mutableStateOf(todo.completed_dates) }
+    var completedDates by remember(todo.completedDates) { mutableStateOf(todo.completedDates) }
     var subtasks by remember(todo.subtasks) { mutableStateOf(todo.subtasks) }
     var editingSubtaskId by remember { mutableStateOf<String?>(null) }
-    var targetCount by remember(todo.target_count) { mutableStateOf(todo.target_count) }
+    var targetCount by remember(todo.targetCount) { mutableStateOf(todo.targetCount) }
     var parentCompleted by remember(todo.completed) { mutableStateOf(todo.completed) }
-    var parentCompletedAt by remember(todo.completed_at) { mutableStateOf(todo.completed_at) }
+    var parentCompletedAt by remember(todo.completedAt) { mutableStateOf(todo.completedAt) }
 
-    var selectedTypeUi by remember(todo.task_type, todo.recurring) {
-        mutableStateOf(if (todo.recurring == RecurringType.DAILY_REPEAT) TaskType.DAILY_REPEAT else todo.task_type)
+    var selectedTypeUi by remember(todo.taskType, todo.recurring) {
+        mutableStateOf(if (todo.recurring == RecurringType.DAILY_REPEAT) TaskType.DAILY_REPEAT else todo.taskType)
     }
 
     val performAutoSave = rememberDebouncedAutoSave(delayMs = 300) { t ->
@@ -574,7 +574,7 @@ private fun EditTodoSubtasksSection(
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().then(dragModifier)) {
                         Checkbox(checked = sub.completed, onCheckedChange = { chk ->
                             val updatedSubtasks = subtasks.map {
-                                if (it.id == sub.id) it.copy(completed = chk, completed_at = if (chk) nowIso() else null) else it
+                                if (it.id == sub.id) it.copy(completed = chk, completedAt = if (chk) nowIso() else null) else it
                             }
                             onSubtasksChange(updatedSubtasks)
                             val allCompleted = updatedSubtasks.isNotEmpty() && updatedSubtasks.all { it.completed }
