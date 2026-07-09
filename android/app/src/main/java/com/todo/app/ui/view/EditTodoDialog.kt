@@ -1,5 +1,7 @@
 package com.todo.app.ui.view
 
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -29,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Checkbox
