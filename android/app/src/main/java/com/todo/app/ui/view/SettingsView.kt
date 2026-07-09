@@ -74,9 +74,9 @@ fun SettingsView(viewModel: TodoViewModel) {
         isDownloading = true
         downloadProgress = 0
         downloadJob = coroutineScope.launch {
-            val file = AppUpdater.downloadApk(context, apkUrl) { progress ->
+            val file = AppUpdater.downloadApk(context, apkUrl, onProgress = { progress ->
                 downloadProgress = progress
-            }
+            })
             isDownloading = false
             if (file != null) {
                 AppUpdater.installApk(context, file)
