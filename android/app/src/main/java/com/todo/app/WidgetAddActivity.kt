@@ -109,8 +109,8 @@ class WidgetAddActivity : ComponentActivity() {
                 val currentData = repository.getTodoData().first()
                 val minOrder = currentData.todos.filter { !it.deleted && !it.completed }.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()
                 val newTodo = Todo.create(parsed.content, parsed.date).copy(
-                    task_type = parsed.taskType,
-                    target_count = parsed.targetCount,
+                    taskType = parsed.taskType,
+                    targetCount = parsed.targetCount,
                     recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
                     order = minOrder - 1.0
                 )
