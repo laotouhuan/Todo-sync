@@ -1,6 +1,5 @@
-package com.todo.app.ui.view
-
 @file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+package com.todo.app.ui.view
 
 import android.content.ClipData
 import android.content.ClipboardManager

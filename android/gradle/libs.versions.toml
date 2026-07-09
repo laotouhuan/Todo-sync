@@ -13,6 +13,7 @@ junitExt                = "1.2.1"
 espressoCore            = "3.6.1"
 okhttp                  = "4.12.0"
 reorderable             = "0.9.6"
+securityCrypto          = "1.1.0-alpha06"
 
 [libraries]
 # AndroidX Core
@@ -37,6 +38,9 @@ androidx-glance-material3          = { group = "androidx.glance",         name =
 
 # Kotlin Serialization（JSON 读写）
 kotlinx-serialization-json         = { group = "org.jetbrains.kotlinx",  name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
+
+# Security
+androidx-security-crypto           = { group = "androidx.security",       name = "security-crypto",        version.ref = "securityCrypto" }
 
 # 测试
 junit                              = { group = "junit",                   name = "junit",                  version.ref = "junit" }
