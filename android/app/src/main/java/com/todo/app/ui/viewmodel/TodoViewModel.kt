@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class TodoViewModel(private val repository: TodoRepository, private val configManager: ConfigManager) : ViewModel() {
+class TodoViewModel(private val repository: TodoRepository, val configManager: ConfigManager) : ViewModel() {
 
     private val _todayDate = MutableStateFlow(java.time.LocalDate.now().toString())
     val todayDate: StateFlow<String> = _todayDate.asStateFlow()
