@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -356,27 +357,35 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 
                 // Color bar
-                Row(
-                    modifier = Modifier.fillMaxWidth().height(16.dp).clip(RoundedCornerShape(8.dp))
-                ) {
-                    val weightMorning = if (morningCount == 0 && totalSlots == 0) 1f else morningCount.toFloat()
-                    val weightAfternoon = if (afternoonCount == 0 && totalSlots == 0) 1f else afternoonCount.toFloat()
-                    val weightEvening = if (eveningCount == 0 && totalSlots == 0) 1f else eveningCount.toFloat()
-                    val weightNight = if (nightCount == 0 && totalSlots == 0) 1f else nightCount.toFloat()
-
-                    if (weightMorning > 0f) Box(modifier = Modifier.weight(weightMorning).fillMaxHeight().background(Color(0xFFF59E0B)))
-                    if (weightAfternoon > 0f) Box(modifier = Modifier.weight(weightAfternoon).fillMaxHeight().background(Color(0xFF7B61FF)))
-                    if (weightEvening > 0f) Box(modifier = Modifier.weight(weightEvening).fillMaxHeight().background(Color(0xFF6366F1)))
-                    if (weightNight > 0f) Box(modifier = Modifier.weight(weightNight).fillMaxHeight().background(Color(0xFF3B82F6)))
+                if (totalSlots == 0) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(10.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp))
+                    ) {
+                        if (morningCount > 0) Box(modifier = Modifier.weight(morningCount.toFloat()).fillMaxHeight().background(Color(0xFFF59E0B)))
+                        if (afternoonCount > 0) Box(modifier = Modifier.weight(afternoonCount.toFloat()).fillMaxHeight().background(Color(0xFF7B61FF)))
+                        if (eveningCount > 0) Box(modifier = Modifier.weight(eveningCount.toFloat()).fillMaxHeight().background(Color(0xFF6366F1)))
+                        if (nightCount > 0) Box(modifier = Modifier.weight(nightCount.toFloat()).fillMaxHeight().background(Color(0xFF3B82F6)))
+                    }
                 }
                 
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(10.dp))
                 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("清晨: $morningPct%", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("下午: $afternoonPct%", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("晚上: $eveningPct%", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("深夜: $nightPct%", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    TimeSlotLegendItem(label = "清晨", pct = morningPct, color = Color(0xFFF59E0B), modifier = Modifier.weight(1f))
+                    TimeSlotLegendItem(label = "下午", pct = afternoonPct, color = Color(0xFF7B61FF), modifier = Modifier.weight(1f))
+                    TimeSlotLegendItem(label = "晚上", pct = eveningPct, color = Color(0xFF6366F1), modifier = Modifier.weight(1f))
+                    TimeSlotLegendItem(label = "深夜", pct = nightPct, color = Color(0xFF3B82F6), modifier = Modifier.weight(1f))
                 }
 
                 if (makeupCheckinCount > 0) {
@@ -437,25 +446,16 @@ fun HealthContent(viewModel: TodoViewModel) {
     var throughputDays by remember { mutableIntStateOf(30) }
     var expandedDropdown by remember { mutableStateOf(false) }
 
-    val activeTodos = remember(todos) { todos.filter { !it.deleted } }
-    val incompleteTodos = remember(activeTodos) {
-        val currentWeekStr = weekStringOf(LocalDate.now())
-        val currentMonthStr = monthStringOf(LocalDate.now())
-        activeTodos.filter { t ->
-            if (t.completed) {
-                false
-            } else {
-                // 排除过期的周/月打卡任务 (不管是否限定了次数)
-                if (t.taskType == TaskType.WEEKLY_CHECKIN && t.date != null && t.date!! < currentWeekStr) {
-                    false
-                } else if (t.taskType == TaskType.MONTHLY_CHECKIN && t.date != null && t.date!! < currentMonthStr) {
-                    false
-                } else {
-                    // 排除没有设定次数目标的打卡任务 (未过期时)
-                    !((t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) && t.targetCount == null)
-                }
-            }
+    val activeTodos = remember(todos) {
+        todos.filter { 
+            !it.deleted && 
+            it.taskType != TaskType.WEEKLY_CHECKIN && 
+            it.taskType != TaskType.MONTHLY_CHECKIN &&
+            it.recurring != "daily_repeat"
         }
+    }
+    val incompleteTodos = remember(activeTodos) {
+        activeTodos.filter { !it.completed }
     }
 
     val nowTime = OffsetDateTime.now()
@@ -473,10 +473,6 @@ fun HealthContent(viewModel: TodoViewModel) {
     var completedCount = 0
     
     activeTodos.forEach { t ->
-        // 排除周/月打卡任务
-        if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
-            return@forEach
-        }
         val createdDateTime = try {
             OffsetDateTime.parse(t.createdAt)
         } catch (e: Exception) {
@@ -509,6 +505,15 @@ fun HealthContent(viewModel: TodoViewModel) {
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        item {
+            Text(
+                text = "* 清单健康及相关指标仅统计普通单次任务，不含重复任务与周/月打卡",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                textAlign = TextAlign.Center
+            )
+        }
         // Health Grade Card
         item {
             ElevatedCard(
@@ -724,3 +729,34 @@ fun HealthContent(viewModel: TodoViewModel) {
         }
     }
 }
+
+@Composable
+private fun TimeSlotLegendItem(label: String, pct: Int, color: Color, modifier: Modifier = Modifier) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .background(color.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+            .padding(vertical = 6.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(color, CircleShape)
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = "$pct%",
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+            color = color
+        )
+    }
+}
+
