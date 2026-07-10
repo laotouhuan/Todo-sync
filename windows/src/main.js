@@ -1559,20 +1559,9 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
 }
 
 function renderHealth(todayStr, tomorrowStr) {
-    const activeTodos = appState.todoData.todos.filter(t => !t.deleted);
+    const activeTodos = appState.todoData.todos.filter(t => !t.deleted && t.task_type !== 'weekly_checkin' && t.task_type !== 'monthly_checkin' && t.recurring !== 'daily_repeat');
     const incompleteTodos = activeTodos.filter(t => {
         if (t.completed) return false;
-        // 排除过期的周/月打卡任务
-        if (t.task_type === 'weekly_checkin' && t.date && t.date < getThisWeekString()) {
-            return false;
-        }
-        if (t.task_type === 'monthly_checkin' && t.date && t.date < getThisMonthString()) {
-            return false;
-        }
-        // 排除没有设定次数目标的打卡任务
-        if ((t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') && !t.target_count) {
-            return false;
-        }
         return true;
     });
     
@@ -1590,7 +1579,7 @@ function renderHealth(todayStr, tomorrowStr) {
     
     const avgAge = incompleteCount === 0 ? 0 : totalAgeDays / incompleteCount;
     document.getElementById('metric-avg-age').textContent = `${avgAge.toFixed(1)} 天`;
-
+ 
     // 2. 健康评级
     const healthGrade = getHealthGrade(avgAge);
     const gradeLetterEl = document.getElementById('health-grade-letter');
@@ -1598,7 +1587,7 @@ function renderHealth(todayStr, tomorrowStr) {
     gradeLetterEl.textContent = healthGrade.grade;
     gradeLetterEl.style.color = healthGrade.color;
     gradeTextEl.textContent = `“${healthGrade.text}”`;
-
+ 
     // 3. 吞吐量对比
     const thresholdMs = now.getTime() - (appState.healthThroughputDays * 86400000);
     const thresholdDate = new Date(thresholdMs);
@@ -1607,10 +1596,6 @@ function renderHealth(todayStr, tomorrowStr) {
     let completedCount = 0;
     
     activeTodos.forEach(t => {
-        // 排除周/月打卡任务
-        if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
-            return;
-        }
         if (t.created_at) {
             const createdDate = new Date(t.created_at);
             if (!isNaN(createdDate.getTime()) && createdDate >= thresholdDate) {
