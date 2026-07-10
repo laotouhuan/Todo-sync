@@ -490,6 +490,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
     const isCheckinCompletedToday = (todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin')
         && todo.completed_dates && todo.completed_dates.some(dStr => dStr.startsWith(todayStr));
     const isVisualCompleted = checkinDate !== null ? true : (todo.completed || isCheckinCompletedToday);
+    const highlightDate = checkinDate ? checkinDate.substring(0, 10) : todayStr;
     li.className = `todo-item ${isVisualCompleted ? 'completed' : ''}`;
     li.id = checkinDate !== null ? `todo-${todo.id}-${checkinDate}` : `todo-${todo.id}`;
     li.dataset.id = todo.id;
@@ -545,7 +546,8 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
             const dateStr = formatDate(current);
 
             const cell = document.createElement('div');
-            cell.className = `checkin-grid-cell compact-cell${completedDates.includes(dateStr) ? ' checked' : ''}${dateStr === todayStr ? ' today-cell' : ''}`;
+            const isChecked = completedDates.some(d => d.startsWith(dateStr));
+            cell.className = `checkin-grid-cell compact-cell${isChecked ? ' checked' : ''}${dateStr === highlightDate ? ' today-cell' : ''}`;
             cell.textContent = labels[i];
             cell.title = dateStr;
             grid.appendChild(cell);
@@ -579,7 +581,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
         monthCalendarGrid.style.display = appState.expandedTaskIds.has(todo.id) ? 'grid' : 'none';
         monthCalendarGrid.style.marginTop = '6px';
 
-        renderMonthCalendar(monthCalendarGrid, todo, false, todayStr);
+        renderMonthCalendar(monthCalendarGrid, todo, false, highlightDate);
 
         progressWrapper.appendChild(barRow);
         progressWrapper.appendChild(monthCalendarGrid);
@@ -938,6 +940,7 @@ function renderEditCheckinGrid(todo) {
             const dateStr = formatDate(current);
 
             const isChecked = completedDates.some(d => d.startsWith(dateStr));
+            const cell = document.createElement('div');
             cell.className = `checkin-grid-cell${isChecked ? ' checked' : ''}${dateStr === todayStr ? ' today-cell' : ''}`;
             cell.textContent = labels[i];
             cell.title = dateStr;
@@ -1528,7 +1531,29 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         statsList.appendChild(emptyTip);
     } else {
         displayTodos.forEach(todo => {
-            statsList.appendChild(createTodoItemElement(todo, todayStr, tomorrowStr));
+            let checkinDateForTodo = null;
+            if (todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin') {
+                if (appState.statsPeriod === 'day') {
+                    const match = (todo.completed_dates || []).find(d => d.startsWith(targetDayStr));
+                    if (match) checkinDateForTodo = match;
+                } else if (appState.statsPeriod === 'week') {
+                    const matches = (todo.completed_dates || []).filter(d => {
+                        const checkDate = new Date(d);
+                        return !isNaN(checkDate.getTime()) && getISOWeekString(checkDate) === targetWeekStr;
+                    });
+                    if (matches.length > 0) {
+                        matches.sort();
+                        checkinDateForTodo = matches[matches.length - 1];
+                    }
+                } else if (appState.statsPeriod === 'month') {
+                    const matches = (todo.completed_dates || []).filter(d => d.startsWith(targetMonthStr));
+                    if (matches.length > 0) {
+                        matches.sort();
+                        checkinDateForTodo = matches[matches.length - 1];
+                    }
+                }
+            }
+            statsList.appendChild(createTodoItemElement(todo, todayStr, tomorrowStr, checkinDateForTodo));
         });
     }
 }
@@ -1881,11 +1906,12 @@ function render() {
                 filteredTodos.forEach(t => {
                     if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
                         (t.completed_dates || []).forEach(dStr => {
-                            if (!completedGroupsMap[dStr]) completedGroupsMap[dStr] = [];
+                            const dateKey = dStr.substring(0, 10);
+                            if (!completedGroupsMap[dateKey]) completedGroupsMap[dateKey] = [];
                             const clone = deepClone(t);
                             clone.checkinDate = dStr;
                             clone.completed = true;
-                            completedGroupsMap[dStr].push(clone);
+                            completedGroupsMap[dateKey].push(clone);
                         });
                     } else {
                         if (t.completed) {

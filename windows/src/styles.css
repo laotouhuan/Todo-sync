@@ -1910,7 +1910,7 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   box-shadow: 0 0 8px rgba(123, 97, 255, 0.4);
 }
 .checkin-grid-cell.today-cell {
-  border-color: var(--accent-color);
+  border-color: #faad14 !important;
   border-width: 2px;
 }
 

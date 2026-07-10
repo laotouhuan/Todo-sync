@@ -108,6 +108,9 @@ fn watch_file(app: AppHandle) {
             }
         }
 
+        let mut last_path_check = std::time::Instant::now();
+        let poll_interval = Duration::from_millis(FILE_POLL_INTERVAL_MS);
+
         loop {
             // 短超时接收文件事件，配合外部计时器实现 5 秒轮询
             if let Ok(Ok(Event { paths, .. })) = rx.recv_timeout(Duration::from_millis(500)) {
@@ -117,20 +120,23 @@ fn watch_file(app: AppHandle) {
             }
 
             // 检查路径是否变化（每 5 秒轮询）
-            let new_path = todo_store::get_data_path(&app_clone).unwrap_or_default();
-            if new_path != current_path {
-                if let Some(parent) = current_path.parent() {
-                    if let Err(e) = watcher.unwatch(parent) {
-                        log::warn!("Failed to unwatch {:?}: {e}", parent);
+            if last_path_check.elapsed() >= poll_interval {
+                last_path_check = std::time::Instant::now();
+                let new_path = todo_store::get_data_path(&app_clone).unwrap_or_default();
+                if new_path != current_path {
+                    if let Some(parent) = current_path.parent() {
+                        if let Err(e) = watcher.unwatch(parent) {
+                            log::warn!("Failed to unwatch {:?}: {e}", parent);
+                        }
                     }
-                }
-                current_path = new_path;
-                if let Some(parent) = current_path.parent() {
-                    if let Err(e) = watcher.watch(parent, RecursiveMode::NonRecursive) {
-                        log::warn!("Failed to watch {:?}: {e}", parent);
+                    current_path = new_path;
+                    if let Some(parent) = current_path.parent() {
+                        if let Err(e) = watcher.watch(parent, RecursiveMode::NonRecursive) {
+                            log::warn!("Failed to watch {:?}: {e}", parent);
+                        }
                     }
+                    let _ = app_clone.emit("todo_data_changed", ());
                 }
-                let _ = app_clone.emit("todo_data_changed", ());
             }
         }
     });

@@ -139,74 +139,14 @@ class TodoRepository(private val context: Context) {
         }
     }
 
-    private fun migrateTodo(todo: Todo): Todo {
-        var recurring = todo.recurring
-        var taskType = todo.taskType
 
-        when (recurring) {
-            "daily" -> {
-                recurring = RecurringType.DAILY_REPEAT
-                if (taskType.isEmpty() || taskType == TaskType.NORMAL) taskType = TaskType.NORMAL
-            }
-            "weekly" -> {
-                recurring = RecurringType.NONE
-                taskType = TaskType.WEEKLY_CHECKIN
-            }
-            "monthly" -> {
-                recurring = RecurringType.NONE
-                taskType = TaskType.MONTHLY_CHECKIN
-            }
-        }
-
-        val dateStr = todo.date
-        if (dateStr != null) {
-            when {
-                isWeekDate(dateStr) -> taskType = TaskType.WEEKLY_CHECKIN
-                isMonthDate(dateStr) -> taskType = TaskType.MONTHLY_CHECKIN
-            }
-        }
-
-        val completedDates = todo.completedDates ?: emptyList()
-
-        return todo.copy(
-            recurring = recurring,
-            taskType = taskType.ifEmpty { TaskType.NORMAL },
-            completedDates = completedDates,
-            targetCount = todo.targetCount
-        )
-    }
-
-    private fun normalizeData(data: TodoData): TodoData {
-        val migratedTodos = data.todos.map { migrateTodo(it) }
-
-        // Remove duplicate IDs (keep the latest updated)
-        val uniqueTodos = migratedTodos.groupBy { it.id }
-            .map { (_, list) ->
-                if (list.size > 1) {
-                    list.maxByOrNull { try { OffsetDateTime.parse(it.updatedAt) } catch (_: Exception) { OffsetDateTime.MIN } } ?: list.first()
-                } else {
-                    list.first()
-                }
-            }
-
-        // Remove duplicate completedDates
-        val deduplicatedTodos = uniqueTodos.map { todo ->
-            if (todo.completedDates.size != todo.completedDates.toSet().size) {
-                todo.copy(completedDates = todo.completedDates.distinct().sorted())
-            } else {
-                todo
-            }
-        }
-
-        return data.copy(todos = deduplicatedTodos)
-    }
 
     private suspend fun loadFromDisk() {
         if (dataFile.exists()) {
             try {
                 val jsonString = dataFile.readText()
                 val parsed = jsonFormat.decodeFromString<TodoData>(jsonString)
-                val migratedData = normalizeData(parsed)
+                val migratedData = com.todo.app.data.model.MergeUtils.normalizeData(parsed)
                 val migratedTodos = migratedData.todos
 
                 // 旧数据迁移：所有 todo 的 order 都为 0.0 时，按 createdAt 降序分配递增序号
@@ -283,52 +223,7 @@ class TodoRepository(private val context: Context) {
         }
     }
 
-    private fun mergeTodoData(local: TodoData, cloud: TodoData): TodoData {
-        val localTodos = normalizeData(local).todos.associateBy { it.id }
-        val cloudTodos = normalizeData(cloud).todos.associateBy { it.id }
-        val merged = mutableMapOf<String, Todo>()
-        for (id in localTodos.keys + cloudTodos.keys) {
-            val l = localTodos[id]
-            val c = cloudTodos[id]
-            if (l != null && c != null) {
-                val lTime = try { OffsetDateTime.parse(l.updatedAt) } catch (_: Exception) { OffsetDateTime.MIN }
-                val cTime = try { OffsetDateTime.parse(c.updatedAt) } catch (_: Exception) { OffsetDateTime.MIN }
-                val base = if (cTime.isAfter(lTime)) c else l
 
-                // completedDates 并集去重并排序
-                val mergedDates = (l.completedDates + c.completedDates).distinct().sorted()
-                var updatedTodo = base.copy(completedDates = mergedDates)
-                if (mergedDates != base.completedDates) {
-                    updatedTodo = updatedTodo.copy(updatedAt = nowIso())
-                }
-
-                // 重新计算周/月打卡任务完成状态
-                if (updatedTodo.taskType == TaskType.WEEKLY_CHECKIN || updatedTodo.taskType == TaskType.MONTHLY_CHECKIN) {
-                    val completedCount = if (updatedTodo.taskType == TaskType.WEEKLY_CHECKIN) {
-                        updatedTodo.getWeeklyCompletedCount()
-                    } else {
-                        updatedTodo.getMonthlyCompletedCount()
-                    }
-                    val shouldBeCompleted = updatedTodo.targetCount != null && completedCount >= updatedTodo.targetCount!!
-                    if (updatedTodo.completed != shouldBeCompleted) {
-                        updatedTodo = updatedTodo.copy(
-                            completed = shouldBeCompleted,
-                            completedAt = if (shouldBeCompleted) (updatedTodo.completedAt ?: nowIso()) else null,
-                            updatedAt = nowIso()
-                        )
-                    }
-                }
-                merged[id] = updatedTodo
-            } else {
-                merged[id] = l ?: c!!
-            }
-        }
-        return TodoData(
-            version = local.version,
-            last_updated = nowIso(),
-            todos = merged.values.sortedByDescending { it.createdAt }
-        )
-    }
 
     suspend fun syncWithCloud() = mutex.withLock { withContext(Dispatchers.IO) {
         if (isSyncing.value) return@withContext
@@ -343,7 +238,7 @@ class TodoRepository(private val context: Context) {
                 try {
                     val cloudData = jsonFormat.decodeFromString<TodoData>(cloudJson)
                     val localData = _todoData.value
-                    val mergedData = mergeTodoData(localData, cloudData)
+                    val mergedData = com.todo.app.data.model.MergeUtils.mergeTodoData(localData, cloudData)
 
                     val mergedJson = jsonFormat.encodeToString(mergedData)
                     val localChanged = mergedData.todos != localData.todos
@@ -386,7 +281,7 @@ class TodoRepository(private val context: Context) {
             if (cloudJson != null) {
                 createLocalBackup()
                 val cloudData = jsonFormat.decodeFromString<TodoData>(cloudJson)
-                val migratedData = normalizeData(cloudData)
+                val migratedData = com.todo.app.data.model.MergeUtils.normalizeData(cloudData)
                 _todoData.value = migratedData
                 atomicWriteJson(jsonFormat.encodeToString(migratedData))
                 com.todo.app.widget.refreshAllWidgets(context)

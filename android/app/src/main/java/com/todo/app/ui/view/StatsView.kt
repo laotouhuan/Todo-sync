@@ -364,10 +364,10 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     val weightEvening = if (eveningCount == 0 && totalSlots == 0) 1f else eveningCount.toFloat()
                     val weightNight = if (nightCount == 0 && totalSlots == 0) 1f else nightCount.toFloat()
 
-                    Box(modifier = Modifier.weight(weightMorning).fillMaxHeight().background(Color(0xFFF59E0B)))
-                    Box(modifier = Modifier.weight(weightAfternoon).fillMaxHeight().background(Color(0xFF7B61FF)))
-                    Box(modifier = Modifier.weight(weightEvening).fillMaxHeight().background(Color(0xFF6366F1)))
-                    Box(modifier = Modifier.weight(weightNight).fillMaxHeight().background(Color(0xFF3B82F6)))
+                    if (weightMorning > 0f) Box(modifier = Modifier.weight(weightMorning).fillMaxHeight().background(Color(0xFFF59E0B)))
+                    if (weightAfternoon > 0f) Box(modifier = Modifier.weight(weightAfternoon).fillMaxHeight().background(Color(0xFF7B61FF)))
+                    if (weightEvening > 0f) Box(modifier = Modifier.weight(weightEvening).fillMaxHeight().background(Color(0xFF6366F1)))
+                    if (weightNight > 0f) Box(modifier = Modifier.weight(weightNight).fillMaxHeight().background(Color(0xFF3B82F6)))
                 }
                 
                 Spacer(Modifier.height(4.dp))
@@ -402,6 +402,19 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
         // List
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(displayTodos, key = { it.id }) { todo ->
+                val checkinDateForTodo = if (todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) {
+                    when (period) {
+                        "day" -> todo.completedDates.find { it.startsWith(targetDate.toString()) }
+                        "week" -> todo.completedDates.filter { dStr ->
+                            try {
+                                val checkDate = LocalDate.parse(dStr.take(10))
+                                checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
+                                checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
+                            } catch (_: Exception) { false }
+                        }.maxOrNull()
+                        else -> todo.completedDates.filter { it.startsWith(targetMonthStr) }.maxOrNull()
+                    }
+                } else null
                 TodoItemRow(
                     todo = todo,
                     viewModel = viewModel,
@@ -410,7 +423,8 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                         viewModel.updateTodo(todo.copy(date = tomorrowStr, updatedAt = nowIso()))
                     },
                     todayStr = todayStr,
-                    tomorrowStr = tomorrowStr
+                    tomorrowStr = tomorrowStr,
+                    checkinDate = checkinDateForTodo
                 )
             }
         }
@@ -577,8 +591,8 @@ fun HealthContent(viewModel: TodoViewModel) {
                         val addedWeight = if (totalThroughput == 0) 1f else addedCount.toFloat()
                         val completedWeight = if (totalThroughput == 0) 1f else completedCount.toFloat()
 
-                        Box(modifier = Modifier.weight(addedWeight).fillMaxHeight().background(Color(0xFF3B82F6)))
-                        Box(modifier = Modifier.weight(completedWeight).fillMaxHeight().background(Color(0xFF10B981)))
+                        if (addedWeight > 0f) Box(modifier = Modifier.weight(addedWeight).fillMaxHeight().background(Color(0xFF3B82F6)))
+                        if (completedWeight > 0f) Box(modifier = Modifier.weight(completedWeight).fillMaxHeight().background(Color(0xFF10B981)))
                     }
 
                     Spacer(Modifier.height(8.dp))

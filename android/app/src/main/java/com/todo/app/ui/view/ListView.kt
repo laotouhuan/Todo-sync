@@ -943,6 +943,7 @@ fun TodoItemRow(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column {
+                val highlightDate = if (!checkinDate.isNullOrEmpty()) checkinDate.take(10) else todayStr
                 val isVisualCompleted = if (checkinDate != null) {
                     true
                 } else {
@@ -1025,7 +1026,7 @@ fun TodoItemRow(
                                 dates.forEachIndexed { idx, date ->
                                     val dateStr = date.toString()
                                     val isChecked = todo.completedDates.any { it.startsWith(dateStr) }
-                                    val isToday = dateStr == todayStr
+                                    val isToday = dateStr == highlightDate
                                     Box(
                                         modifier = Modifier
                                             .size(20.dp)
@@ -1035,8 +1036,8 @@ fun TodoItemRow(
                                                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
                                             )
                                             .border(
-                                                width = if (isToday) 1.5.dp else 0.5.dp,
-                                                color = if (isToday) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                                                width = if (isToday) 2.dp else 0.5.dp,
+                                                color = if (isToday) Color(0xFFFAAD14) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
                                                 shape = RoundedCornerShape(4.dp)
                                             )
                                             .clickable {
@@ -1110,7 +1111,7 @@ fun TodoItemRow(
                                             rowDates.forEach { date ->
                                                 val dateStr = date.toString()
                                                 val isChecked = todo.completedDates.any { it.startsWith(dateStr) }
-                                                val isToday = dateStr == todayStr
+                                                val isToday = dateStr == highlightDate
                                                 val isCurrentMonth = date.monthValue == targetMonth
 
                                                 Box(
@@ -1126,12 +1127,8 @@ fun TodoItemRow(
                                                             }
                                                         )
                                                         .border(
-                                                            width = if (isToday) 1.5.dp else 0.5.dp,
-                                                            color = if (isToday) {
-                                                                MaterialTheme.colorScheme.primary
-                                                            } else {
-                                                                MaterialTheme.colorScheme.outline.copy(alpha = if (isCurrentMonth) 0.2f else 0.05f)
-                                                            },
+                                                            width = if (isToday) 2.dp else 0.5.dp,
+                                                            color = if (isToday) Color(0xFFFAAD14) else MaterialTheme.colorScheme.outline.copy(alpha = if (isCurrentMonth) 0.2f else 0.05f),
                                                             shape = RoundedCornerShape(4.dp)
                                                         )
                                                         .then(
