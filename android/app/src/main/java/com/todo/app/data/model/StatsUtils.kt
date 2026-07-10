@@ -73,25 +73,32 @@ fun calculateCompletionStats(todos: List<Todo>, todayStr: String): Pair<Int, Int
  * @return Number of consecutive days with completions
  */
 fun calculateStreak(todos: List<Todo>, todayStr: String): Int {
-    val completedDates = todos
+    val completedDatesSet = todos
         .filter { !it.deleted && it.completed && it.completedAt != null }
         .mapNotNull { it.completedAt?.take(10) }
-        .toSortedSet()
-        .reversed()
+        .toSet()
 
-    if (completedDates.isEmpty()) return 0
+    if (completedDatesSet.isEmpty()) return 0
 
+    var currentDate = try {
+        java.time.LocalDate.parse(todayStr)
+    } catch (_: Exception) {
+        return 0
+    }
     var streak = 0
-    var currentDate = java.time.LocalDate.parse(todayStr)
 
-    for (dateStr in completedDates) {
-        val date = try { java.time.LocalDate.parse(dateStr) } catch (_: Exception) { continue }
-        if (date == currentDate || date == currentDate.minusDays(1)) {
-            streak++
-            currentDate = date.minusDays(1)
-        } else {
-            break
-        }
+    if (completedDatesSet.contains(currentDate.toString())) {
+        // Streak starts today
+    } else if (completedDatesSet.contains(currentDate.minusDays(1).toString())) {
+        // Streak starts yesterday
+        currentDate = currentDate.minusDays(1)
+    } else {
+        return 0
+    }
+
+    while (completedDatesSet.contains(currentDate.toString())) {
+        streak++
+        currentDate = currentDate.minusDays(1)
     }
     return streak
 }
@@ -105,7 +112,8 @@ fun calculateBestStreak(todos: List<Todo>): Int {
     val completedDates = todos
         .filter { !it.deleted && it.completed && it.completedAt != null }
         .mapNotNull { it.completedAt?.take(10) }
-        .toSortedSet()
+        .distinct()
+        .sorted()
 
     if (completedDates.isEmpty()) return 0
 

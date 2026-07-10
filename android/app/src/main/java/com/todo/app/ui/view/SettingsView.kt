@@ -70,13 +70,13 @@ fun SettingsView(viewModel: TodoViewModel) {
     val buttonShape = RoundedCornerShape(8.dp)
     val cardShape = RoundedCornerShape(12.dp)
 
-    val startDownloadUpdate = { apkUrl: String ->
+    val startDownloadUpdate = { apkUrl: String, sha256: String? ->
         isDownloading = true
         downloadProgress = 0
         downloadJob = coroutineScope.launch {
             val file = AppUpdater.downloadApk(context, apkUrl, onProgress = { progress ->
                 downloadProgress = progress
-            })
+            }, expectedSha256 = sha256)
             isDownloading = false
             if (file != null) {
                 AppUpdater.installApk(context, file)
@@ -324,7 +324,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                     },
                     confirmButton = {
                         if (!isDownloading) {
-                            Button(onClick = { startDownloadUpdate(updateInfo!!.apkUrl) }) {
+                            Button(onClick = { startDownloadUpdate(updateInfo!!.apkUrl, updateInfo!!.sha256) }) {
                                 Text("立即更新")
                             }
                         } else {

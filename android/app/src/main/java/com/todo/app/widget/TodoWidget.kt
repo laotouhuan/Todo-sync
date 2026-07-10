@@ -77,6 +77,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
 
     override val stateDefinition = PreferencesGlanceStateDefinition
 
+    @android.annotation.SuppressLint("StateFlowValueCalledInComposition")
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
             val prefs = currentState<Preferences>()

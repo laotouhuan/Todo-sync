@@ -105,8 +105,8 @@ private fun buildUpdatedTodo(
     completedDates: List<String>,
     subtasks: List<Subtask>
 ): Todo {
-    val mappedTaskType = if (selectedTypeUi == TaskType.DAILY_REPEAT) TaskType.NORMAL else selectedTypeUi
-    val mappedRecurring = if (selectedTypeUi == TaskType.DAILY_REPEAT) RecurringType.DAILY_REPEAT else RecurringType.NONE
+    var mappedTaskType = if (selectedTypeUi == TaskType.DAILY_REPEAT) TaskType.NORMAL else selectedTypeUi
+    var mappedRecurring = if (selectedTypeUi == TaskType.DAILY_REPEAT) RecurringType.DAILY_REPEAT else RecurringType.NONE
 
     var finalDate = date.takeIf { it.isNotBlank() }
     var finalTime = time.takeIf { it.isNotBlank() }
@@ -117,10 +117,13 @@ private fun buildUpdatedTodo(
             finalDate = LocalDate.now().toString()
         }
     } else if (mappedTaskType == TaskType.NORMAL && finalDate != null && (isWeekDate(finalDate) || isMonthDate(finalDate))) {
+        finalTime = null
         if (isWeekDate(finalDate)) {
-            return todo.copy(taskType = TaskType.WEEKLY_CHECKIN, recurring = RecurringType.NONE, date = finalDate, updatedAt = nowIso())
+            mappedTaskType = TaskType.WEEKLY_CHECKIN
+            mappedRecurring = RecurringType.NONE
         } else {
-            return todo.copy(taskType = TaskType.MONTHLY_CHECKIN, recurring = RecurringType.NONE, date = finalDate, updatedAt = nowIso())
+            mappedTaskType = TaskType.MONTHLY_CHECKIN
+            mappedRecurring = RecurringType.NONE
         }
     } else if (selectedTypeUi == TaskType.WEEKLY_CHECKIN) {
         finalTime = null
