@@ -75,7 +75,6 @@
       <ul id="todo-list">
         <!-- Rendered via JS -->
       </ul>
-    </main>
 
     <!-- Stats Container -->
     <div id="stats-container" class="hidden">
@@ -88,10 +87,36 @@
       <!-- 效率洞察容器 -->
       <div id="stats-insights">
         <div class="stats-header">
-          <div class="tabs-container stats-period-tabs" role="tablist" aria-label="统计周期">
-            <button class="tab-btn active" id="stats-period-day" data-period="day" role="tab" aria-selected="true">日</button>
-            <button class="tab-btn" id="stats-period-week" data-period="week" role="tab" aria-selected="false">周</button>
-            <button class="tab-btn" id="stats-period-month" data-period="month" role="tab" aria-selected="false">月</button>
+          <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; position: relative;">
+            <div class="tabs-container stats-period-tabs" role="tablist" aria-label="统计周期">
+              <button class="tab-btn active" id="stats-period-day" data-period="day" role="tab" aria-selected="true">日</button>
+              <button class="tab-btn" id="stats-period-week" data-period="week" role="tab" aria-selected="false">周</button>
+              <button class="tab-btn" id="stats-period-month" data-period="month" role="tab" aria-selected="false">月</button>
+            </div>
+            <button id="stats-filter-toggle-btn" class="icon-btn-small" aria-label="筛选任务类别" style="margin-left: 8px;">
+              <svg viewBox="0 0 24 24" fill="none" width="16" height="16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
+            </button>
+            <!-- 下拉筛选菜单 -->
+            <div id="stats-filter-dropdown" class="stats-filter-dropdown hidden">
+              <label class="stats-filter-item">
+                <input type="checkbox" id="filter-normal" checked>
+                <span class="dot normal-dot"></span>普通待办
+              </label>
+              <label class="stats-filter-item">
+                <input type="checkbox" id="filter-daily" checked>
+                <span class="dot daily-dot"></span>每日重复
+              </label>
+              <label class="stats-filter-item">
+                <input type="checkbox" id="filter-weekly" checked>
+                <span class="dot weekly-dot"></span>每周打卡
+              </label>
+              <label class="stats-filter-item">
+                <input type="checkbox" id="filter-monthly" checked>
+                <span class="dot monthly-dot"></span>每月打卡
+              </label>
+            </div>
           </div>
           <div class="stats-date-nav">
             <button id="stats-prev-btn" class="icon-btn-small" aria-label="上一个周期">
@@ -112,24 +137,28 @@
         </div>
 
         <!-- 时段分布卡片 -->
-        <div class="time-distribution-card" id="time-distribution">
+        <div class="time-distribution-card" id="time-distribution" style="position: relative;">
           <div class="time-insight-text" id="time-insight-text">☀️ 暂无已完成的任务数据</div>
-          <div class="time-bar" id="time-bar">
-            <div class="time-bar-segment segment-morning" style="flex: 1;" title="清晨 6-12"></div>
-            <div class="time-bar-segment segment-afternoon" style="flex: 1;" title="下午 12-18"></div>
-            <div class="time-bar-segment segment-evening" style="flex: 1;" title="晚上 18-24"></div>
-            <div class="time-bar-segment segment-night" style="flex: 1;" title="深夜 0-6"></div>
+          <!-- 替换为环形时钟 -->
+          <div class="efficiency-clock-container" style="display: flex; justify-content: center; align-items: center; margin: 12px 0; width: 100%;">
+            <svg id="efficiency-clock-svg" width="340" height="260" viewBox="0 0 340 260"></svg>
           </div>
-          <div class="time-bar-labels">
-            <div class="time-bar-label" id="label-morning" style="flex: 1;">清晨: -</div>
-            <div class="time-bar-label" id="label-afternoon" style="flex: 1;">下午: -</div>
-            <div class="time-bar-label" id="label-evening" style="flex: 1;">晚上: -</div>
-            <div class="time-bar-label" id="label-night" style="flex: 1;">深夜: -</div>
-          </div>
+          <!-- 左侧和右侧的补打卡列 -->
+          <div id="makeup-checkins-left" style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; z-index: 5;"></div>
+          <div id="makeup-checkins-right" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; z-index: 5;"></div>
+          
           <div id="time-distribution-tip" class="time-distribution-tip hidden" style="font-size: 0.72rem; color: var(--text-secondary); opacity: 0.65; margin-top: 8px; text-align: center; width: 100%;"></div>
+          <!-- 悬浮提示框 -->
+          <div id="clock-tooltip" class="clock-tooltip"></div>
         </div>
 
-        <ul id="stats-list"></ul>
+        <div class="stats-list-toggle-container" style="text-align: center; margin: 12px 0 6px 0;">
+          <button id="toggle-stats-list-btn" style="font-size: 0.8rem; padding: 6px 14px; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--glass-border); cursor: pointer; color: var(--text-primary); transition: all 0.2s;">
+            显示详细任务列表 (共 0 项)
+          </button>
+        </div>
+
+        <ul id="stats-list" class="hidden"></ul>
       </div>
 
       <!-- 清单健康容器 -->
@@ -189,6 +218,7 @@
         </div>
       </div>
     </div>
+    </main>
 
     <!-- Add Input -->
     <footer id="app-footer">

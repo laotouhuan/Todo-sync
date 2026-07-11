@@ -428,12 +428,12 @@ class TodoRepository(private val context: Context) {
             return
         }
 
-        if (dates.contains(todayStr)) {
+        if (dates.any { it.startsWith(todayStr) }) {
             _uiEvent.send(UiEvent.ShowMessage("今天已打卡！如需消卡，请进入编辑弹窗。"))
             return
         }
 
-        dates.add(todayStr)
+        dates.add(nowIso())
         dates.sort()
 
         val updatedTodoForCount = todo.copy(completedDates = dates)

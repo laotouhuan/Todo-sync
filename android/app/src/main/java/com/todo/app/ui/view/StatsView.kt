@@ -1,7 +1,9 @@
 package com.todo.app.ui.view
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,16 +12,27 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
 import com.todo.app.data.model.Todo
 import com.todo.app.data.model.TodoComparator
 import com.todo.app.data.model.TaskType
@@ -31,8 +44,10 @@ import com.todo.app.data.model.monthStringOf
 import com.todo.app.data.model.nowIso
 import com.todo.app.data.model.weekStringOf
 import com.todo.app.ui.viewmodel.TodoViewModel
+import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.ZoneId
 import java.time.temporal.IsoFields
 import java.util.Locale
 
@@ -40,6 +55,70 @@ import java.util.Locale
 
 private fun formatVal(valDouble: Double): String {
     return if (valDouble % 1.0 == 0.0) valDouble.toInt().toString() else String.format(Locale.US, "%.1f", valDouble)
+}
+
+@Composable
+private fun MakeupIcon(shape: String, color: Color, dotRadius: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val dotRadiusPx = dotRadius.toPx()
+        val px = size.width / 2f
+        val py = size.height / 2f
+        val strokeW = when (dotRadius) {
+            8.dp -> 1.5.dp.toPx()
+            6.dp -> 1.0.dp.toPx()
+            else -> 0.7.dp.toPx()
+        }
+        when (shape) {
+            "circle" -> {
+                drawCircle(color = color, radius = dotRadiusPx)
+                drawCircle(color = Color.White, radius = dotRadiusPx, style = Stroke(width = strokeW))
+            }
+            "triangle" -> {
+                val path = Path().apply {
+                    moveTo(px, py - dotRadiusPx * 1.1f)
+                    lineTo(px - dotRadiusPx, py + dotRadiusPx * 0.9f)
+                    lineTo(px + dotRadiusPx, py + dotRadiusPx * 0.9f)
+                    close()
+                }
+                drawPath(path = path, color = color)
+                drawPath(path = path, color = Color.White, style = Stroke(width = strokeW))
+            }
+            "diamond" -> {
+                val path = Path().apply {
+                    moveTo(px, py - dotRadiusPx * 1.1f)
+                    lineTo(px + dotRadiusPx * 1.1f, py)
+                    lineTo(px, py + dotRadiusPx * 1.1f)
+                    lineTo(px - dotRadiusPx * 1.1f, py)
+                    close()
+                }
+                drawPath(path = path, color = color)
+                drawPath(path = path, color = Color.White, style = Stroke(width = strokeW))
+            }
+            "star" -> {
+                val path = Path().apply {
+                    val spikes = 5
+                    val outerRadius = dotRadiusPx * 1.25f
+                    val innerRadius = dotRadiusPx * 0.6f
+                    var rot = Math.PI / 2 * 3
+                    val step = Math.PI / spikes
+                    for (i in 0 until spikes) {
+                        val px1 = px + Math.cos(rot).toFloat() * outerRadius
+                        val py1 = py + Math.sin(rot).toFloat() * outerRadius
+                        if (i == 0) moveTo(px1, py1) else lineTo(px1, py1)
+                        rot += step
+                        
+                        val px2 = px + Math.cos(rot).toFloat() * innerRadius
+                        val py2 = py + Math.sin(rot).toFloat() * innerRadius
+                        lineTo(px2, py2)
+                        rot += step
+                    }
+                    close()
+                }
+                drawPath(path = path, color = color)
+                drawPath(path = path, color = Color.White, style = Stroke(width = strokeW))
+            }
+        }
+    }
 }
 
 @Composable
@@ -85,6 +164,14 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     val todos by viewModel.todos.collectAsState()
     var period by remember { mutableStateOf("day") }
     var targetDate by remember { mutableStateOf(LocalDate.now()) }
+
+    var showTaskList by remember { mutableStateOf(false) }
+    var expandedFilterMenu by remember { mutableStateOf(false) }
+    var checkedFilters by remember { mutableStateOf(setOf("normal", "daily", "weekly", "monthly")) }
+    var tooltipTodo by remember { mutableStateOf<Todo?>(null) }
+    var tooltipDate by remember { mutableStateOf("") }
+    var tooltipTime by remember { mutableStateOf("") }
+    var tooltipOffset by remember { mutableStateOf(Offset.Zero) }
 
     val targetWeekStr = weekStringOf(targetDate)
     val targetMonthStr = monthStringOf(targetDate)
@@ -169,10 +256,25 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
         }
     }
 
+    // Apply global category filter to periodTodos
+    val filteredTodos = remember(periodTodos, checkedFilters) {
+        periodTodos.filter { t ->
+            val isDaily = t.recurring == "daily_repeat"
+            val isWeekly = t.taskType == TaskType.WEEKLY_CHECKIN
+            val isMonthly = t.taskType == TaskType.MONTHLY_CHECKIN
+            val isNormal = t.taskType == TaskType.NORMAL && t.recurring != "daily_repeat"
+            
+            (isNormal && checkedFilters.contains("normal")) ||
+            (isDaily && checkedFilters.contains("daily")) ||
+            (isWeekly && checkedFilters.contains("weekly")) ||
+            (isMonthly && checkedFilters.contains("monthly"))
+        }
+    }
+
     var totalDouble = 0.0
     var completedDouble = 0.0
 
-    periodTodos.forEach { t ->
+    filteredTodos.forEach { t ->
         if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
             var periodCheckinCount = 0
             t.completedDates.forEach { dStr ->
@@ -209,55 +311,16 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
 
     val progress = if (totalDouble == 0.0) 0f else (completedDouble / totalDouble).toFloat()
 
-    val displayTodos = periodTodos.sortedWith(TodoComparator)
+    val displayTodos = filteredTodos.sortedWith(TodoComparator)
 
     val todayStr = LocalDate.now().toString()
     val tomorrowStr = LocalDate.now().plusDays(1).toString()
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Period Tabs
-        val tabIndex = when (period) { "day" -> 0; "week" -> 1; else -> 2 }
-        TabRow(selectedTabIndex = tabIndex) {
-            Tab(selected = period == "day", onClick = { period = "day" }, text = { Text("日") })
-            Tab(selected = period == "week", onClick = { period = "week" }, text = { Text("周") })
-            Tab(selected = period == "month", onClick = { period = "month" }, text = { Text("月") })
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        // Date Nav
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = {
-                targetDate = when (period) {
-                    "day" -> targetDate.minusDays(1)
-                    "week" -> targetDate.minusWeeks(1)
-                    else -> targetDate.minusMonths(1)
-                }
-            }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Prev") }
-            
-            val label = when (period) {
-                "day" -> targetDate.toString()
-                "week" -> "${targetDate.get(IsoFields.WEEK_BASED_YEAR)}年 第${targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)}周"
-                else -> "${targetDate.year}年 ${targetDate.monthValue}月"
-            }
-            Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
-            
-            IconButton(onClick = {
-                targetDate = when (period) {
-                    "day" -> targetDate.plusDays(1)
-                    "week" -> targetDate.plusWeeks(1)
-                    else -> targetDate.plusMonths(1)
-                }
-            }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next") }
-        }
-
-        var morningCount = 0
-        var afternoonCount = 0
-        var eveningCount = 0
-        var nightCount = 0
-        var makeupCheckinCount = 0
-
-        periodTodos.forEach { t ->
+    val density = LocalDensity.current
+    val plottedDots = remember(filteredTodos, period, targetDate) {
+        val list = mutableListOf<PlottedDot>()
+        val completionEvents = mutableListOf<Pair<Todo, String>>()
+        filteredTodos.forEach { t ->
             if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
                 t.completedDates.forEach { dStr ->
                     val inPeriod = when (period) {
@@ -273,143 +336,707 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                         }
                         else -> dStr.startsWith(targetMonthStr)
                     }
-
-                    if (inPeriod) {
-                        if (dStr.length > 10) {
-                            val slot = categorizeByTimeSlot(dStr)
-                            if (slot == "morning") morningCount++
-                            else if (slot == "afternoon") afternoonCount++
-                            else if (slot == "evening") eveningCount++
-                            else if (slot == "night") nightCount++
-                        } else {
-                            makeupCheckinCount++
-                        }
+                    if (inPeriod && dStr.length > 10) {
+                        completionEvents.add(Pair(t, dStr))
                     }
                 }
             } else {
                 if (t.completed && !t.completedAt.isNullOrEmpty()) {
-                    val slot = categorizeByTimeSlot(t.completedAt)
+                    completionEvents.add(Pair(t, t.completedAt!!))
+                }
+            }
+        }
+
+        val cx = with(density) { 170.dp.toPx() }
+        val cy = with(density) { 130.dp.toPx() }
+        val r = with(density) { 80.dp.toPx() }
+        
+        completionEvents.forEachIndexed { index, (t, timeStr) ->
+            val hm = parseTimeToHourMinute(timeStr)
+            if (hm != null) {
+                val (hour, minute) = hm
+                val fracHour = hour + minute / 60.0
+                val angle = fracHour * 15.0
+                
+                val hash = (t.id + index.toString()).hashCode()
+                val jitterR = ((hash % 5) - 2) * with(density) { 5.5.dp.toPx() }
+                val activeR = r + jitterR
+                val jitterAngle = ((hash % 7) - 3) * 1.5
+                
+                val thetaRad = Math.toRadians(angle + jitterAngle)
+                val px = cx + activeR * Math.sin(thetaRad).toFloat()
+                val py = cy - activeR * Math.cos(thetaRad).toFloat()
+                
+                val color = when {
+                    t.recurring == "daily_repeat" -> Color(0xFFF59E0B)
+                    t.taskType == TaskType.WEEKLY_CHECKIN -> Color(0xFF6366F1)
+                    t.taskType == TaskType.MONTHLY_CHECKIN -> Color(0xFFF43F5E)
+                    else -> Color(0xFF10B981)
+                }
+                
+                val shape = when {
+                    t.recurring == "daily_repeat" -> "triangle"
+                    t.taskType == TaskType.WEEKLY_CHECKIN -> "diamond"
+                    t.taskType == TaskType.MONTHLY_CHECKIN -> "star"
+                    else -> "circle"
+                }
+                
+                val pad = { n: Int -> n.toString().padStart(2, '0') }
+                val dateLabel = timeStr.take(10)
+                list.add(PlottedDot(t, dateLabel, "${pad(hour)}:${pad(minute)}", px, py, color, shape))
+            }
+        }
+        list
+    }
+
+    val makeupCheckins = remember(filteredTodos, period, targetDate) {
+        val list = mutableListOf<Pair<Todo, String>>()
+        filteredTodos.forEach { t ->
+            if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
+                t.completedDates.forEach { dStr ->
+                    val inPeriod = when (period) {
+                        "day" -> dStr.startsWith(targetDate.toString())
+                        "week" -> {
+                            try {
+                                val checkDate = LocalDate.parse(dStr.take(10))
+                                checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
+                                checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
+                            } catch (e: Exception) {
+                                false
+                            }
+                        }
+                        else -> dStr.startsWith(targetMonthStr)
+                    }
+                    if (inPeriod && dStr.length <= 10) {
+                        list.add(Pair(t, dStr))
+                    }
+                }
+            }
+        }
+        list
+    }
+
+    var morningCount = 0
+    var afternoonCount = 0
+    var eveningCount = 0
+    var nightCount = 0
+    val makeupCheckinCount = makeupCheckins.size
+
+    filteredTodos.forEach { t ->
+        if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
+            t.completedDates.forEach { dStr ->
+                val inPeriod = when (period) {
+                    "day" -> dStr.startsWith(targetDate.toString())
+                    "week" -> {
+                        try {
+                            val checkDate = LocalDate.parse(dStr.take(10))
+                            checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
+                            checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
+                        } catch (e: Exception) {
+                            false
+                        }
+                    }
+                    else -> dStr.startsWith(targetMonthStr)
+                }
+
+                if (inPeriod && dStr.length > 10) {
+                    val slot = categorizeByTimeSlot(dStr)
                     if (slot == "morning") morningCount++
                     else if (slot == "afternoon") afternoonCount++
                     else if (slot == "evening") eveningCount++
                     else if (slot == "night") nightCount++
                 }
             }
+        } else {
+            if (t.completed && !t.completedAt.isNullOrEmpty()) {
+                val slot = categorizeByTimeSlot(t.completedAt)
+                if (slot == "morning") morningCount++
+                else if (slot == "afternoon") afternoonCount++
+                else if (slot == "evening") eveningCount++
+                else if (slot == "night") nightCount++
+            }
         }
-        val totalSlots = morningCount + afternoonCount + eveningCount + nightCount
-        val morningPct = if (totalSlots == 0) 0 else Math.round((morningCount.toDouble() / totalSlots) * 100).toInt()
-        val afternoonPct = if (totalSlots == 0) 0 else Math.round((afternoonCount.toDouble() / totalSlots) * 100).toInt()
-        val eveningPct = if (totalSlots == 0) 0 else Math.round((eveningCount.toDouble() / totalSlots) * 100).toInt()
-        val nightPct = if (totalSlots == 0) 0 else Math.round((nightCount.toDouble() / totalSlots) * 100).toInt()
+    }
+    val totalSlots = morningCount + afternoonCount + eveningCount + nightCount
+    val morningPct = if (totalSlots == 0) 0 else Math.round((morningCount.toDouble() / totalSlots) * 100).toInt()
+    val afternoonPct = if (totalSlots == 0) 0 else Math.round((afternoonCount.toDouble() / totalSlots) * 100).toInt()
+    val eveningPct = if (totalSlots == 0) 0 else Math.round((eveningCount.toDouble() / totalSlots) * 100).toInt()
+    val nightPct = if (totalSlots == 0) 0 else Math.round((nightCount.toDouble() / totalSlots) * 100).toInt()
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(bottom = 24.dp)
+    ) {
+        // Period Tabs with Dropdown Filter
+        item {
+            val tabIndex = when (period) { "day" -> 0; "week" -> 1; else -> 2 }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                TabRow(
+                    selectedTabIndex = tabIndex,
+                    modifier = Modifier.width(240.dp)
+                ) {
+                    Tab(selected = period == "day", onClick = { period = "day" }, text = { Text("日", modifier = Modifier.padding(horizontal = 8.dp)) })
+                    Tab(selected = period == "week", onClick = { period = "week" }, text = { Text("周", modifier = Modifier.padding(horizontal = 8.dp)) })
+                    Tab(selected = period == "month", onClick = { period = "month" }, text = { Text("月", modifier = Modifier.padding(horizontal = 8.dp)) })
+                }
+                Box {
+                    IconButton(onClick = { expandedFilterMenu = true }) {
+                        Icon(Icons.Filled.List, contentDescription = "筛选")
+                    }
+                    DropdownMenu(
+                        expanded = expandedFilterMenu,
+                        onDismissRequest = { expandedFilterMenu = false }
+                    ) {
+                        listOf(
+                            Triple("normal", "普通待办", Color(0xFF10B981)),
+                            Triple("daily", "每日重复", Color(0xFFF59E0B)),
+                            Triple("weekly", "每周打卡", Color(0xFF6366F1)),
+                            Triple("monthly", "每月打卡", Color(0xFFF43F5E))
+                        ).forEach { (key, label, color) ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(
+                                            checked = checkedFilters.contains(key),
+                                            onCheckedChange = { isChecked ->
+                                                checkedFilters = if (isChecked) {
+                                                    checkedFilters + key
+                                                } else {
+                                                    checkedFilters - key
+                                                }
+                                            }
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .background(color, if (key == "normal") CircleShape else RoundedCornerShape(1.dp))
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(label)
+                                    }
+                                },
+                                onClick = {
+                                    val isChecked = checkedFilters.contains(key)
+                                    checkedFilters = if (isChecked) {
+                                        checkedFilters - key
+                                    } else {
+                                        checkedFilters + key
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Date Nav
+        item {
+            Spacer(Modifier.height(4.dp))
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = {
+                    targetDate = when (period) {
+                        "day" -> targetDate.minusDays(1)
+                        "week" -> targetDate.minusWeeks(1)
+                        else -> targetDate.minusMonths(1)
+                    }
+                }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Prev") }
+                
+                val label = when (period) {
+                    "day" -> targetDate.toString()
+                    "week" -> "${targetDate.get(IsoFields.WEEK_BASED_YEAR)}年 第${targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)}周"
+                    else -> "${targetDate.year}年 ${targetDate.monthValue}月"
+                }
+                Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
+                
+                IconButton(onClick = {
+                    targetDate = when (period) {
+                        "day" -> targetDate.plusDays(1)
+                        "week" -> targetDate.plusWeeks(1)
+                        else -> targetDate.plusMonths(1)
+                    }
+                }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next") }
+            }
+        }
 
         // Summary Bar
-        ElevatedCard(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Text("共 ${formatVal(totalDouble)} 项，已完成 ${formatVal(completedDouble)} 项，进度 ${(progress * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    LinearProgressIndicator(
-                        progress = { progress }, 
-                        modifier = Modifier.weight(1f).height(8.dp),
-                        strokeCap = StrokeCap.Round,
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        item {
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text("共 ${formatVal(totalDouble)} 项，已完成 ${formatVal(completedDouble)} 项，进度 ${(progress * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LinearProgressIndicator(
+                            progress = { progress }, 
+                            modifier = Modifier.weight(1f).height(8.dp),
+                            strokeCap = StrokeCap.Round,
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
 
         // 时段分布卡片
-        ElevatedCard(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                val insightText = if (totalSlots == 0) {
-                    "☀️ 暂无已完成的任务数据"
-                } else {
-                    var maxCount = morningCount
-                    var maxSlotLabel = "清晨"
-                    var maxPct = morningPct
-                    if (afternoonCount > maxCount) {
-                        maxCount = afternoonCount
-                        maxSlotLabel = "下午"
-                        maxPct = afternoonPct
-                    }
-                    if (eveningCount > maxCount) {
-                        maxCount = eveningCount
-                        maxSlotLabel = "晚上"
-                        maxPct = eveningPct
-                    }
-                    if (nightCount > maxCount) {
-                        maxSlotLabel = "深夜" // Note: label was "深夜" in Compose code, mapped to "night"
-                        maxPct = nightPct
-                    }
-                    "☀️ 当前周期内你的高效时段在 ${maxSlotLabel}，占已完成任务的 ${maxPct}%"
+        item {
+            val insightText = if (totalSlots == 0) {
+                "☀️ 暂无已完成的任务数据"
+            } else {
+                var maxCount = morningCount
+                var maxSlotLabel = "上午"
+                var maxPct = morningPct
+                if (afternoonCount > maxCount) {
+                    maxCount = afternoonCount
+                    maxSlotLabel = "下午"
+                    maxPct = afternoonPct
                 }
-                Text(insightText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(8.dp))
-                
-                // Color bar
-                if (totalSlots == 0) {
+                if (eveningCount > maxCount) {
+                    maxCount = eveningCount
+                    maxSlotLabel = "晚上"
+                    maxPct = eveningPct
+                }
+                if (nightCount > maxCount) {
+                    maxCount = nightCount
+                    maxSlotLabel = "深夜"
+                    maxPct = nightPct
+                }
+                "☀️ 当前周期内你的高效时段在 ${maxSlotLabel}，占已完成任务 of ${maxPct}%"
+            }
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(insightText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(8.dp))
+                    
+                    // Clock drawing container
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(10.dp)
-                            .clip(RoundedCornerShape(5.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    )
-                } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp))
+                            .wrapContentHeight()
+                            .padding(vertical = 4.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        if (morningCount > 0) Box(modifier = Modifier.weight(morningCount.toFloat()).fillMaxHeight().background(Color(0xFFF59E0B)))
-                        if (afternoonCount > 0) Box(modifier = Modifier.weight(afternoonCount.toFloat()).fillMaxHeight().background(Color(0xFF7B61FF)))
-                        if (eveningCount > 0) Box(modifier = Modifier.weight(eveningCount.toFloat()).fillMaxHeight().background(Color(0xFF6366F1)))
-                        if (nightCount > 0) Box(modifier = Modifier.weight(nightCount.toFloat()).fillMaxHeight().background(Color(0xFF3B82F6)))
-                    }
-                }
-                
-                Spacer(Modifier.height(10.dp))
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    TimeSlotLegendItem(label = "清晨", pct = morningPct, color = Color(0xFFF59E0B), modifier = Modifier.weight(1f))
-                    TimeSlotLegendItem(label = "下午", pct = afternoonPct, color = Color(0xFF7B61FF), modifier = Modifier.weight(1f))
-                    TimeSlotLegendItem(label = "晚上", pct = eveningPct, color = Color(0xFF6366F1), modifier = Modifier.weight(1f))
-                    TimeSlotLegendItem(label = "深夜", pct = nightPct, color = Color(0xFF3B82F6), modifier = Modifier.weight(1f))
-                }
+                        Canvas(
+                            modifier = Modifier
+                                .size(340.dp, 260.dp)
+                                .pointerInput(plottedDots, period) {
+                                    detectTapGestures(
+                                        onTap = { offset ->
+                                            val touchRadius = 24.dp.toPx()
+                                            val clicked = plottedDots.minByOrNull { dot ->
+                                                val dx = dot.x - offset.x
+                                                val dy = dot.y - offset.y
+                                                dx * dx + dy * dy
+                                            }
+                                            if (clicked != null) {
+                                                val dx = clicked.x - offset.x
+                                                val dy = clicked.y - offset.y
+                                                if (dx * dx + dy * dy <= touchRadius * touchRadius) {
+                                                    onEditTodo(clicked.todo)
+                                                } else {
+                                                    tooltipTodo = null
+                                                }
+                                            } else {
+                                                tooltipTodo = null
+                                            }
+                                        },
+                                        onLongPress = { offset ->
+                                            val touchRadius = 24.dp.toPx()
+                                            val clicked = plottedDots.minByOrNull { dot ->
+                                                val dx = dot.x - offset.x
+                                                val dy = dot.y - offset.y
+                                                dx * dx + dy * dy
+                                            }
+                                            if (clicked != null) {
+                                                val dx = clicked.x - offset.x
+                                                val dy = clicked.y - offset.y
+                                                if (dx * dx + dy * dy <= touchRadius * touchRadius) {
+                                                    tooltipTodo = clicked.todo
+                                                    tooltipDate = clicked.dateLabel
+                                                    tooltipTime = clicked.timeLabel
+                                                    tooltipOffset = offset
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+                        ) {
+                            val cx = size.width / 2
+                            val cy = size.height / 2
+                            val rPx = 80.dp.toPx()
+                            val strokeWidthPx = 10.dp.toPx()
+                            
+                            // Background track
+                            drawCircle(
+                                color = Color.White.copy(alpha = 0.05f),
+                                radius = rPx,
+                                center = Offset(cx, cy),
+                                style = Stroke(width = strokeWidthPx)
+                            )
+                            
+                            // Q1 (Top-Right): 0-6 (Night)
+                            drawArc(
+                                color = Color(0xFF3B82F6),
+                                startAngle = 270f,
+                                sweepAngle = 90f,
+                                useCenter = false,
+                                topLeft = Offset(cx - rPx, cy - rPx),
+                                size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
+                                style = Stroke(width = strokeWidthPx),
+                                alpha = if (totalSlots > 0) (if (nightCount > 0) 0.95f else 0.2f) else 0.2f
+                            )
+                            
+                            // Q2 (Bottom-Right): 6-12 (Morning)
+                            drawArc(
+                                color = Color(0xFFF59E0B),
+                                startAngle = 0f,
+                                sweepAngle = 90f,
+                                useCenter = false,
+                                topLeft = Offset(cx - rPx, cy - rPx),
+                                size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
+                                style = Stroke(width = strokeWidthPx),
+                                alpha = if (totalSlots > 0) (if (morningCount > 0) 0.95f else 0.2f) else 0.2f
+                            )
+                            
+                            // Q3 (Bottom-Left): 12-18 (Afternoon)
+                            drawArc(
+                                color = Color(0xFF7B61FF),
+                                startAngle = 90f,
+                                sweepAngle = 90f,
+                                useCenter = false,
+                                topLeft = Offset(cx - rPx, cy - rPx),
+                                size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
+                                style = Stroke(width = strokeWidthPx),
+                                alpha = if (totalSlots > 0) (if (afternoonCount > 0) 0.95f else 0.2f) else 0.2f
+                            )
+                            
+                            // Q4 (Top-Left): 18-24 (Evening)
+                            drawArc(
+                                color = Color(0xFF6366F1),
+                                startAngle = 180f,
+                                sweepAngle = 90f,
+                                useCenter = false,
+                                topLeft = Offset(cx - rPx, cy - rPx),
+                                size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
+                                style = Stroke(width = strokeWidthPx),
+                                alpha = if (totalSlots > 0) (if (eveningCount > 0) 0.95f else 0.2f) else 0.2f
+                            )
 
-                if (makeupCheckinCount > 0) {
-                    val periodText = when (period) {
-                        "day" -> "本日"
-                        "week" -> "本周"
-                        else -> "本月"
+                            // Division lines
+                            drawLine(
+                                color = Color.White.copy(alpha = 0.15f),
+                                start = Offset(cx - rPx - 15.dp.toPx(), cy),
+                                end = Offset(cx + rPx + 15.dp.toPx(), cy),
+                                strokeWidth = 1.dp.toPx()
+                            )
+                            drawLine(
+                                color = Color.White.copy(alpha = 0.15f),
+                                start = Offset(cx, cy - rPx - 15.dp.toPx()),
+                                end = Offset(cx, cy + rPx + 15.dp.toPx()),
+                                strokeWidth = 1.dp.toPx()
+                            )
+                            
+                            // Clock text labels
+                            val paint = android.graphics.Paint().apply {
+                                textSize = 11.5.sp.toPx()
+                                typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                            }
+                            
+                            paint.color = Color(0xFF3B82F6).toArgb()
+                            paint.textAlign = android.graphics.Paint.Align.RIGHT
+                            drawContext.canvas.nativeCanvas.drawText("深夜 (0-6): $nightPct%", 325.dp.toPx(), 25.dp.toPx(), paint)
+                            
+                            paint.color = Color(0xFFF59E0B).toArgb()
+                            paint.textAlign = android.graphics.Paint.Align.RIGHT
+                            drawContext.canvas.nativeCanvas.drawText("上午 (6-12): $morningPct%", 325.dp.toPx(), 245.dp.toPx(), paint)
+                            
+                            paint.color = Color(0xFF7B61FF).toArgb()
+                            paint.textAlign = android.graphics.Paint.Align.LEFT
+                            drawContext.canvas.nativeCanvas.drawText("下午 (12-18): $afternoonPct%", 15.dp.toPx(), 245.dp.toPx(), paint)
+                            
+                            paint.color = Color(0xFF6366F1).toArgb()
+                            paint.textAlign = android.graphics.Paint.Align.LEFT
+                            drawContext.canvas.nativeCanvas.drawText("晚上 (18-24): $eveningPct%", 15.dp.toPx(), 25.dp.toPx(), paint)
+
+                            // Draw shapes
+                            val dotRadius = when (period) {
+                                "day" -> 8.dp.toPx()
+                                "week" -> 6.dp.toPx()
+                                else -> 4.5.dp.toPx()
+                            }
+                            val strokeW = when (period) {
+                                "day" -> 1.5.dp.toPx()
+                                "week" -> 1.0.dp.toPx()
+                                else -> 0.7.dp.toPx()
+                            }
+
+                            plottedDots.forEach { dot ->
+                                val px = dot.x
+                                val py = dot.y
+                                
+                                when (dot.shape) {
+                                    "circle" -> {
+                                        drawCircle(
+                                            color = dot.color,
+                                            radius = dotRadius,
+                                            center = Offset(px, py)
+                                        )
+                                        drawCircle(
+                                            color = Color.White,
+                                            radius = dotRadius,
+                                            center = Offset(px, py),
+                                            style = Stroke(width = strokeW)
+                                        )
+                                    }
+                                    "triangle" -> {
+                                        val path = Path().apply {
+                                            moveTo(px, py - dotRadius * 1.1f)
+                                            lineTo(px - dotRadius, py + dotRadius * 0.9f)
+                                            lineTo(px + dotRadius, py + dotRadius * 0.9f)
+                                            close()
+                                        }
+                                        drawPath(path = path, color = dot.color)
+                                        drawPath(path = path, color = Color.White, style = Stroke(width = strokeW))
+                                    }
+                                    "diamond" -> {
+                                        val path = Path().apply {
+                                            moveTo(px, py - dotRadius * 1.1f)
+                                            lineTo(px + dotRadius * 1.1f, py)
+                                            lineTo(px, py + dotRadius * 1.1f)
+                                            lineTo(px - dotRadius * 1.1f, py)
+                                            close()
+                                        }
+                                        drawPath(path = path, color = dot.color)
+                                        drawPath(path = path, color = Color.White, style = Stroke(width = strokeW))
+                                    }
+                                    "star" -> {
+                                        val path = Path().apply {
+                                            val spikes = 5
+                                            val outerRadius = dotRadius * 1.25f
+                                            val innerRadius = dotRadius * 0.6f
+                                            var rot = Math.PI / 2 * 3
+                                            val step = Math.PI / spikes
+                                            for (i in 0 until spikes) {
+                                                val px1 = px + Math.cos(rot).toFloat() * outerRadius
+                                                val py1 = py + Math.sin(rot).toFloat() * outerRadius
+                                                if (i == 0) moveTo(px1, py1) else lineTo(px1, py1)
+                                                rot += step
+                                                
+                                                val px2 = px + Math.cos(rot).toFloat() * innerRadius
+                                                val py2 = py + Math.sin(rot).toFloat() * innerRadius
+                                                lineTo(px2, py2)
+                                                rot += step
+                                            }
+                                            close()
+                                        }
+                                        drawPath(path = path, color = dot.color)
+                                        drawPath(path = path, color = Color.White, style = Stroke(width = strokeW))
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Tooltip Pop-up overlay for Canvas dots
+                        tooltipTodo?.let { todo ->
+                            Popup(
+                                alignment = Alignment.TopStart,
+                                offset = IntOffset(tooltipOffset.x.toInt(), tooltipOffset.y.toInt() - 40.dp.value.toInt()),
+                                onDismissRequest = { tooltipTodo = null }
+                            ) {
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.inverseSurface),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(todo.content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.inverseOnSurface, fontWeight = FontWeight.Bold)
+                                        Text("完成日期: $tooltipDate", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f))
+                                        Text("打卡时间: $tooltipTime", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f))
+                                    }
+                                }
+                            }
+                        }
+
+                        val dotRadiusDp = when (period) {
+                            "day" -> 8.dp
+                            "week" -> 6.dp
+                            else -> 4.5.dp
+                        }
+
+                        // Left column for makeup check-ins
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.CenterStart)
+                                .padding(start = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            makeupCheckins.filterIndexed { idx, _ -> idx % 2 == 0 }.forEach { (todo, dateStr) ->
+                                val color = when {
+                                    todo.recurring == "daily_repeat" -> Color(0xFFF59E0B)
+                                    todo.taskType == TaskType.WEEKLY_CHECKIN -> Color(0xFF6366F1)
+                                    todo.taskType == TaskType.MONTHLY_CHECKIN -> Color(0xFFF43F5E)
+                                    else -> Color(0xFF10B981)
+                                }
+                                val shape = when {
+                                    todo.recurring == "daily_repeat" -> "triangle"
+                                    todo.taskType == TaskType.WEEKLY_CHECKIN -> "diamond"
+                                    todo.taskType == TaskType.MONTHLY_CHECKIN -> "star"
+                                    else -> "circle"
+                                }
+                                var showTooltip by remember { mutableStateOf(false) }
+                                Box(
+                                    modifier = Modifier
+                                        .size(22.dp)
+                                        .pointerInput(todo, dateStr) {
+                                            detectTapGestures(
+                                                onTap = { onEditTodo(todo) },
+                                                onLongPress = { showTooltip = true }
+                                            )
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    MakeupIcon(shape = shape, color = color, dotRadius = dotRadiusDp, modifier = Modifier.size(22.dp))
+                                    
+                                    if (showTooltip) {
+                                        Popup(
+                                            alignment = Alignment.TopStart,
+                                            offset = IntOffset(0, -40.dp.value.toInt()),
+                                            onDismissRequest = { showTooltip = false }
+                                        ) {
+                                            Card(
+                                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.inverseSurface),
+                                                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Column(modifier = Modifier.padding(10.dp)) {
+                                                    Text(todo.content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.inverseOnSurface, fontWeight = FontWeight.Bold)
+                                                    Text("完成日期: $dateStr", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Right column for makeup check-ins
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            makeupCheckins.filterIndexed { idx, _ -> idx % 2 == 1 }.forEach { (todo, dateStr) ->
+                                val color = when {
+                                    todo.recurring == "daily_repeat" -> Color(0xFFF59E0B)
+                                    todo.taskType == TaskType.WEEKLY_CHECKIN -> Color(0xFF6366F1)
+                                    todo.taskType == TaskType.MONTHLY_CHECKIN -> Color(0xFFF43F5E)
+                                    else -> Color(0xFF10B981)
+                                }
+                                val shape = when {
+                                    todo.recurring == "daily_repeat" -> "triangle"
+                                    todo.taskType == TaskType.WEEKLY_CHECKIN -> "diamond"
+                                    todo.taskType == TaskType.MONTHLY_CHECKIN -> "star"
+                                    else -> "circle"
+                                }
+                                var showTooltip by remember { mutableStateOf(false) }
+                                Box(
+                                    modifier = Modifier
+                                        .size(22.dp)
+                                        .pointerInput(todo, dateStr) {
+                                            detectTapGestures(
+                                                onTap = { onEditTodo(todo) },
+                                                onLongPress = { showTooltip = true }
+                                            )
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    MakeupIcon(shape = shape, color = color, dotRadius = dotRadiusDp, modifier = Modifier.size(22.dp))
+                                    
+                                    if (showTooltip) {
+                                        Popup(
+                                            alignment = Alignment.TopEnd,
+                                            offset = IntOffset(0, -40.dp.value.toInt()),
+                                            onDismissRequest = { showTooltip = false }
+                                        ) {
+                                            Card(
+                                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.inverseSurface),
+                                                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Column(modifier = Modifier.padding(10.dp)) {
+                                                    Text(todo.content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.inverseOnSurface, fontWeight = FontWeight.Bold)
+                                                    Text("完成日期: $dateStr", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "* ${periodText}包含 ${makeupCheckinCount} 项补打卡，不计入时段分布统计",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Center
-                    )
+
+                    if (makeupCheckinCount > 0) {
+                        val periodText = when (period) {
+                            "day" -> "本日"
+                            "week" -> "本周"
+                            else -> "本月"
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "* ${periodText}包含 ${makeupCheckinCount} 项补打卡，已列在左右两侧，不计入时段分布统计",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        // Toggle list button
+        item {
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                OutlinedButton(
+                    onClick = { showTaskList = !showTaskList },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = if (showTaskList) "收起详细任务列表" 
+                               else "显示详细任务列表 (共 ${displayTodos.size} 项)"
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
 
         // List
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
+        if (showTaskList) {
             items(displayTodos, key = { it.id }) { todo ->
                 val checkinDateForTodo = if (todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) {
                     when (period) {
@@ -757,6 +1384,34 @@ private fun TimeSlotLegendItem(label: String, pct: Int, color: Color, modifier: 
             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
             color = color
         )
+    }
+}
+
+private data class PlottedDot(
+    val todo: Todo,
+    val dateLabel: String,
+    val timeLabel: String,
+    val x: Float,
+    val y: Float,
+    val color: Color,
+    val shape: String
+)
+
+private fun parseTimeToHourMinute(completedAt: String): Pair<Int, Int>? {
+    return try {
+        val odt = OffsetDateTime.parse(completedAt)
+        Pair(odt.hour, odt.minute)
+    } catch (e: Exception) {
+        try {
+            val dt = Instant.parse(completedAt).atZone(ZoneId.systemDefault())
+            Pair(dt.hour, dt.minute)
+        } catch (ex: Exception) {
+            val match = Regex("T(\\d{2}):(\\d{2})").find(completedAt)
+            if (match != null) {
+                val (h, m) = match.destructured
+                Pair(h.toInt(), m.toInt())
+            } else null
+        }
     }
 }
 
