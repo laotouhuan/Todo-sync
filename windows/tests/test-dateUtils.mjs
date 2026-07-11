@@ -395,7 +395,7 @@ describe('groupTodosByDate', () => {
 
 // ====== Stats Helpers ======
 describe('categorizeByTimeSlot', () => {
-    it('清晨 6-12', () => {
+    it('上午 6-12', () => {
         assert.equal(categorizeByTimeSlot('2026-07-08T06:00:00'), 'morning');
         assert.equal(categorizeByTimeSlot('2026-07-08T11:59:59'), 'morning');
     });

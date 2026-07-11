@@ -39,6 +39,13 @@ const appState = {
     futureCollapsed: true,
     noDateCollapsed: true,
     pastCollapsed: true,
+    statsFilters: {
+        normal: true,
+        daily: true,
+        weekly: true,
+        monthly: true
+    },
+    showStatsList: false,
 };
 
 // 模块级拖拽状态（替代 window 全局属性）
@@ -1380,6 +1387,15 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         });
     }
 
+    // Apply global category filter
+    periodTodos = periodTodos.filter(t => {
+        const filters = appState.statsFilters;
+        if (t.task_type === 'weekly_checkin') return filters.weekly;
+        if (t.task_type === 'monthly_checkin') return filters.monthly;
+        if (t.recurring === 'daily_repeat') return filters.daily;
+        return filters.normal;
+    });
+
     let totalCountSum = 0;
     let completedCountSum = 0;
 
@@ -1421,7 +1437,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
 
     // 时段分布渲染 (打卡任务包含有时间戳记录的正常打卡，排除无时分秒的补打卡)
     let morningCount = 0, afternoonCount = 0, eveningCount = 0, nightCount = 0;
-    let makeupCheckinCount = 0;
+    let makeupCheckins = [];
 
     periodTodos.forEach(t => {
         if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
@@ -1447,7 +1463,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
                         else if (slot === 'night') nightCount++;
                     } else {
                         // 补打卡（长度为10，如 YYYY-MM-DD）不计入时段，计为补打卡数
-                        makeupCheckinCount++;
+                        makeupCheckins.push({ date: dStr, content: t.content, todo: t });
                     }
                 }
             });
@@ -1469,24 +1485,134 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     const eveningPct = totalSlots === 0 ? 0 : Math.round((eveningCount / totalSlots) * 100);
     const nightPct = totalSlots === 0 ? 0 : Math.round((nightCount / totalSlots) * 100);
 
-    document.getElementById('label-morning').textContent = `清晨: ${morningPct}%`;
-    document.getElementById('label-afternoon').textContent = `下午: ${afternoonPct}%`;
-    document.getElementById('label-evening').textContent = `晚上: ${eveningPct}%`;
-    document.getElementById('label-night').textContent = `深夜: ${nightPct}%`;
-
-    document.querySelector('.segment-morning').style.flex = morningCount || 1;
-    document.querySelector('.segment-afternoon').style.flex = afternoonCount || 1;
-    document.querySelector('.segment-evening').style.flex = eveningCount || 1;
-    document.querySelector('.segment-night').style.flex = nightCount || 1;
-
     const tipEl = document.getElementById('time-distribution-tip');
+    const leftCol = document.getElementById('makeup-checkins-left');
+    const rightCol = document.getElementById('makeup-checkins-right');
+    
+    if (leftCol) leftCol.innerHTML = '';
+    if (rightCol) rightCol.innerHTML = '';
+
     if (tipEl) {
-        if (makeupCheckinCount > 0) {
+        if (makeupCheckins.length > 0) {
             let periodText = '本日';
             if (appState.statsPeriod === 'week') periodText = '本周';
             else if (appState.statsPeriod === 'month') periodText = '本月';
-            tipEl.textContent = `* ${periodText}包含 ${makeupCheckinCount} 项补打卡，不计入时段分布统计`;
+            tipEl.textContent = `* ${periodText}包含 ${makeupCheckins.length} 项补打卡，已列在左右两侧，不计入时段统计`;
             tipEl.classList.remove('hidden');
+
+            // Render makeup checkins to left and right columns
+            makeupCheckins.forEach((item, index) => {
+                const t = item.todo;
+                
+                let color = '#10B981';
+                let shape = 'circle';
+                if (t.recurring === 'daily_repeat') {
+                    color = '#F59E0B';
+                    shape = 'triangle';
+                } else if (t.task_type === 'weekly_checkin') {
+                    color = '#6366F1';
+                    shape = 'diamond';
+                } else if (t.task_type === 'monthly_checkin') {
+                    color = '#F43F5E';
+                    shape = 'star';
+                }
+
+                let dotSize = 8;
+                let strokeWidth = 1.5;
+                let opacityVal = 0.95;
+                if (appState.statsPeriod === 'week') {
+                    dotSize = 6;
+                    strokeWidth = 1.0;
+                    opacityVal = 0.8;
+                } else if (appState.statsPeriod === 'month') {
+                    dotSize = 4.5;
+                    strokeWidth = 0.7;
+                    opacityVal = 0.6;
+                }
+
+                const x = 11, y = 11; // center of 22x22 SVG
+                let innerSvg = '';
+
+                if (shape === 'circle') {
+                    innerSvg = `<circle cx="${x}" cy="${y}" r="${dotSize}" fill="${color}" stroke="#ffffff" stroke-width="${strokeWidth}" opacity="${opacityVal}" />`;
+                } else if (shape === 'triangle') {
+                    const p1 = `${x},${y - dotSize * 1.1}`;
+                    const p2 = `${x - dotSize},${y + dotSize * 0.9}`;
+                    const p3 = `${x + dotSize},${y + dotSize * 0.9}`;
+                    innerSvg = `<polygon points="${p1} ${p2} ${p3}" fill="${color}" stroke="#ffffff" stroke-width="${strokeWidth}" opacity="${opacityVal}" />`;
+                } else if (shape === 'diamond') {
+                    const p1 = `${x},${y - dotSize * 1.1}`;
+                    const p2 = `${x + dotSize * 1.1},${y}`;
+                    const p3 = `${x},${y + dotSize * 1.1}`;
+                    const p4 = `${x - dotSize * 1.1},${y}`;
+                    innerSvg = `<polygon points="${p1} ${p2} ${p3} ${p4}" fill="${color}" stroke="#ffffff" stroke-width="${strokeWidth}" opacity="${opacityVal}" />`;
+                } else if (shape === 'star') {
+                    const spikes = 5;
+                    const outerRadius = dotSize * 1.25;
+                    const innerRadius = dotSize * 0.6;
+                    let rot = Math.PI / 2 * 3;
+                    let px, py;
+                    let step = Math.PI / spikes;
+                    let points = [];
+                    for (let i = 0; i < spikes; i++) {
+                        px = x + Math.cos(rot) * outerRadius;
+                        py = y + Math.sin(rot) * outerRadius;
+                        points.push(`${px},${py}`);
+                        rot += step;
+                        px = x + Math.cos(rot) * innerRadius;
+                        py = y + Math.sin(rot) * innerRadius;
+                        points.push(`${px},${py}`);
+                        rot += step;
+                    }
+                    innerSvg = `<polygon points="${points.join(' ')}" fill="${color}" stroke="#ffffff" stroke-width="${strokeWidth}" opacity="${opacityVal}" />`;
+                }
+
+                const dot = document.createElement('div');
+                dot.style.cssText = `
+                    width: 22px; height: 22px; 
+                    background: transparent; 
+                    display: flex; justify-content: center; align-items: center; 
+                    cursor: pointer;
+                `;
+                dot.innerHTML = `<svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">${innerSvg}</svg>`;
+                
+                const tooltipEl = document.getElementById('clock-tooltip');
+                dot.addEventListener('mouseover', (e) => {
+                    if (tooltipEl) {
+                        tooltipEl.style.display = 'block';
+                        tooltipEl.innerHTML = `<strong>${item.content}</strong><br/>完成日期: ${item.date}`;
+                    }
+                });
+                
+                dot.addEventListener('mousemove', (e) => {
+                    if (tooltipEl) {
+                        const cardRect = document.getElementById('time-distribution').getBoundingClientRect();
+                        let tooltipX = e.clientX - cardRect.left + 12;
+                        if (index % 2 === 1) {
+                            tooltipX = e.clientX - cardRect.left - tooltipEl.offsetWidth - 12;
+                        }
+                        const tooltipY = e.clientY - cardRect.top + 12;
+                        tooltipEl.style.left = `${tooltipX}px`;
+                        tooltipEl.style.top = `${tooltipY}px`;
+                    }
+                });
+                
+                dot.addEventListener('mouseout', () => {
+                    if (tooltipEl) tooltipEl.style.display = 'none';
+                });
+                
+                dot.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (tooltipEl) tooltipEl.style.display = 'none';
+                    openEditModal(t);
+                });
+                
+                if (index % 2 === 0 && leftCol) {
+                    leftCol.appendChild(dot);
+                } else if (rightCol) {
+                    rightCol.appendChild(dot);
+                }
+            });
         } else {
             tipEl.textContent = '';
             tipEl.classList.add('hidden');
@@ -1498,7 +1624,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         insightTextEl.textContent = '☀️ 暂无已完成的任务数据';
     } else {
         let maxCount = morningCount;
-        let maxSlotLabel = '清晨';
+        let maxSlotLabel = '上午';
         let maxPct = morningPct;
 
         if (afternoonCount > maxCount) {
@@ -1520,9 +1646,290 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         insightTextEl.textContent = `☀️ 当前周期内你的高效时段在 ${maxSlotLabel}，占已完成任务的 ${maxPct}%`;
     }
 
-    let displayTodos = periodTodos;
+    // ====== CUSTOM SVG CLOCK RENDERING ======
+    const svgEl = document.getElementById('efficiency-clock-svg');
+    if (svgEl) {
+        svgEl.innerHTML = ''; // clear previous elements
+        
+        const cx = 170;
+        const cy = 130;
+        const r = 80;
+        const strokeW = 10;
+        
+        // Render background circular track
+        const bgTrack = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        bgTrack.setAttribute('cx', cx);
+        bgTrack.setAttribute('cy', cy);
+        bgTrack.setAttribute('r', r);
+        bgTrack.setAttribute('fill', 'none');
+        bgTrack.setAttribute('stroke', 'rgba(255, 255, 255, 0.05)');
+        bgTrack.setAttribute('stroke-width', strokeW);
+        svgEl.appendChild(bgTrack);
+        
+        // Draw the 4 quadrant arcs representing our time slots
+        // Quadrant 1 (Top-Right): 0-6 (Night)
+        const q1Path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        q1Path.setAttribute('d', `M ${cx},${cy - r} A ${r},${r} 0 0 1 ${cx + r},${cy}`);
+        q1Path.setAttribute('fill', 'none');
+        q1Path.setAttribute('stroke', '#3b82f6');
+        q1Path.setAttribute('stroke-width', strokeW);
+        q1Path.setAttribute('opacity', totalSlots > 0 ? (nightCount > 0 ? 0.95 : 0.2) : 0.2);
+        svgEl.appendChild(q1Path);
+        
+        // Quadrant 2 (Bottom-Right): 6-12 (Morning)
+        const q2Path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        q2Path.setAttribute('d', `M ${cx + r},${cy} A ${r},${r} 0 0 1 ${cx},${cy + r}`);
+        q2Path.setAttribute('fill', 'none');
+        q2Path.setAttribute('stroke', '#f59e0b');
+        q2Path.setAttribute('stroke-width', strokeW);
+        q2Path.setAttribute('opacity', totalSlots > 0 ? (morningCount > 0 ? 0.95 : 0.2) : 0.2);
+        svgEl.appendChild(q2Path);
+        
+        // Quadrant 3 (Bottom-Left): 12-18 (Afternoon)
+        const q3Path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        q3Path.setAttribute('d', `M ${cx},${cy + r} A ${r},${r} 0 0 1 ${cx - r},${cy}`);
+        q3Path.setAttribute('fill', 'none');
+        q3Path.setAttribute('stroke', '#7b61ff');
+        q3Path.setAttribute('stroke-width', strokeW);
+        q3Path.setAttribute('opacity', totalSlots > 0 ? (afternoonCount > 0 ? 0.95 : 0.2) : 0.2);
+        svgEl.appendChild(q3Path);
+        
+        // Quadrant 4 (Top-Left): 18-24 (Evening)
+        const q4Path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        q4Path.setAttribute('d', `M ${cx - r},${cy} A ${r},${r} 0 0 1 ${cx},${cy - r}`);
+        q4Path.setAttribute('fill', 'none');
+        q4Path.setAttribute('stroke', '#6366f1');
+        q4Path.setAttribute('stroke-width', strokeW);
+        q4Path.setAttribute('opacity', totalSlots > 0 ? (eveningCount > 0 ? 0.95 : 0.2) : 0.2);
+        svgEl.appendChild(q4Path);
 
+        // Draw dotted division lines
+        const lineH = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        lineH.setAttribute('x1', cx - r - 15);
+        lineH.setAttribute('y1', cy);
+        lineH.setAttribute('x2', cx + r + 15);
+        lineH.setAttribute('y2', cy);
+        lineH.setAttribute('stroke', 'rgba(255, 255, 255, 0.15)');
+        lineH.setAttribute('stroke-dasharray', '2,4');
+        svgEl.appendChild(lineH);
+
+        const lineV = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        lineV.setAttribute('x1', cx);
+        lineV.setAttribute('y1', cy - r - 15);
+        lineV.setAttribute('x2', cx);
+        lineV.setAttribute('y2', cy + r + 15);
+        lineV.setAttribute('stroke', 'rgba(255, 255, 255, 0.15)');
+        lineV.setAttribute('stroke-dasharray', '2,4');
+        svgEl.appendChild(lineV);
+        
+        // Center clock icon
+        const centerGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        centerGroup.setAttribute('transform', `translate(${cx - 10}, ${cy - 10})`);
+        centerGroup.setAttribute('opacity', '0.25');
+        centerGroup.innerHTML = `
+          <svg viewBox="0 0 24 24" fill="none" width="20" height="20" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        `;
+        svgEl.appendChild(centerGroup);
+
+        // Text Labels
+        const drawLabel = (textStr, x, y, anchor, color) => {
+            const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            txt.setAttribute('x', x);
+            txt.setAttribute('y', y);
+            txt.setAttribute('text-anchor', anchor);
+            txt.setAttribute('fill', color);
+            txt.setAttribute('font-size', '11.5px');
+            txt.setAttribute('font-weight', '600');
+            txt.textContent = textStr;
+            svgEl.appendChild(txt);
+        };
+        
+        drawLabel(`深夜 (0-6): ${nightPct}%`, 325, 25, 'end', '#3b82f6');
+        drawLabel(`上午 (6-12): ${morningPct}%`, 325, 245, 'end', '#f59e0b');
+        drawLabel(`下午 (12-18): ${afternoonPct}%`, 15, 245, 'start', '#7b61ff');
+        drawLabel(`晚上 (18-24): ${eveningPct}%`, 15, 25, 'start', '#6366f1');
+
+        // Draw dots representing task completions
+        const completionEvents = [];
+        periodTodos.forEach(t => {
+            if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
+                const completedDates = t.completed_dates || [];
+                completedDates.forEach(dStr => {
+                    let inPeriod = false;
+                    if (appState.statsPeriod === 'day') {
+                        inPeriod = dStr.startsWith(targetDayStr);
+                    } else if (appState.statsPeriod === 'week') {
+                        const checkDate = new Date(dStr);
+                        inPeriod = !isNaN(checkDate.getTime()) && getISOWeekString(checkDate) === targetWeekStr;
+                    } else {
+                        inPeriod = dStr.startsWith(targetMonthStr);
+                    }
+
+                    if (inPeriod && dStr.length > 10) {
+                        completionEvents.push({
+                            todo: t,
+                            completed_at: dStr
+                        });
+                    }
+                });
+            } else {
+                if (t.completed && t.completed_at) {
+                    completionEvents.push({
+                        todo: t,
+                        completed_at: t.completed_at
+                    });
+                }
+            }
+        });
+
+        let dotSize = 8;
+        let strokeWidth = 1.5;
+        let opacityVal = 0.95;
+        if (appState.statsPeriod === 'week') {
+            dotSize = 6;
+            strokeWidth = 1.0;
+            opacityVal = 0.8;
+        } else if (appState.statsPeriod === 'month') {
+            dotSize = 4.5;
+            strokeWidth = 0.7;
+            opacityVal = 0.6;
+        }
+
+        const tooltipEl = document.getElementById('clock-tooltip');
+
+        completionEvents.forEach((ev, index) => {
+            const t = ev.todo;
+            const timeStr = ev.completed_at;
+            const dateObj = new Date(timeStr);
+            if (isNaN(dateObj.getTime())) return;
+            
+            const hour = dateObj.getHours();
+            const minute = dateObj.getMinutes();
+            const fracHour = hour + minute / 60.0;
+            const angle = fracHour * 15.0; // 360 / 24 = 15 deg per hour
+            
+            const hash = (t.id + index).split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+            const jitterR = ((hash % 5) - 2) * 5.5;
+            const activeR = r + jitterR;
+            const jitterAngle = ((hash % 7) - 3) * 1.5;
+            
+            const thetaRad = (angle + jitterAngle) * Math.PI / 180;
+            const x = cx + activeR * Math.sin(thetaRad);
+            const y = cy - activeR * Math.cos(thetaRad);
+            
+            let color = '#10B981';
+            let shape = 'circle';
+            if (t.recurring === 'daily_repeat') {
+                color = '#F59E0B';
+                shape = 'triangle';
+            } else if (t.task_type === 'weekly_checkin') {
+                color = '#6366F1';
+                shape = 'diamond';
+            } else if (t.task_type === 'monthly_checkin') {
+                color = '#F43F5E';
+                shape = 'star';
+            }
+
+            let shapeEl;
+            if (shape === 'circle') {
+                shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                shapeEl.setAttribute('cx', x);
+                shapeEl.setAttribute('cy', y);
+                shapeEl.setAttribute('r', dotSize);
+            } else if (shape === 'triangle') {
+                shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                const p1 = `${x},${y - dotSize * 1.1}`;
+                const p2 = `${x - dotSize},${y + dotSize * 0.9}`;
+                const p3 = `${x + dotSize},${y + dotSize * 0.9}`;
+                shapeEl.setAttribute('points', `${p1} ${p2} ${p3}`);
+            } else if (shape === 'diamond') {
+                shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                const p1 = `${x},${y - dotSize * 1.1}`;
+                const p2 = `${x + dotSize * 1.1},${y}`;
+                const p3 = `${x},${y + dotSize * 1.1}`;
+                const p4 = `${x - dotSize * 1.1},${y}`;
+                shapeEl.setAttribute('points', `${p1} ${p2} ${p3} ${p4}`);
+            } else if (shape === 'star') {
+                shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                const spikes = 5;
+                const outerRadius = dotSize * 1.25;
+                const innerRadius = dotSize * 0.6;
+                let rot = Math.PI / 2 * 3;
+                let px, py;
+                let step = Math.PI / spikes;
+                let points = [];
+                for (let i = 0; i < spikes; i++) {
+                    px = x + Math.cos(rot) * outerRadius;
+                    py = y + Math.sin(rot) * outerRadius;
+                    points.push(`${px},${py}`);
+                    rot += step;
+                    px = x + Math.cos(rot) * innerRadius;
+                    py = y + Math.sin(rot) * innerRadius;
+                    points.push(`${px},${py}`);
+                    rot += step;
+                }
+                shapeEl.setAttribute('points', points.join(' '));
+            }
+            
+            shapeEl.setAttribute('fill', color);
+            shapeEl.setAttribute('stroke', '#ffffff');
+            shapeEl.setAttribute('stroke-width', strokeWidth);
+            shapeEl.setAttribute('opacity', opacityVal);
+            shapeEl.setAttribute('class', 'task-dot');
+            
+            const pad = (n) => String(n).padStart(2, '0');
+            const displayTime = `${pad(hour)}:${pad(minute)}`;
+            
+            shapeEl.addEventListener('mouseover', (e) => {
+                if (tooltipEl) {
+                    tooltipEl.style.display = 'block';
+                    tooltipEl.innerHTML = `<strong>${t.content}</strong><br/>完成日期: ${timeStr.substring(0, 10)}<br/>打卡时间: ${displayTime}`;
+                }
+            });
+            
+            shapeEl.addEventListener('mousemove', (e) => {
+                if (tooltipEl) {
+                    const cardRect = document.getElementById('time-distribution').getBoundingClientRect();
+                    const tooltipX = e.clientX - cardRect.left + 12;
+                    const tooltipY = e.clientY - cardRect.top + 12;
+                    tooltipEl.style.left = `${tooltipX}px`;
+                    tooltipEl.style.top = `${tooltipY}px`;
+                }
+            });
+            
+            shapeEl.addEventListener('mouseout', () => {
+                if (tooltipEl) tooltipEl.style.display = 'none';
+            });
+            
+            shapeEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (tooltipEl) tooltipEl.style.display = 'none';
+                openEditModal(t);
+            });
+            
+            svgEl.appendChild(shapeEl);
+        });
+    }
+
+    let displayTodos = periodTodos;
     displayTodos.sort(sortFunc);
+
+    // List visibility and toggle text
+    const toggleListBtn = document.getElementById('toggle-stats-list-btn');
+    if (toggleListBtn) {
+        toggleListBtn.textContent = appState.showStatsList 
+            ? '收起详细任务列表' 
+            : `显示详细任务列表 (共 ${displayTodos.length} 项)`;
+    }
+
+    if (appState.showStatsList) {
+        statsList.classList.remove('hidden');
+    } else {
+        statsList.classList.add('hidden');
+    }
 
     if (displayTodos.length === 0) {
         const emptyTip = document.createElement('div');
@@ -1818,7 +2225,12 @@ function render() {
         appState.statsTargetDate.getTime(),
         appState.statsSubTab,
         appState.healthThroughputDays,
-        appState.showAllHistory
+        appState.showAllHistory,
+        appState.statsFilters.normal,
+        appState.statsFilters.daily,
+        appState.statsFilters.weekly,
+        appState.statsFilters.monthly,
+        appState.showStatsList
     ].join('|');
     const _hash = appState.todoData.todos.map(t => `${t.id}:${t.updated_at}:${t.completed}`).join('|') + '|' + uiStateHash;
     if (_hash === _lastRenderedHash) return;
@@ -2514,7 +2926,7 @@ window.addEventListener("DOMContentLoaded", () => {
                 if (btn.dataset.subtab === 'insights') btn.classList.add('active');
                 else btn.classList.remove('active');
             });
-            mainContentEl.classList.add('hidden');
+            document.getElementById('todo-list').classList.add('hidden');
             if (tabsContainerEl) tabsContainerEl.classList.add('hidden');
             if (appFooterEl) appFooterEl.classList.add('hidden');
             statsContainerEl.classList.remove('hidden');
@@ -2527,7 +2939,7 @@ window.addEventListener("DOMContentLoaded", () => {
             if (allSubTabs) allSubTabs.classList.add('hidden');
         } else {
             appState.currentView = 'list';
-            mainContentEl.classList.remove('hidden');
+            document.getElementById('todo-list').classList.remove('hidden');
             mainContentEl.className = 'list-view';
             if (tabsContainerEl) tabsContainerEl.classList.remove('hidden');
             if (appFooterEl) appFooterEl.classList.remove('hidden');
@@ -2623,6 +3035,40 @@ window.addEventListener("DOMContentLoaded", () => {
         render();
     });
 
+    // 统计筛选下拉菜单事件绑定
+    const filterToggleBtn = document.getElementById('stats-filter-toggle-btn');
+    const filterDropdown = document.getElementById('stats-filter-dropdown');
+    if (filterToggleBtn && filterDropdown) {
+        filterToggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            filterDropdown.classList.toggle('hidden');
+        });
+        document.addEventListener('click', (e) => {
+            if (!filterDropdown.classList.contains('hidden') && !e.target.closest('#stats-filter-dropdown') && e.target !== filterToggleBtn) {
+                filterDropdown.classList.add('hidden');
+            }
+        });
+    }
+
+    ['normal', 'daily', 'weekly', 'monthly'].forEach(key => {
+        const cb = document.getElementById(`filter-${key}`);
+        if (cb) {
+            cb.checked = appState.statsFilters[key];
+            cb.addEventListener('change', () => {
+                appState.statsFilters[key] = cb.checked;
+                render();
+            });
+        }
+    });
+
+    // 统计列表展开折叠事件绑定
+    const toggleListBtn = document.getElementById('toggle-stats-list-btn');
+    if (toggleListBtn) {
+        toggleListBtn.addEventListener('click', () => {
+            appState.showStatsList = !appState.showStatsList;
+            render();
+        });
+    }
 
     // 今天/全部过滤标签
     const tabToday = document.getElementById('tab-today');
@@ -2723,7 +3169,7 @@ window.addEventListener("DOMContentLoaded", () => {
         if (!input) return;
         const content = input.value.trim();
         if (content && appState.currentEditingTodo) {
-            appState.currentEditingSubtasks.push({ id: crypto.randomUUID(), content, completed: false });
+            appState.currentEditingSubtasks.unshift({ id: crypto.randomUUID(), content, completed: false });
             input.value = '';
             renderEditSubtasks();
             autoSaveEdit();

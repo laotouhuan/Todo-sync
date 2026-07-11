@@ -640,7 +640,7 @@ private fun EditTodoSubtasksSection(
         )
         IconButton(onClick = {
             if (newSubtaskContent.isNotBlank()) {
-                onSubtasksChange(subtasks + Subtask(UUID.randomUUID().toString(), newSubtaskContent, false))
+                onSubtasksChange(listOf(Subtask(UUID.randomUUID().toString(), newSubtaskContent, false)) + subtasks)
                 newSubtaskContent = ""
                 performAutoSave()
             }
