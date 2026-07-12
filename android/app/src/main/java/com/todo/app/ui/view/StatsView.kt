@@ -13,6 +13,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.List
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -347,7 +353,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
             }
         }
 
-        val cx = with(density) { 170.dp.toPx() }
+        val cx = with(density) { 155.dp.toPx() }
         val cy = with(density) { 130.dp.toPx() }
         val r = with(density) { 80.dp.toPx() }
         
@@ -359,7 +365,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                 val angle = fracHour * 15.0
                 
                 val hash = (t.id + index.toString()).hashCode()
-                val jitterR = ((hash % 5) - 2) * with(density) { 5.5.dp.toPx() }
+                val jitterR = ((hash % 5) - 2) * with(density) { 3.dp.toPx() }
                 val activeR = r + jitterR
                 val jitterAngle = ((hash % 7) - 3) * 1.5
                 
@@ -469,23 +475,51 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     ) {
         // Period Tabs with Dropdown Filter
         item {
-            val tabIndex = when (period) { "day" -> 0; "week" -> 1; else -> 2 }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                TabRow(
-                    selectedTabIndex = tabIndex,
-                    modifier = Modifier.width(240.dp)
+                Row(
+                    modifier = Modifier
+                        .width(200.dp)
+                        .height(36.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        .padding(3.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Tab(selected = period == "day", onClick = { period = "day" }, text = { Text("日", modifier = Modifier.padding(horizontal = 8.dp)) })
-                    Tab(selected = period == "week", onClick = { period = "week" }, text = { Text("周", modifier = Modifier.padding(horizontal = 8.dp)) })
-                    Tab(selected = period == "month", onClick = { period = "month" }, text = { Text("月", modifier = Modifier.padding(horizontal = 8.dp)) })
+                    val options = listOf("day" to "日", "week" to "周", "month" to "月")
+                    options.forEach { (key, label) ->
+                        val isSelected = period == key
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .background(
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                    shape = RoundedCornerShape(15.dp)
+                                )
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = { period = key }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
                 Box {
                     IconButton(onClick = { expandedFilterMenu = true }) {
-                        Icon(Icons.Filled.List, contentDescription = "筛选")
+                        Icon(FilterListIcon, contentDescription = "筛选")
                     }
                     DropdownMenu(
                         expanded = expandedFilterMenu,
@@ -611,12 +645,13 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     maxSlotLabel = "深夜"
                     maxPct = nightPct
                 }
-                "☀️ 当前周期内你的高效时段在 ${maxSlotLabel}，占已完成任务 of ${maxPct}%"
+                "☀️ 当前周期内你的高效时段在 ${maxSlotLabel}，占已完成任务的 ${maxPct}%"
             }
-            ElevatedCard(
+            OutlinedCard(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(insightText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
@@ -632,7 +667,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     ) {
                         Canvas(
                             modifier = Modifier
-                                .size(340.dp, 260.dp)
+                                .size(310.dp, 260.dp)
                                 .pointerInput(plottedDots, period) {
                                     detectTapGestures(
                                         onTap = { offset ->
@@ -714,7 +749,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                             
                             // Q3 (Bottom-Left): 12-18 (Afternoon)
                             drawArc(
-                                color = Color(0xFF7B61FF),
+                                color = Color(0xFF10B981),
                                 startAngle = 90f,
                                 sweepAngle = 90f,
                                 useCenter = false,
@@ -758,19 +793,19 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                             
                             paint.color = Color(0xFF3B82F6).toArgb()
                             paint.textAlign = android.graphics.Paint.Align.RIGHT
-                            drawContext.canvas.nativeCanvas.drawText("深夜 (0-6): $nightPct%", 325.dp.toPx(), 25.dp.toPx(), paint)
+                            drawContext.canvas.nativeCanvas.drawText("深夜 (0-6): $nightPct%", 298.dp.toPx(), 25.dp.toPx(), paint)
                             
                             paint.color = Color(0xFFF59E0B).toArgb()
                             paint.textAlign = android.graphics.Paint.Align.RIGHT
-                            drawContext.canvas.nativeCanvas.drawText("上午 (6-12): $morningPct%", 325.dp.toPx(), 245.dp.toPx(), paint)
+                            drawContext.canvas.nativeCanvas.drawText("上午 (6-12): $morningPct%", 298.dp.toPx(), 245.dp.toPx(), paint)
                             
-                            paint.color = Color(0xFF7B61FF).toArgb()
+                            paint.color = Color(0xFF10B981).toArgb()
                             paint.textAlign = android.graphics.Paint.Align.LEFT
-                            drawContext.canvas.nativeCanvas.drawText("下午 (12-18): $afternoonPct%", 15.dp.toPx(), 245.dp.toPx(), paint)
+                            drawContext.canvas.nativeCanvas.drawText("下午 (12-18): $afternoonPct%", 12.dp.toPx(), 245.dp.toPx(), paint)
                             
                             paint.color = Color(0xFF6366F1).toArgb()
                             paint.textAlign = android.graphics.Paint.Align.LEFT
-                            drawContext.canvas.nativeCanvas.drawText("晚上 (18-24): $eveningPct%", 15.dp.toPx(), 25.dp.toPx(), paint)
+                            drawContext.canvas.nativeCanvas.drawText("晚上 (18-24): $eveningPct%", 12.dp.toPx(), 25.dp.toPx(), paint)
 
                             // Draw shapes
                             val dotRadius = when (period) {
@@ -1399,7 +1434,7 @@ private data class PlottedDot(
 
 private fun parseTimeToHourMinute(completedAt: String): Pair<Int, Int>? {
     return try {
-        val odt = OffsetDateTime.parse(completedAt)
+        val odt = OffsetDateTime.parse(completedAt).atZoneSameInstant(ZoneId.systemDefault())
         Pair(odt.hour, odt.minute)
     } catch (e: Exception) {
         try {
@@ -1414,4 +1449,34 @@ private fun parseTimeToHourMinute(completedAt: String): Pair<Int, Int>? {
         }
     }
 }
+
+private val FilterListIcon: ImageVector
+    get() = ImageVector.Builder(
+        name = "Filled.FilterList",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).apply {
+        path(fill = SolidColor(Color(0xFF000000))) {
+            moveTo(10f, 18f)
+            horizontalLineTo(14f)
+            verticalLineTo(16f)
+            horizontalLineTo(10f)
+            verticalLineTo(18f)
+            close()
+            moveTo(3f, 6f)
+            verticalLineTo(8f)
+            horizontalLineTo(21f)
+            verticalLineTo(6f)
+            horizontalLineTo(3f)
+            close()
+            moveTo(6f, 13f)
+            horizontalLineTo(18f)
+            verticalLineTo(11f)
+            horizontalLineTo(6f)
+            verticalLineTo(13f)
+            close()
+        }
+    }.build()
 

@@ -291,6 +291,17 @@
           <div id="edit-checkin-grid" style="margin-top: 4px;"></div>
         </div>
 
+        <!-- 完成时间 (已完成的任务显示) -->
+        <div class="date-time-row" id="edit-completed-at-row" style="display: none; margin-bottom: 12px;">
+          <div class="input-group" style="flex: 1;">
+            <label>完成时间</label>
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
+              <input type="date" id="edit-completed-date" style="flex: 1;" />
+              <input type="time" id="edit-completed-time" style="flex: 1;" />
+            </div>
+          </div>
+        </div>
+
         <!-- 子任务区域 -->
         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; margin-bottom: 4px;">
           <label style="margin: 0; font-weight: 600;">子步骤/备注</label>

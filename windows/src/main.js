@@ -290,11 +290,21 @@ function mergeTodoData(localData, cloudData) {
             } else {
                 merged = deepClone(lTodo);
             }
-            // completed_dates 合并取并集去重
-            const mergedDates = [...new Set([
-                ...(lTodo.completed_dates || []),
-                ...(cTodo.completed_dates || [])
-            ])].sort();
+            // completed_dates 合并取并集去重 (同一天如果有不同的时间戳/日期，优先保留带时间戳的或者更晚的那个)
+            const allDates = [...(lTodo.completed_dates || []), ...(cTodo.completed_dates || [])];
+            const dateGroups = {};
+            allDates.forEach(dStr => {
+                const datePart = dStr.split('T')[0];
+                if (!dateGroups[datePart]) {
+                    dateGroups[datePart] = [];
+                }
+                dateGroups[datePart].push(dStr);
+            });
+            const mergedDates = Object.keys(dateGroups).map(datePart => {
+                const group = dateGroups[datePart];
+                group.sort((a, b) => b.length - a.length || b.localeCompare(a));
+                return group[0];
+            }).sort();
             if (JSON.stringify(merged.completed_dates) !== JSON.stringify(mergedDates)) {
                 merged.completed_dates = mergedDates;
                 merged.updated_at = new Date().toISOString();
@@ -801,6 +811,195 @@ function getMonthlyCompletedCount(todo) {
 }
 
 // ====== Month Calendar Grid Rendering (Week-aligned, with previous/next month tails) ======
+let activeCheckinDropdown = null;
+
+function showCheckinDropdown(cellEl, todo, dateStr) {
+    // 1. Remove existing dropdown
+    if (activeCheckinDropdown) {
+        const isSame = activeCheckinDropdown.dataset.cellId === dateStr;
+        activeCheckinDropdown.remove();
+        activeCheckinDropdown = null;
+        if (isSame) return; // Toggle close behavior
+    }
+
+    const completedDates = todo.completed_dates || [];
+    const matchedDate = completedDates.find(d => d.startsWith(dateStr));
+    const isChecked = !!matchedDate;
+
+    // Create dropdown element
+    const dropdown = document.createElement('div');
+    dropdown.className = 'checkin-dropdown';
+    dropdown.dataset.cellId = dateStr;
+
+    // Prefill date and time
+    let initialDate = dateStr;
+    let initialTime = '';
+    
+    if (isChecked) {
+        if (matchedDate.length > 10) {
+            const d = new Date(matchedDate);
+            if (!isNaN(d.getTime())) {
+                const yyyy = d.getFullYear();
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                initialDate = `${yyyy}-${mm}-${dd}`;
+                const hh = String(d.getHours()).padStart(2, '0');
+                const min = String(d.getMinutes()).padStart(2, '0');
+                initialTime = `${hh}:${min}`;
+            }
+        }
+    } else {
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, '0');
+        const min = String(now.getMinutes()).padStart(2, '0');
+        initialTime = `${hh}:${min}`;
+    }
+
+    if (!initialTime) {
+        initialTime = '12:00';
+    }
+
+    dropdown.innerHTML = `
+        <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 4px; color: var(--accent-color);">
+            ${isChecked ? '修改打卡时间' : '补打卡'}
+        </div>
+        <div>
+            <label>完成日期</label>
+            <input type="date" id="dropdown-date" value="${initialDate}" />
+        </div>
+        <div>
+            <label>完成时间</label>
+            <input type="time" id="dropdown-time" value="${initialTime}" />
+        </div>
+        <div class="checkin-dropdown-buttons">
+            ${isChecked ? `
+                <button type="button" class="checkin-dropdown-btn primary" id="dropdown-save">保存</button>
+                <button type="button" class="checkin-dropdown-btn danger" id="dropdown-cancel-check">销卡</button>
+            ` : `
+                <button type="button" class="checkin-dropdown-btn primary" id="dropdown-save">打卡</button>
+                <button type="button" class="checkin-dropdown-btn secondary" id="dropdown-close">取消</button>
+            `}
+        </div>
+    `;
+
+    document.body.appendChild(dropdown);
+    activeCheckinDropdown = dropdown;
+
+    // Position dropdown relative to cellEl
+    const rect = cellEl.getBoundingClientRect();
+    const dropdownHeight = 190; // approx height
+    const dropdownWidth = 200; // width from css
+    
+    // Default show below
+    let top = rect.bottom + window.scrollY + 6;
+    let left = rect.left + window.scrollX - (dropdownWidth - rect.width) / 2;
+
+    // Boundary check
+    if (top + dropdownHeight > window.innerHeight + window.scrollY) {
+        // Show above instead
+        top = rect.top + window.scrollY - dropdownHeight - 6;
+    }
+    if (left < 10) left = 10;
+    if (left + dropdownWidth > window.innerWidth - 10) {
+        left = window.innerWidth - dropdownWidth - 10;
+    }
+
+    dropdown.style.top = `${top}px`;
+    dropdown.style.left = `${left}px`;
+
+    // Click handlers
+    const saveBtn = dropdown.querySelector('#dropdown-save');
+    const closeBtn = dropdown.querySelector('#dropdown-close');
+    const cancelCheckBtn = dropdown.querySelector('#dropdown-cancel-check');
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            dropdown.remove();
+            activeCheckinDropdown = null;
+        });
+    }
+
+    if (cancelCheckBtn) {
+        cancelCheckBtn.addEventListener('click', async () => {
+            // Delete checkin
+            const idx = todo.completed_dates.findIndex(d => d.startsWith(dateStr));
+            if (idx > -1) {
+                todo.completed_dates.splice(idx, 1);
+            }
+            await onDropdownCheckinUpdate(todo);
+            dropdown.remove();
+            activeCheckinDropdown = null;
+        });
+    }
+
+    saveBtn.addEventListener('click', async () => {
+        const inputDate = dropdown.querySelector('#dropdown-date').value;
+        const inputTime = dropdown.querySelector('#dropdown-time').value;
+        if (!inputDate || !inputTime) return;
+
+        // Combine inputs into ISO timestamp in local time
+        const [yyyy, mm, dd] = inputDate.split('-').map(Number);
+        const [hh, min] = inputTime.split(':').map(Number);
+        const d = new Date(yyyy, mm - 1, dd, hh, min, 0, 0);
+        const newIso = d.toISOString();
+
+        if (isChecked) {
+            // Edit existing checkin: remove old, push new
+            const idx = todo.completed_dates.findIndex(d => d.startsWith(dateStr));
+            if (idx > -1) {
+                todo.completed_dates.splice(idx, 1);
+            }
+            todo.completed_dates.push(newIso);
+        } else {
+            // New checkin
+            todo.completed_dates.push(newIso);
+        }
+        todo.completed_dates.sort();
+
+        await onDropdownCheckinUpdate(todo);
+        dropdown.remove();
+        activeCheckinDropdown = null;
+    });
+
+    // Close on click outside
+    setTimeout(() => {
+        const outsideClickListener = (e) => {
+            if (!dropdown.contains(e.target) && !cellEl.contains(e.target)) {
+                dropdown.remove();
+                activeCheckinDropdown = null;
+                document.removeEventListener('click', outsideClickListener);
+            }
+        };
+        document.addEventListener('click', outsideClickListener);
+    }, 50);
+}
+
+async function onDropdownCheckinUpdate(todo) {
+    // Recompute completed status if target_count is set
+    if (todo.target_count) {
+        const currentPeriodCount = todo.task_type === 'weekly_checkin' 
+            ? getWeeklyCompletedCount(todo) 
+            : getMonthlyCompletedCount(todo);
+        todo.completed = currentPeriodCount >= todo.target_count;
+        todo.completed_at = todo.completed ? new Date().toISOString() : null;
+    } else {
+        todo.completed = false;
+        todo.completed_at = null;
+    }
+    
+    todo.updated_at = new Date().toISOString();
+    
+    // Save to global state and trigger sync
+    const index = appState.todoData.todos.findIndex(t => t.id === todo.id);
+    if (index > -1) {
+        appState.todoData.todos[index] = todo;
+    }
+    
+    render();
+    renderEditCheckinGrid(todo);
+    await saveData();
+}
+
 function renderMonthCalendar(container, todo, isInteractive, todayStr) {
     container.innerHTML = '';
     
@@ -846,19 +1045,39 @@ function renderMonthCalendar(container, todo, isInteractive, todayStr) {
     for (let d = 1; d <= daysInMonth; d++) {
         const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const cell = document.createElement('div');
-        const isChecked = completedDates.some(d => d.startsWith(dateStr));
+        const matchedDate = completedDates.find(dt => dt.startsWith(dateStr));
+        const isChecked = !!matchedDate;
         const isToday = dateStr === todayStr;
         
         if (isInteractive) {
             cell.className = `checkin-grid-cell${isChecked ? ' checked' : ''}${isToday ? ' today-cell' : ''}`;
-            cell.addEventListener('click', () => {
-                toggleCheckinDate(todo, dateStr);
+            cell.addEventListener('click', (e) => {
+                showCheckinDropdown(cell, todo, dateStr);
             });
         } else {
             cell.className = `checkin-grid-cell compact-cell${isChecked ? ' checked' : ''}${isToday ? ' today-cell' : ''}`;
         }
         cell.textContent = d;
-        cell.title = dateStr;
+        
+        if (isChecked) {
+            if (matchedDate.length > 10) {
+                const dateObj = new Date(matchedDate);
+                if (!isNaN(dateObj.getTime())) {
+                    const yyyy = dateObj.getFullYear();
+                    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                    const dd = String(dateObj.getDate()).padStart(2, '0');
+                    const hh = String(dateObj.getHours()).padStart(2, '0');
+                    const min = String(dateObj.getMinutes()).padStart(2, '0');
+                    cell.title = `日期: ${yyyy}-${mm}-${dd}\n时间: ${hh}:${min}`;
+                } else {
+                    cell.title = `日期: ${dateStr}\n时间: --:--`;
+                }
+            } else {
+                cell.title = `日期: ${dateStr}\n时间: --:--`;
+            }
+        } else {
+            cell.title = dateStr;
+        }
         container.appendChild(cell);
     }
 
@@ -873,42 +1092,6 @@ function renderMonthCalendar(container, todo, isInteractive, todayStr) {
         cell.textContent = d;
         container.appendChild(cell);
     }
-}
-
-// ====== Edit Checkin Grid ======
-function toggleCheckinDate(todo, dateStr) {
-    const index = todo.completed_dates.findIndex(d => d.startsWith(dateStr));
-    if (index > -1) {
-        // 消卡
-        todo.completed_dates.splice(index, 1);
-    } else {
-        // 补卡 / 打卡
-        const todayStr = getTodayString();
-        if (dateStr === todayStr) {
-            todo.completed_dates.push(new Date().toISOString());
-        } else {
-            todo.completed_dates.push(dateStr);
-        }
-    }
-    todo.completed_dates.sort();
-
-    // 根据目标次数重新判定是否完成
-    if (todo.target_count) {
-        const currentPeriodCount = todo.task_type === 'weekly_checkin' 
-            ? getWeeklyCompletedCount(todo) 
-            : getMonthlyCompletedCount(todo);
-        todo.completed = currentPeriodCount >= todo.target_count;
-        todo.completed_at = todo.completed ? new Date().toISOString() : null;
-    } else {
-        todo.completed = false;
-        todo.completed_at = null;
-    }
-    
-    todo.updated_at = new Date().toISOString();
-    
-    renderEditCheckinGrid(todo);
-    render();
-    saveData();
 }
 
 function renderEditCheckinGrid(todo) {
@@ -946,13 +1129,34 @@ function renderEditCheckinGrid(todo) {
             current.setDate(monday.getDate() + i);
             const dateStr = formatDate(current);
 
-            const isChecked = completedDates.some(d => d.startsWith(dateStr));
+            const matchedDate = completedDates.find(d => d.startsWith(dateStr));
+            const isChecked = !!matchedDate;
             const cell = document.createElement('div');
             cell.className = `checkin-grid-cell${isChecked ? ' checked' : ''}${dateStr === todayStr ? ' today-cell' : ''}`;
             cell.textContent = labels[i];
-            cell.title = dateStr;
-            cell.addEventListener('click', () => {
-                toggleCheckinDate(todo, dateStr);
+            
+            if (isChecked) {
+                if (matchedDate.length > 10) {
+                    const dateObj = new Date(matchedDate);
+                    if (!isNaN(dateObj.getTime())) {
+                        const yyyy = dateObj.getFullYear();
+                        const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                        const dd = String(dateObj.getDate()).padStart(2, '0');
+                        const hh = String(dateObj.getHours()).padStart(2, '0');
+                        const min = String(dateObj.getMinutes()).padStart(2, '0');
+                        cell.title = `日期: ${yyyy}-${mm}-${dd}\n时间: ${hh}:${min}`;
+                    } else {
+                        cell.title = `日期: ${dateStr}\n时间: --:--`;
+                    }
+                } else {
+                    cell.title = `日期: ${dateStr}\n时间: --:--`;
+                }
+            } else {
+                cell.title = dateStr;
+            }
+
+            cell.addEventListener('click', (e) => {
+                showCheckinDropdown(cell, todo, dateStr);
             });
             gridEl.appendChild(cell);
         }
@@ -1185,6 +1389,24 @@ async function _doAutoSave() {
             const val = parseInt(targetCountInput.value, 10);
             appState.todoData.todos[index].target_count = (isNaN(val) || val <= 0) ? null : val;
         }
+
+        // 保存完成日期和时间 (仅针对普通/每天重复任务且已完成的情况)
+        const completedAtRow = document.getElementById('edit-completed-at-row');
+        if (completedAtRow && completedAtRow.style.display !== 'none' && appState.todoData.todos[index].completed) {
+            const compDateVal = document.getElementById('edit-completed-date').value;
+            const compTimeVal = document.getElementById('edit-completed-time').value;
+            if (compDateVal && compTimeVal) {
+                const [yyyy, mm, dd] = compDateVal.split('-').map(Number);
+                const [hh, min] = compTimeVal.split(':').map(Number);
+                const d = new Date(yyyy, mm - 1, dd, hh, min, 0, 0);
+                appState.todoData.todos[index].completed_at = d.toISOString();
+            } else if (compDateVal) {
+                const [yyyy, mm, dd] = compDateVal.split('-').map(Number);
+                const d = new Date(yyyy, mm - 1, dd, 0, 0, 0, 0);
+                appState.todoData.todos[index].completed_at = d.toISOString();
+            }
+        }
+
         appState.todoData.todos[index].subtasks = deepClone(appState.currentEditingSubtasks);
         appState.todoData.todos[index].updated_at = new Date().toISOString();
 
@@ -1215,6 +1437,7 @@ function updateEditModalFields(taskTypeVal) {
     const dateTimeRow = document.getElementById('edit-date-time-row');
     const targetCountGroup = document.getElementById('target-count-group');
     const checkinGridGroup = document.getElementById('edit-checkin-grid-group');
+    const completedAtRow = document.getElementById('edit-completed-at-row');
     
     if (dateTimeRow) {
         dateTimeRow.style.display = (taskTypeVal === 'normal') ? 'flex' : 'none';
@@ -1226,6 +1449,12 @@ function updateEditModalFields(taskTypeVal) {
     }
     if (checkinGridGroup) {
         checkinGridGroup.style.display = isCheckin ? 'block' : 'none';
+    }
+
+    const isNormalOrDaily = taskTypeVal === 'normal' || taskTypeVal === 'daily_repeat';
+    if (completedAtRow) {
+        const todo = appState.currentEditingTodo;
+        completedAtRow.style.display = (isNormalOrDaily && todo && todo.completed) ? 'flex' : 'none';
     }
 }
 
@@ -1272,6 +1501,37 @@ function openEditModal(todo) {
         targetCountInput.value = todo.target_count || '';
     }
 
+    // 初始化并填充完成日期和时间
+    const completedAtRow = document.getElementById('edit-completed-at-row');
+    if (completedAtRow) {
+        const isNormalOrDaily = taskTypeVal === 'normal' || taskTypeVal === 'daily_repeat';
+        if (todo.completed && isNormalOrDaily) {
+            completedAtRow.style.display = 'flex';
+            const compDateInput = document.getElementById('edit-completed-date');
+            const compTimeInput = document.getElementById('edit-completed-time');
+            if (todo.completed_at) {
+                const d = new Date(todo.completed_at);
+                if (!isNaN(d.getTime())) {
+                    const yyyy = d.getFullYear();
+                    const mm = String(d.getMonth() + 1).padStart(2, '0');
+                    const dd = String(d.getDate()).padStart(2, '0');
+                    compDateInput.value = `${yyyy}-${mm}-${dd}`;
+                    const hh = String(d.getHours()).padStart(2, '0');
+                    const min = String(d.getMinutes()).padStart(2, '0');
+                    compTimeInput.value = `${hh}:${min}`;
+                } else {
+                    compDateInput.value = '';
+                    compTimeInput.value = '';
+                }
+            } else {
+                compDateInput.value = '';
+                compTimeInput.value = '';
+            }
+        } else {
+            completedAtRow.style.display = 'none';
+        }
+    }
+
     appState.currentEditingSubtasks = todo.subtasks ? deepClone(todo.subtasks) : [];
     renderEditSubtasks();
     renderEditCheckinGrid(todo);
@@ -1281,6 +1541,10 @@ function openEditModal(todo) {
 }
 
 function closeEditModal() {
+    if (activeCheckinDropdown) {
+        activeCheckinDropdown.remove();
+        activeCheckinDropdown = null;
+    }
     autoSaveEditImmediate().finally(() => {
         document.getElementById('edit-modal').classList.remove('active');
         appState.currentEditingTodo = null;
@@ -3219,7 +3483,7 @@ window.addEventListener("DOMContentLoaded", () => {
     });
 
     // 绑定编辑模态框自动保存
-    ['edit-content', 'edit-date', 'edit-has-date-switch', 'edit-task-type', 'edit-target-count'].forEach(id => {
+    ['edit-content', 'edit-date', 'edit-has-date-switch', 'edit-task-type', 'edit-target-count', 'edit-completed-date', 'edit-completed-time'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
             el.addEventListener('change', autoSaveEdit);

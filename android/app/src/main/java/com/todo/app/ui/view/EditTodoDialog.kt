@@ -45,6 +45,11 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -219,16 +224,10 @@ fun EditTodoDialog(
         performAutoSave(updated)
     }
 
-    val onToggleCheckinDate = { dateStr: String ->
-        val currentDates = completedDates.toMutableList()
-        if (currentDates.contains(dateStr)) {
-            currentDates.remove(dateStr)
-        } else {
-            currentDates.add(dateStr)
-        }
-        currentDates.sort()
-        completedDates = currentDates
-        val updated = buildUpdatedTodo(todo, content, date, time, selectedTypeUi, targetCount, parentCompleted, parentCompletedAt, currentDates, subtasks)
+    val onUpdateCompletedDates = { newDates: List<String> ->
+        val sorted = newDates.sorted()
+        completedDates = sorted
+        val updated = buildUpdatedTodo(todo, content, date, time, selectedTypeUi, targetCount, parentCompleted, parentCompletedAt, sorted, subtasks)
         performAutoSave(updated)
     }
 
@@ -308,7 +307,7 @@ fun EditTodoDialog(
                         targetCount = targetCount,
                         onTargetCountChange = { targetCount = it; buildAndSave() },
                         completedDates = completedDates,
-                        onToggleCheckinDate = onToggleCheckinDate,
+                        onUpdateCompletedDates = onUpdateCompletedDates,
                         date = date
                     )
                 }
@@ -444,7 +443,7 @@ private fun EditTodoCheckinSection(
     targetCount: Int?,
     onTargetCountChange: (Int?) -> Unit,
     completedDates: List<String>,
-    onToggleCheckinDate: (String) -> Unit,
+    onUpdateCompletedDates: (List<String>) -> Unit,
     date: String
 ) {
     Spacer(Modifier.height(12.dp))
@@ -465,9 +464,9 @@ private fun EditTodoCheckinSection(
     Text("打卡记录 (点击补卡/消卡)", style = MaterialTheme.typography.titleMedium)
     Spacer(Modifier.height(4.dp))
     if (selectedTypeUi == TaskType.WEEKLY_CHECKIN) {
-        EditWeekCheckinGrid(completedDates, onToggleCheckinDate, todo.date)
+        EditWeekCheckinGrid(completedDates, onUpdateCompletedDates, todo.date)
     } else {
-        EditMonthCheckinGrid(date, completedDates, onToggleCheckinDate)
+        EditMonthCheckinGrid(date, completedDates, onUpdateCompletedDates)
     }
 }
 
@@ -486,6 +485,72 @@ private fun EditTodoSubtasksSection(
     context: Context
 ) {
     Spacer(Modifier.height(16.dp))
+
+    if (parentCompleted && (todo.taskType == TaskType.NORMAL || todo.recurring == RecurringType.DAILY_REPEAT)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val localDt = remember(parentCompletedAt) {
+                try {
+                    if (parentCompletedAt != null) {
+                        java.time.Instant.parse(parentCompletedAt)
+                            .atZone(java.time.ZoneId.systemDefault())
+                            .toLocalDateTime()
+                    } else {
+                        java.time.LocalDateTime.now()
+                    }
+                } catch (e: Exception) {
+                    java.time.LocalDateTime.now()
+                }
+            }
+
+            var dateText by remember(parentCompletedAt) {
+                val mm = String.format("%02d", localDt.monthValue)
+                val dd = String.format("%02d", localDt.dayOfMonth)
+                mutableStateOf("${localDt.year}-$mm-$dd")
+            }
+
+            var timeText by remember(parentCompletedAt) {
+                val hh = String.format("%02d", localDt.hour)
+                val min = String.format("%02d", localDt.minute)
+                mutableStateOf("$hh:$min")
+            }
+
+            OutlinedTextField(
+                value = dateText,
+                onValueChange = {
+                    dateText = it
+                    try {
+                        val ldt = java.time.LocalDateTime.parse("${it}T${timeText}:00")
+                        val instantStr = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
+                        onParentCompletedAtChange(instantStr)
+                        performAutoSave()
+                    } catch (_: Exception) {}
+                },
+                label = { Text("完成日期") },
+                modifier = Modifier.weight(1f),
+                singleLine = true
+            )
+
+            OutlinedTextField(
+                value = timeText,
+                onValueChange = {
+                    timeText = it
+                    try {
+                        val ldt = java.time.LocalDateTime.parse("${dateText}T${it}:00")
+                        val instantStr = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
+                        onParentCompletedAtChange(instantStr)
+                        performAutoSave()
+                    } catch (_: Exception) {}
+                },
+                label = { Text("完成时间") },
+                modifier = Modifier.weight(1f),
+                singleLine = true
+            )
+        }
+    }
+
     var showCopyDialog by remember { mutableStateOf(false) }
     var copyOnlyUncompleted by remember { mutableStateOf(true) }
 
@@ -719,7 +784,7 @@ fun BasicTextFieldWithHint(
 @Composable
 fun EditWeekCheckinGrid(
     completedDates: List<String>,
-    onToggleDate: (String) -> Unit,
+    onUpdateCompletedDates: (List<String>) -> Unit,
     todoDate: String? = null
 ) {
     val dates = remember(todoDate) {
@@ -745,8 +810,10 @@ fun EditWeekCheckinGrid(
     ) {
         dates.forEachIndexed { idx, date ->
             val dateStr = date.toString()
-            val isChecked = completedDates.contains(dateStr)
+            val matchedDate = completedDates.find { it.startsWith(dateStr) }
+            val isChecked = matchedDate != null
             val isToday = dateStr == todayStr
+            var showPopup by remember { mutableStateOf(false) }
 
             Box(
                 modifier = Modifier
@@ -762,7 +829,7 @@ fun EditWeekCheckinGrid(
                         color = if (isToday) MaterialTheme.colorScheme.primary else if (isChecked) Color.Transparent else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
                         shape = RoundedCornerShape(6.dp)
                     )
-                    .clickable { onToggleDate(dateStr) },
+                    .clickable { showPopup = true },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -770,6 +837,135 @@ fun EditWeekCheckinGrid(
                     color = if (isChecked) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium
                 )
+
+                if (showPopup) {
+                    Popup(
+                        onDismissRequest = { showPopup = false },
+                        properties = PopupProperties(focusable = true)
+                    ) {
+                        Card(
+                            modifier = Modifier
+                                .width(220.dp)
+                                .padding(8.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = if (isChecked) "修改打卡时间" else "补打卡",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                
+                                val localDt = remember(matchedDate) {
+                                    try {
+                                        if (isChecked && matchedDate != null) {
+                                            if (matchedDate.contains('T')) {
+                                                java.time.Instant.parse(matchedDate)
+                                                    .atZone(java.time.ZoneId.systemDefault())
+                                                    .toLocalDateTime()
+                                            } else {
+                                                LocalDate.parse(matchedDate).atStartOfDay()
+                                            }
+                                        } else {
+                                            java.time.LocalDateTime.now()
+                                        }
+                                    } catch (e: Exception) {
+                                        java.time.LocalDateTime.now()
+                                    }
+                                }
+
+                                var inputDate by remember(matchedDate) {
+                                    val mm = String.format("%02d", localDt.monthValue)
+                                    val dd = String.format("%02d", localDt.dayOfMonth)
+                                    mutableStateOf("${localDt.year}-$mm-$dd")
+                                }
+
+                                var inputTime by remember(matchedDate) {
+                                    val hh = String.format("%02d", localDt.hour)
+                                    val min = String.format("%02d", localDt.minute)
+                                    mutableStateOf("$hh:$min")
+                                }
+
+                                OutlinedTextField(
+                                    value = inputDate,
+                                    onValueChange = { inputDate = it },
+                                    label = { Text("完成日期") },
+                                    singleLine = true
+                                )
+
+                                OutlinedTextField(
+                                    value = inputTime,
+                                    onValueChange = { inputTime = it },
+                                    label = { Text("完成时间") },
+                                    singleLine = true
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    if (isChecked) {
+                                        Button(
+                                            onClick = {
+                                                try {
+                                                    val ldt = java.time.LocalDateTime.parse("${inputDate}T${inputTime}:00")
+                                                    val instantStr = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
+                                                    onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) } + instantStr)
+                                                } catch (_: Exception) {
+                                                    onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) } + "${inputDate}T${inputTime}:00Z")
+                                                }
+                                                showPopup = false
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("保存", fontSize = 11.sp)
+                                        }
+                                        Button(
+                                            onClick = {
+                                                onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) })
+                                                showPopup = false
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                            modifier = Modifier.weight(1f),
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("销卡", fontSize = 11.sp)
+                                        }
+                                    } else {
+                                        Button(
+                                            onClick = {
+                                                try {
+                                                    val ldt = java.time.LocalDateTime.parse("${inputDate}T${inputTime}:00")
+                                                    val instantStr = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
+                                                    onUpdateCompletedDates(completedDates + instantStr)
+                                                } catch (_: Exception) {
+                                                    onUpdateCompletedDates(completedDates + "${inputDate}T${inputTime}:00Z")
+                                                }
+                                                showPopup = false
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("打卡", fontSize = 11.sp)
+                                        }
+                                        OutlinedButton(
+                                            onClick = { showPopup = false },
+                                            modifier = Modifier.weight(1f),
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("取消", fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -779,7 +975,7 @@ fun EditWeekCheckinGrid(
 fun EditMonthCheckinGrid(
     todoDate: String?,
     completedDates: List<String>,
-    onToggleDate: (String) -> Unit
+    onUpdateCompletedDates: (List<String>) -> Unit
 ) {
     val dates = remember(todoDate) { getMonthCalendarDates(todoDate) }
     val todayStr = LocalDate.now().toString()
@@ -825,9 +1021,11 @@ fun EditMonthCheckinGrid(
             ) {
                 rowDates.forEach { date ->
                     val dateStr = date.toString()
-                    val isChecked = completedDates.contains(dateStr)
+                    val matchedDate = completedDates.find { it.startsWith(dateStr) }
+                    val isChecked = matchedDate != null
                     val isToday = dateStr == todayStr
                     val isCurrentMonth = date.monthValue == targetMonth
+                    var showPopup by remember { mutableStateOf(false) }
 
                     Box(
                         modifier = Modifier
@@ -855,7 +1053,7 @@ fun EditMonthCheckinGrid(
                             )
                             .then(
                                 if (isCurrentMonth || isChecked) {
-                                    Modifier.clickable { onToggleDate(dateStr) }
+                                    Modifier.clickable { showPopup = true }
                                 } else {
                                     Modifier
                                 }
@@ -871,6 +1069,135 @@ fun EditMonthCheckinGrid(
                             },
                             style = MaterialTheme.typography.bodyMedium
                         )
+
+                        if (showPopup) {
+                            Popup(
+                                onDismissRequest = { showPopup = false },
+                                properties = PopupProperties(focusable = true)
+                            ) {
+                                Card(
+                                    modifier = Modifier
+                                        .width(220.dp)
+                                        .padding(8.dp),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = if (isChecked) "修改打卡时间" else "补打卡",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        
+                                        val localDt = remember(matchedDate) {
+                                            try {
+                                                if (isChecked && matchedDate != null) {
+                                                    if (matchedDate.contains('T')) {
+                                                        java.time.Instant.parse(matchedDate)
+                                                            .atZone(java.time.ZoneId.systemDefault())
+                                                            .toLocalDateTime()
+                                                    } else {
+                                                        LocalDate.parse(matchedDate).atStartOfDay()
+                                                    }
+                                                } else {
+                                                    java.time.LocalDateTime.now()
+                                                }
+                                            } catch (e: Exception) {
+                                                java.time.LocalDateTime.now()
+                                            }
+                                        }
+
+                                        var inputDate by remember(matchedDate) {
+                                            val mm = String.format("%02d", localDt.monthValue)
+                                            val dd = String.format("%02d", localDt.dayOfMonth)
+                                            mutableStateOf("${localDt.year}-$mm-$dd")
+                                        }
+
+                                        var inputTime by remember(matchedDate) {
+                                            val hh = String.format("%02d", localDt.hour)
+                                            val min = String.format("%02d", localDt.minute)
+                                            mutableStateOf("$hh:$min")
+                                        }
+
+                                        OutlinedTextField(
+                                            value = inputDate,
+                                            onValueChange = { inputDate = it },
+                                            label = { Text("完成日期") },
+                                            singleLine = true
+                                        )
+
+                                        OutlinedTextField(
+                                            value = inputTime,
+                                            onValueChange = { inputTime = it },
+                                            label = { Text("完成时间") },
+                                            singleLine = true
+                                        )
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            if (isChecked) {
+                                                Button(
+                                                    onClick = {
+                                                        try {
+                                                            val ldt = java.time.LocalDateTime.parse("${inputDate}T${inputTime}:00")
+                                                            val instantStr = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
+                                                            onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) } + instantStr)
+                                                        } catch (_: Exception) {
+                                                            onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) } + "${inputDate}T${inputTime}:00Z")
+                                                        }
+                                                        showPopup = false
+                                                    },
+                                                    modifier = Modifier.weight(1f),
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("保存", fontSize = 11.sp)
+                                                }
+                                                Button(
+                                                    onClick = {
+                                                        onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) })
+                                                        showPopup = false
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                                    modifier = Modifier.weight(1f),
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("销卡", fontSize = 11.sp)
+                                                }
+                                            } else {
+                                                Button(
+                                                    onClick = {
+                                                        try {
+                                                            val ldt = java.time.LocalDateTime.parse("${inputDate}T${inputTime}:00")
+                                                            val instantStr = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
+                                                            onUpdateCompletedDates(completedDates + instantStr)
+                                                        } catch (_: Exception) {
+                                                            onUpdateCompletedDates(completedDates + "${inputDate}T${inputTime}:00Z")
+                                                        }
+                                                        showPopup = false
+                                                    },
+                                                    modifier = Modifier.weight(1f),
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("打卡", fontSize = 11.sp)
+                                                }
+                                                OutlinedButton(
+                                                    onClick = { showPopup = false },
+                                                    modifier = Modifier.weight(1f),
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("取消", fontSize = 11.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

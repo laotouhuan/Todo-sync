@@ -67,14 +67,24 @@ object MergeUtils {
 
         // 去重复 completedDates
         val deduplicatedTodos = uniqueTodos.map { todo ->
-            if (todo.completedDates.size != todo.completedDates.toSet().size) {
-                todo.copy(completedDates = todo.completedDates.distinct().sorted())
+            val deduped = deduplicateDates(todo.completedDates)
+            if (deduped != todo.completedDates) {
+                todo.copy(completedDates = deduped)
             } else {
                 todo
             }
         }
 
         return data.copy(todos = deduplicatedTodos)
+    }
+
+    private fun deduplicateDates(dates: List<String>): List<String> {
+        return dates.groupBy { it.substringBefore('T') }
+            .map { (_, group) ->
+                group.sortedWith(compareByDescending<String> { it.length }.thenByDescending { it })
+                    .first()
+            }
+            .sorted()
     }
 
     /**
@@ -94,7 +104,7 @@ object MergeUtils {
                 val base = if (cTime.isAfter(lTime)) c else l
 
                 // completedDates 并集去重并排序
-                val mergedDates = (l.completedDates + c.completedDates).distinct().sorted()
+                val mergedDates = deduplicateDates(l.completedDates + c.completedDates)
                 var updatedTodo = base.copy(completedDates = mergedDates)
                 if (mergedDates != base.completedDates) {
                     updatedTodo = updatedTodo.copy(updatedAt = nowIso())

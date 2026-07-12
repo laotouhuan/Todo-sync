@@ -2006,6 +2006,70 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   border-width: 2px;
 }
 
+/* Checkin popup/dropdown dropdown */
+.checkin-dropdown {
+  position: fixed;
+  z-index: 2500;
+  background: var(--modal-bg-solid);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 200px;
+  backdrop-filter: blur(10px);
+}
+.checkin-dropdown label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+  display: block;
+}
+.checkin-dropdown input {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: var(--text-color);
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+.checkin-dropdown-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.checkin-dropdown-btn {
+  flex: 1;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.2s;
+  text-align: center;
+}
+.checkin-dropdown-btn:hover {
+  opacity: 0.9;
+}
+.checkin-dropdown-btn.primary {
+  background: var(--accent-color);
+  color: #fff;
+}
+.checkin-dropdown-btn.secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-color);
+}
+.checkin-dropdown-btn.danger {
+  background: #ff4d4f;
+  color: #fff;
+}
+
+
 /* Compact checkin grid in main list */
 .compact-checkin-grid {
   gap: 4px;

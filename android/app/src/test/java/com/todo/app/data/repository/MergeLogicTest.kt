@@ -85,6 +85,32 @@ class MergeLogicTest {
     }
 
     @Test
+    fun testMerge_CompletedDatesDeduplicationWithTimestamp() {
+        val id = UUID.randomUUID().toString()
+
+        val localTodo = Todo.create("Task").copy(
+            id = id,
+            completedDates = listOf("2026-06-02", "2026-06-03T10:00:00Z"),
+            updatedAt = "2026-06-15T12:00:00Z"
+        )
+
+        val cloudTodo = Todo.create("Task").copy(
+            id = id,
+            completedDates = listOf("2026-06-02T12:00:00Z", "2026-06-03"),
+            updatedAt = "2026-06-15T11:00:00Z"
+        )
+
+        val localData = TodoData(1, "2026-06-15T12:00:00Z", listOf(localTodo))
+        val cloudData = TodoData(1, "2026-06-15T12:00:00Z", listOf(cloudTodo))
+
+        val mergedData = MergeUtils.mergeTodoData(localData, cloudData)
+
+        assertEquals(1, mergedData.todos.size)
+        val mergedTodo = mergedData.todos[0]
+        assertEquals(listOf("2026-06-02T12:00:00Z", "2026-06-03T10:00:00Z"), mergedTodo.completedDates)
+    }
+
+    @Test
     fun testMerge_WeeklyCheckinCompletionRecalculation() {
         val id = UUID.randomUUID().toString()
         val targetDateStr = "2026-W03" // Weekly task

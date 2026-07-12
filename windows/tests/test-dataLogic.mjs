@@ -97,10 +97,20 @@ function mergeTodoData(localData, cloudData) {
             } else {
                 merged = JSON.parse(JSON.stringify(lTodo));
             }
-            const mergedDates = [...new Set([
-                ...(lTodo.completed_dates || []),
-                ...(cTodo.completed_dates || [])
-            ])].sort();
+            const allDates = [...(lTodo.completed_dates || []), ...(cTodo.completed_dates || [])];
+            const dateGroups = {};
+            allDates.forEach(dStr => {
+                const datePart = dStr.split('T')[0];
+                if (!dateGroups[datePart]) {
+                    dateGroups[datePart] = [];
+                }
+                dateGroups[datePart].push(dStr);
+            });
+            const mergedDates = Object.keys(dateGroups).map(datePart => {
+                const group = dateGroups[datePart];
+                group.sort((a, b) => b.length - a.length || b.localeCompare(a));
+                return group[0];
+            }).sort();
             if (JSON.stringify(merged.completed_dates) !== JSON.stringify(mergedDates)) {
                 merged.completed_dates = mergedDates;
                 merged.updated_at = new Date().toISOString();
@@ -279,6 +289,22 @@ describe('mergeTodoData', () => {
         const result = mergeTodoData(local, cloud);
         const merged = result.data.todos[0];
         assert.deepEqual(merged.completed_dates, ['2026-06-01', '2026-06-02', '2026-06-03']);
+    });
+
+    it('completed_dates 合并去重并优先保留时间戳', () => {
+        const id = 'checkin-dedup';
+        const local = makeData([makeTodo({
+            id, completed_dates: ['2026-06-02', '2026-06-03T10:00:00.000Z'],
+            updated_at: '2026-06-28T00:00:00Z'
+        })]);
+        const cloud = makeData([makeTodo({
+            id, completed_dates: ['2026-06-02T12:00:00.000Z', '2026-06-03'],
+            updated_at: '2026-06-28T00:00:00Z'
+        })]);
+
+        const result = mergeTodoData(local, cloud);
+        const merged = result.data.todos[0];
+        assert.deepEqual(merged.completed_dates, ['2026-06-02T12:00:00.000Z', '2026-06-03T10:00:00.000Z']);
     });
 
     it('合并结果按 created_at 降序排列', () => {
