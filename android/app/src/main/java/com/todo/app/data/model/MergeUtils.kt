@@ -103,8 +103,8 @@ object MergeUtils {
                 val cTime = try { OffsetDateTime.parse(c.updatedAt) } catch (_: Exception) { OffsetDateTime.MIN }
                 val base = if (cTime.isAfter(lTime)) c else l
 
-                // completedDates 并集去重并排序
-                val mergedDates = deduplicateDates(l.completedDates + c.completedDates)
+                // completedDates 智能合并：支持销卡（删除打卡）同步与离线补卡合并
+                val mergedDates = mergeCompletedDates(l.completedDates, c.completedDates, lTime, cTime)
                 var updatedTodo = base.copy(completedDates = mergedDates)
                 if (mergedDates != base.completedDates) {
                     updatedTodo = updatedTodo.copy(updatedAt = nowIso())
@@ -136,5 +136,47 @@ object MergeUtils {
             last_updated = nowIso(),
             todos = merged.values.sortedByDescending { it.createdAt }
         )
+    }
+
+    private fun mergeCompletedDates(
+        lDates: List<String>,
+        cDates: List<String>,
+        lTime: OffsetDateTime,
+        cTime: OffsetDateTime
+    ): List<String> {
+        val allDateParts = (lDates.map { it.substringBefore('T') } + cDates.map { it.substringBefore('T') }).distinct()
+        val mergedDates = mutableListOf<String>()
+
+        for (datePart in allDateParts) {
+            val checkinL = lDates.find { it.startsWith(datePart) }
+            val checkinC = cDates.find { it.startsWith(datePart) }
+
+            if (checkinL != null && checkinC != null) {
+                if (checkinL.length >= checkinC.length) {
+                    mergedDates.add(checkinL)
+                } else {
+                    mergedDates.add(checkinC)
+                }
+            } else if (checkinL != null) {
+                if (checkinL.length > 10) {
+                    val tCheck = try { OffsetDateTime.parse(checkinL) } catch (_: Exception) { OffsetDateTime.MIN }
+                    if (tCheck.isAfter(cTime)) {
+                        mergedDates.add(checkinL)
+                    }
+                } else {
+                    mergedDates.add(checkinL)
+                }
+            } else if (checkinC != null) {
+                if (checkinC.length > 10) {
+                    val tCheck = try { OffsetDateTime.parse(checkinC) } catch (_: Exception) { OffsetDateTime.MIN }
+                    if (tCheck.isAfter(lTime)) {
+                        mergedDates.add(checkinC)
+                    }
+                } else {
+                    mergedDates.add(checkinC)
+                }
+            }
+        }
+        return mergedDates.sorted()
     }
 }

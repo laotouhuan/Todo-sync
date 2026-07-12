@@ -97,20 +97,46 @@ function mergeTodoData(localData, cloudData) {
             } else {
                 merged = JSON.parse(JSON.stringify(lTodo));
             }
-            const allDates = [...(lTodo.completed_dates || []), ...(cTodo.completed_dates || [])];
-            const dateGroups = {};
-            allDates.forEach(dStr => {
-                const datePart = dStr.split('T')[0];
-                if (!dateGroups[datePart]) {
-                    dateGroups[datePart] = [];
+            const lDates = lTodo.completed_dates || [];
+            const cDates = cTodo.completed_dates || [];
+            const allDateParts = [...new Set([
+                ...lDates.map(d => d.split('T')[0]),
+                ...cDates.map(d => d.split('T')[0])
+            ])];
+
+            const mergedDates = [];
+            allDateParts.forEach(datePart => {
+                const checkinL = lDates.find(d => d.startsWith(datePart));
+                const checkinC = cDates.find(d => d.startsWith(datePart));
+
+                if (checkinL && checkinC) {
+                    if (checkinL.length >= checkinC.length) {
+                        mergedDates.push(checkinL);
+                    } else {
+                        mergedDates.push(checkinC);
+                    }
+                } else if (checkinL) {
+                    if (checkinL.length > 10) {
+                        const tCheck = new Date(checkinL).getTime();
+                        if (tCheck > cTime) {
+                            mergedDates.push(checkinL);
+                        }
+                    } else {
+                        mergedDates.push(checkinL);
+                    }
+                } else if (checkinC) {
+                    if (checkinC.length > 10) {
+                        const tCheck = new Date(checkinC).getTime();
+                        if (tCheck > lTime) {
+                            mergedDates.push(checkinC);
+                        }
+                    } else {
+                        mergedDates.push(checkinC);
+                    }
                 }
-                dateGroups[datePart].push(dStr);
             });
-            const mergedDates = Object.keys(dateGroups).map(datePart => {
-                const group = dateGroups[datePart];
-                group.sort((a, b) => b.length - a.length || b.localeCompare(a));
-                return group[0];
-            }).sort();
+            mergedDates.sort();
+
             if (JSON.stringify(merged.completed_dates) !== JSON.stringify(mergedDates)) {
                 merged.completed_dates = mergedDates;
                 merged.updated_at = new Date().toISOString();
@@ -273,6 +299,22 @@ describe('mergeTodoData', () => {
         const result = mergeTodoData(local, cloud);
         assert.equal(result.data.todos.length, 2);
         assert.equal(result.changed, true);
+    });
+
+    it('completed_dates 销卡同步 (即一方删除了打卡，且该方 updatedAt 较新时，合并后应删除该打卡)', () => {
+        const id = 'checkin-delete-sync';
+        const local = makeData([makeTodo({
+            id, completed_dates: ['2026-06-02T10:00:00.000Z'],
+            updated_at: '2026-06-02T10:00:00.000Z'
+        })]);
+        const cloud = makeData([makeTodo({
+            id, completed_dates: [],
+            updated_at: '2026-06-02T12:00:00.000Z' // Cloud deleted it later
+        })]);
+
+        const result = mergeTodoData(local, cloud);
+        const merged = result.data.todos[0];
+        assert.deepEqual(merged.completed_dates, []);
     });
 
     it('completed_dates 取并集', () => {

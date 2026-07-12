@@ -491,42 +491,76 @@ private fun EditTodoSubtasksSection(
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            val localDt = remember(parentCompletedAt) {
-                try {
-                    if (parentCompletedAt != null) {
-                        java.time.Instant.parse(parentCompletedAt)
-                            .atZone(java.time.ZoneId.systemDefault())
-                            .toLocalDateTime()
+            var dateText by remember(parentCompletedAt) {
+                if (parentCompletedAt != null) {
+                    if (parentCompletedAt.contains('T')) {
+                        try {
+                            val ldt = java.time.Instant.parse(parentCompletedAt)
+                                .atZone(java.time.ZoneId.systemDefault())
+                                .toLocalDateTime()
+                            val mm = String.format("%02d", ldt.monthValue)
+                            val dd = String.format("%02d", ldt.dayOfMonth)
+                            mutableStateOf("${ldt.year}-$mm-$dd")
+                        } catch (_: Exception) {
+                            mutableStateOf(parentCompletedAt.take(10))
+                        }
                     } else {
-                        java.time.LocalDateTime.now()
+                        mutableStateOf(parentCompletedAt.take(10))
                     }
-                } catch (e: Exception) {
-                    java.time.LocalDateTime.now()
+                } else {
+                    val now = LocalDate.now()
+                    val mm = String.format("%02d", now.monthValue)
+                    val dd = String.format("%02d", now.dayOfMonth)
+                    mutableStateOf("${now.year}-$mm-$dd")
                 }
             }
 
-            var dateText by remember(parentCompletedAt) {
-                val mm = String.format("%02d", localDt.monthValue)
-                val dd = String.format("%02d", localDt.dayOfMonth)
-                mutableStateOf("${localDt.year}-$mm-$dd")
+            var timeText by remember(parentCompletedAt) {
+                if (parentCompletedAt != null && parentCompletedAt.contains('T')) {
+                    try {
+                        val ldt = java.time.Instant.parse(parentCompletedAt)
+                            .atZone(java.time.ZoneId.systemDefault())
+                            .toLocalDateTime()
+                        val hh = String.format("%02d", ldt.hour)
+                        val min = String.format("%02d", ldt.minute)
+                        mutableStateOf("$hh:$min")
+                    } catch (_: Exception) {
+                        mutableStateOf("--:--")
+                    }
+                } else if (parentCompletedAt != null) {
+                    mutableStateOf("--:--")
+                } else {
+                    val now = java.time.LocalDateTime.now()
+                    val hh = String.format("%02d", now.hour)
+                    val min = String.format("%02d", now.minute)
+                    mutableStateOf("$hh:$min")
+                }
             }
 
-            var timeText by remember(parentCompletedAt) {
-                val hh = String.format("%02d", localDt.hour)
-                val min = String.format("%02d", localDt.minute)
-                mutableStateOf("$hh:$min")
+            val updateCompletedAt = { d: String, t: String ->
+                val dateVal = d.trim()
+                val timeVal = t.trim()
+                if (dateVal.isNotEmpty()) {
+                    val checkinStr = if (timeVal.isNotEmpty() && timeVal != "--:--" && timeVal.contains(':')) {
+                        try {
+                            val ldt = java.time.LocalDateTime.parse("${dateVal}T${timeVal}:00")
+                            ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
+                        } catch (_: Exception) {
+                            "${dateVal}T${timeVal}:00Z"
+                        }
+                    } else {
+                        dateVal
+                    }
+                    onParentCompletedAtChange(checkinStr)
+                    performAutoSave()
+                }
             }
 
             OutlinedTextField(
                 value = dateText,
                 onValueChange = {
                     dateText = it
-                    try {
-                        val ldt = java.time.LocalDateTime.parse("${it}T${timeText}:00")
-                        val instantStr = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
-                        onParentCompletedAtChange(instantStr)
-                        performAutoSave()
-                    } catch (_: Exception) {}
+                    updateCompletedAt(it, timeText)
                 },
                 label = { Text("完成日期") },
                 modifier = Modifier.weight(1f),
@@ -537,12 +571,7 @@ private fun EditTodoSubtasksSection(
                 value = timeText,
                 onValueChange = {
                     timeText = it
-                    try {
-                        val ldt = java.time.LocalDateTime.parse("${dateText}T${it}:00")
-                        val instantStr = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
-                        onParentCompletedAtChange(instantStr)
-                        performAutoSave()
-                    } catch (_: Exception) {}
+                    updateCompletedAt(dateText, it)
                 },
                 label = { Text("完成时间") },
                 modifier = Modifier.weight(1f),
@@ -860,34 +889,41 @@ fun EditWeekCheckinGrid(
                                     color = MaterialTheme.colorScheme.primary
                                 )
                                 
-                                val localDt = remember(matchedDate) {
-                                    try {
-                                        if (isChecked && matchedDate != null) {
-                                            if (matchedDate.contains('T')) {
-                                                java.time.Instant.parse(matchedDate)
-                                                    .atZone(java.time.ZoneId.systemDefault())
-                                                    .toLocalDateTime()
-                                            } else {
-                                                LocalDate.parse(matchedDate).atStartOfDay()
-                                            }
-                                        } else {
-                                            java.time.LocalDateTime.now()
+                                val initialTime = remember(matchedDate) {
+                                    if (isChecked && matchedDate != null && matchedDate.contains('T')) {
+                                        try {
+                                            val ldt = java.time.Instant.parse(matchedDate)
+                                                .atZone(java.time.ZoneId.systemDefault())
+                                                .toLocalDateTime()
+                                            val hh = String.format("%02d", ldt.hour)
+                                            val min = String.format("%02d", ldt.minute)
+                                            "$hh:$min"
+                                        } catch (_: Exception) {
+                                            ""
                                         }
-                                    } catch (e: Exception) {
-                                        java.time.LocalDateTime.now()
+                                    } else if (!isChecked) {
+                                        val now = java.time.LocalDateTime.now()
+                                        val hh = String.format("%02d", now.hour)
+                                        val min = String.format("%02d", now.minute)
+                                        "$hh:$min"
+                                    } else {
+                                        ""
                                     }
                                 }
 
                                 var inputDate by remember(matchedDate) {
-                                    val mm = String.format("%02d", localDt.monthValue)
-                                    val dd = String.format("%02d", localDt.dayOfMonth)
-                                    mutableStateOf("${localDt.year}-$mm-$dd")
+                                    if (isChecked && matchedDate != null) {
+                                        mutableStateOf(matchedDate.take(10))
+                                    } else {
+                                        val now = LocalDate.now()
+                                        val mm = String.format("%02d", now.monthValue)
+                                        val dd = String.format("%02d", now.dayOfMonth)
+                                        mutableStateOf("${now.year}-$mm-$dd")
+                                    }
                                 }
 
                                 var inputTime by remember(matchedDate) {
-                                    val hh = String.format("%02d", localDt.hour)
-                                    val min = String.format("%02d", localDt.minute)
-                                    mutableStateOf("$hh:$min")
+                                    mutableStateOf(if (initialTime.isEmpty()) "--:--" else initialTime)
                                 }
 
                                 OutlinedTextField(
@@ -911,13 +947,19 @@ fun EditWeekCheckinGrid(
                                     if (isChecked) {
                                         Button(
                                             onClick = {
-                                                try {
-                                                    val ldt = java.time.LocalDateTime.parse("${inputDate}T${inputTime}:00")
-                                                    val instantStr = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
-                                                    onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) } + instantStr)
-                                                } catch (_: Exception) {
-                                                    onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) } + "${inputDate}T${inputTime}:00Z")
+                                                val dateVal = inputDate.trim()
+                                                val timeVal = inputTime.trim()
+                                                val checkinStr = if (timeVal.isNotEmpty() && timeVal != "--:--" && timeVal.contains(':')) {
+                                                    try {
+                                                        val ldt = java.time.LocalDateTime.parse("${dateVal}T${timeVal}:00")
+                                                        ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
+                                                    } catch (_: Exception) {
+                                                        "${dateVal}T${timeVal}:00Z"
+                                                    }
+                                                } else {
+                                                    dateVal
                                                 }
+                                                onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) } + checkinStr)
                                                 showPopup = false
                                             },
                                             modifier = Modifier.weight(1f),
@@ -939,13 +981,19 @@ fun EditWeekCheckinGrid(
                                     } else {
                                         Button(
                                             onClick = {
-                                                try {
-                                                    val ldt = java.time.LocalDateTime.parse("${inputDate}T${inputTime}:00")
-                                                    val instantStr = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
-                                                    onUpdateCompletedDates(completedDates + instantStr)
-                                                } catch (_: Exception) {
-                                                    onUpdateCompletedDates(completedDates + "${inputDate}T${inputTime}:00Z")
+                                                val dateVal = inputDate.trim()
+                                                val timeVal = inputTime.trim()
+                                                val checkinStr = if (timeVal.isNotEmpty() && timeVal != "--:--" && timeVal.contains(':')) {
+                                                    try {
+                                                        val ldt = java.time.LocalDateTime.parse("${dateVal}T${timeVal}:00")
+                                                        ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
+                                                    } catch (_: Exception) {
+                                                        "${dateVal}T${timeVal}:00Z"
+                                                    }
+                                                } else {
+                                                    dateVal
                                                 }
+                                                onUpdateCompletedDates(completedDates + checkinStr)
                                                 showPopup = false
                                             },
                                             modifier = Modifier.weight(1f),
@@ -1092,34 +1140,41 @@ fun EditMonthCheckinGrid(
                                             color = MaterialTheme.colorScheme.primary
                                         )
                                         
-                                        val localDt = remember(matchedDate) {
-                                            try {
-                                                if (isChecked && matchedDate != null) {
-                                                    if (matchedDate.contains('T')) {
-                                                        java.time.Instant.parse(matchedDate)
-                                                            .atZone(java.time.ZoneId.systemDefault())
-                                                            .toLocalDateTime()
-                                                    } else {
-                                                        LocalDate.parse(matchedDate).atStartOfDay()
-                                                    }
-                                                } else {
-                                                    java.time.LocalDateTime.now()
+                                        val initialTime = remember(matchedDate) {
+                                            if (isChecked && matchedDate != null && matchedDate.contains('T')) {
+                                                try {
+                                                    val ldt = java.time.Instant.parse(matchedDate)
+                                                        .atZone(java.time.ZoneId.systemDefault())
+                                                        .toLocalDateTime()
+                                                    val hh = String.format("%02d", ldt.hour)
+                                                    val min = String.format("%02d", ldt.minute)
+                                                    "$hh:$min"
+                                                } catch (_: Exception) {
+                                                    ""
                                                 }
-                                            } catch (e: Exception) {
-                                                java.time.LocalDateTime.now()
+                                            } else if (!isChecked) {
+                                                val now = java.time.LocalDateTime.now()
+                                                val hh = String.format("%02d", now.hour)
+                                                val min = String.format("%02d", now.minute)
+                                                "$hh:$min"
+                                            } else {
+                                                ""
                                             }
                                         }
 
                                         var inputDate by remember(matchedDate) {
-                                            val mm = String.format("%02d", localDt.monthValue)
-                                            val dd = String.format("%02d", localDt.dayOfMonth)
-                                            mutableStateOf("${localDt.year}-$mm-$dd")
+                                            if (isChecked && matchedDate != null) {
+                                                mutableStateOf(matchedDate.take(10))
+                                            } else {
+                                                val now = LocalDate.now()
+                                                val mm = String.format("%02d", now.monthValue)
+                                                val dd = String.format("%02d", now.dayOfMonth)
+                                                mutableStateOf("${now.year}-$mm-$dd")
+                                            }
                                         }
 
                                         var inputTime by remember(matchedDate) {
-                                            val hh = String.format("%02d", localDt.hour)
-                                            val min = String.format("%02d", localDt.minute)
-                                            mutableStateOf("$hh:$min")
+                                            mutableStateOf(if (initialTime.isEmpty()) "--:--" else initialTime)
                                         }
 
                                         OutlinedTextField(
@@ -1143,13 +1198,19 @@ fun EditMonthCheckinGrid(
                                             if (isChecked) {
                                                 Button(
                                                     onClick = {
-                                                        try {
-                                                            val ldt = java.time.LocalDateTime.parse("${inputDate}T${inputTime}:00")
-                                                            val instantStr = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
-                                                            onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) } + instantStr)
-                                                        } catch (_: Exception) {
-                                                            onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) } + "${inputDate}T${inputTime}:00Z")
+                                                        val dateVal = inputDate.trim()
+                                                        val timeVal = inputTime.trim()
+                                                        val checkinStr = if (timeVal.isNotEmpty() && timeVal != "--:--" && timeVal.contains(':')) {
+                                                            try {
+                                                                val ldt = java.time.LocalDateTime.parse("${dateVal}T${timeVal}:00")
+                                                                ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
+                                                            } catch (_: Exception) {
+                                                                "${dateVal}T${timeVal}:00Z"
+                                                            }
+                                                        } else {
+                                                            dateVal
                                                         }
+                                                        onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) } + checkinStr)
                                                         showPopup = false
                                                     },
                                                     modifier = Modifier.weight(1f),
@@ -1171,13 +1232,19 @@ fun EditMonthCheckinGrid(
                                             } else {
                                                 Button(
                                                     onClick = {
-                                                        try {
-                                                            val ldt = java.time.LocalDateTime.parse("${inputDate}T${inputTime}:00")
-                                                            val instantStr = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
-                                                            onUpdateCompletedDates(completedDates + instantStr)
-                                                        } catch (_: Exception) {
-                                                            onUpdateCompletedDates(completedDates + "${inputDate}T${inputTime}:00Z")
+                                                        val dateVal = inputDate.trim()
+                                                        val timeVal = inputTime.trim()
+                                                        val checkinStr = if (timeVal.isNotEmpty() && timeVal != "--:--" && timeVal.contains(':')) {
+                                                            try {
+                                                                val ldt = java.time.LocalDateTime.parse("${dateVal}T${timeVal}:00")
+                                                                ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
+                                                            } catch (_: Exception) {
+                                                                "${dateVal}T${timeVal}:00Z"
+                                                            }
+                                                        } else {
+                                                            dateVal
                                                         }
+                                                        onUpdateCompletedDates(completedDates + checkinStr)
                                                         showPopup = false
                                                     },
                                                     modifier = Modifier.weight(1f),
