@@ -146,6 +146,32 @@ class MergeLogicTest {
     }
 
     @Test
+    fun testMerge_CompletedDatesDeletionSync() {
+        val id = UUID.randomUUID().toString()
+
+        val localTodo = Todo.create("Task").copy(
+            id = id,
+            completedDates = listOf("2026-06-02T10:00:00Z"),
+            updatedAt = "2026-06-02T10:00:00Z"
+        )
+
+        val cloudTodo = Todo.create("Task").copy(
+            id = id,
+            completedDates = emptyList(),
+            updatedAt = "2026-06-02T12:00:00Z" // Cloud deleted it later
+        )
+
+        val localData = TodoData(1, "2026-06-15T12:00:00Z", listOf(localTodo))
+        val cloudData = TodoData(1, "2026-06-15T12:00:00Z", listOf(cloudTodo))
+
+        val mergedData = MergeUtils.mergeTodoData(localData, cloudData)
+
+        assertEquals(1, mergedData.todos.size)
+        val mergedTodo = mergedData.todos[0]
+        assertEquals(emptyList<String>(), mergedTodo.completedDates)
+    }
+
+    @Test
     fun testNormalizeData_MigrateOldFormat() {
         val oldWeekly = Todo.create("Old Weekly", date = "2026-01-15").copy(
             recurring = "weekly",

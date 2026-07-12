@@ -290,21 +290,47 @@ function mergeTodoData(localData, cloudData) {
             } else {
                 merged = deepClone(lTodo);
             }
-            // completed_dates 合并取并集去重 (同一天如果有不同的时间戳/日期，优先保留带时间戳的或者更晚的那个)
-            const allDates = [...(lTodo.completed_dates || []), ...(cTodo.completed_dates || [])];
-            const dateGroups = {};
-            allDates.forEach(dStr => {
-                const datePart = dStr.split('T')[0];
-                if (!dateGroups[datePart]) {
-                    dateGroups[datePart] = [];
+            // completed_dates 智能合并：支持销卡（删除打卡）同步与离线补卡合并
+            const lDates = lTodo.completed_dates || [];
+            const cDates = cTodo.completed_dates || [];
+            const allDateParts = [...new Set([
+                ...lDates.map(d => d.split('T')[0]),
+                ...cDates.map(d => d.split('T')[0])
+            ])];
+
+            const mergedDates = [];
+            allDateParts.forEach(datePart => {
+                const checkinL = lDates.find(d => d.startsWith(datePart));
+                const checkinC = cDates.find(d => d.startsWith(datePart));
+
+                if (checkinL && checkinC) {
+                    if (checkinL.length >= checkinC.length) {
+                        mergedDates.push(checkinL);
+                    } else {
+                        mergedDates.push(checkinC);
+                    }
+                } else if (checkinL) {
+                    if (checkinL.length > 10) {
+                        const tCheck = new Date(checkinL).getTime();
+                        if (tCheck > cTime) {
+                            mergedDates.push(checkinL);
+                        }
+                    } else {
+                        mergedDates.push(checkinL);
+                    }
+                } else if (checkinC) {
+                    if (checkinC.length > 10) {
+                        const tCheck = new Date(checkinC).getTime();
+                        if (tCheck > lTime) {
+                            mergedDates.push(checkinC);
+                        }
+                    } else {
+                        mergedDates.push(checkinC);
+                    }
                 }
-                dateGroups[datePart].push(dStr);
             });
-            const mergedDates = Object.keys(dateGroups).map(datePart => {
-                const group = dateGroups[datePart];
-                group.sort((a, b) => b.length - a.length || b.localeCompare(a));
-                return group[0];
-            }).sort();
+            mergedDates.sort();
+
             if (JSON.stringify(merged.completed_dates) !== JSON.stringify(mergedDates)) {
                 merged.completed_dates = mergedDates;
                 merged.updated_at = new Date().toISOString();
@@ -855,9 +881,7 @@ function showCheckinDropdown(cellEl, todo, dateStr) {
         initialTime = `${hh}:${min}`;
     }
 
-    if (!initialTime) {
-        initialTime = '12:00';
-    }
+
 
     dropdown.innerHTML = `
         <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 4px; color: var(--accent-color);">
@@ -935,13 +959,17 @@ function showCheckinDropdown(cellEl, todo, dateStr) {
     saveBtn.addEventListener('click', async () => {
         const inputDate = dropdown.querySelector('#dropdown-date').value;
         const inputTime = dropdown.querySelector('#dropdown-time').value;
-        if (!inputDate || !inputTime) return;
+        if (!inputDate) return;
 
-        // Combine inputs into ISO timestamp in local time
-        const [yyyy, mm, dd] = inputDate.split('-').map(Number);
-        const [hh, min] = inputTime.split(':').map(Number);
-        const d = new Date(yyyy, mm - 1, dd, hh, min, 0, 0);
-        const newIso = d.toISOString();
+        let newIso;
+        if (inputTime) {
+            const [yyyy, mm, dd] = inputDate.split('-').map(Number);
+            const [hh, min] = inputTime.split(':').map(Number);
+            const d = new Date(yyyy, mm - 1, dd, hh, min, 0, 0);
+            newIso = d.toISOString();
+        } else {
+            newIso = inputDate;
+        }
 
         if (isChecked) {
             // Edit existing checkin: remove old, push new

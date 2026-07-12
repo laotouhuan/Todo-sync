@@ -353,9 +353,9 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
             }
         }
 
-        val cx = with(density) { 155.dp.toPx() }
+        val cx = with(density) { 145.dp.toPx() }
         val cy = with(density) { 130.dp.toPx() }
-        val r = with(density) { 80.dp.toPx() }
+        val r = with(density) { 75.dp.toPx() }
         
         completionEvents.forEachIndexed { index, (t, timeStr) ->
             val hm = parseTimeToHourMinute(timeStr)
@@ -667,7 +667,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     ) {
                         Canvas(
                             modifier = Modifier
-                                .size(310.dp, 260.dp)
+                                .size(290.dp, 260.dp)
                                 .pointerInput(plottedDots, period) {
                                     detectTapGestures(
                                         onTap = { offset ->
@@ -712,7 +712,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                         ) {
                             val cx = size.width / 2
                             val cy = size.height / 2
-                            val rPx = 80.dp.toPx()
+                            val rPx = 75.dp.toPx()
                             val strokeWidthPx = 10.dp.toPx()
                             
                             // Background track
@@ -793,19 +793,19 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                             
                             paint.color = Color(0xFF3B82F6).toArgb()
                             paint.textAlign = android.graphics.Paint.Align.RIGHT
-                            drawContext.canvas.nativeCanvas.drawText("深夜 (0-6): $nightPct%", 298.dp.toPx(), 25.dp.toPx(), paint)
+                            drawContext.canvas.nativeCanvas.drawText("深夜 (0-6): $nightPct%", 282.dp.toPx(), 25.dp.toPx(), paint)
                             
                             paint.color = Color(0xFFF59E0B).toArgb()
                             paint.textAlign = android.graphics.Paint.Align.RIGHT
-                            drawContext.canvas.nativeCanvas.drawText("上午 (6-12): $morningPct%", 298.dp.toPx(), 245.dp.toPx(), paint)
+                            drawContext.canvas.nativeCanvas.drawText("上午 (6-12): $morningPct%", 282.dp.toPx(), 245.dp.toPx(), paint)
                             
                             paint.color = Color(0xFF10B981).toArgb()
                             paint.textAlign = android.graphics.Paint.Align.LEFT
-                            drawContext.canvas.nativeCanvas.drawText("下午 (12-18): $afternoonPct%", 12.dp.toPx(), 245.dp.toPx(), paint)
+                            drawContext.canvas.nativeCanvas.drawText("下午 (12-18): $afternoonPct%", 8.dp.toPx(), 245.dp.toPx(), paint)
                             
                             paint.color = Color(0xFF6366F1).toArgb()
                             paint.textAlign = android.graphics.Paint.Align.LEFT
-                            drawContext.canvas.nativeCanvas.drawText("晚上 (18-24): $eveningPct%", 12.dp.toPx(), 25.dp.toPx(), paint)
+                            drawContext.canvas.nativeCanvas.drawText("晚上 (18-24): $eveningPct%", 8.dp.toPx(), 25.dp.toPx(), paint)
 
                             // Draw shapes
                             val dotRadius = when (period) {
