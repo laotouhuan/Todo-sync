@@ -36,6 +36,7 @@ import com.todo.app.data.model.DateStrings
 import com.todo.app.data.model.classifyForTodayFocus
 import com.todo.app.data.model.TodoComparator
 import com.todo.app.data.model.isOverdue
+import com.todo.app.data.model.TaskType
 import java.time.LocalDate
 import java.util.Locale
 
@@ -246,7 +247,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                                     }
                                 }
                                 is WidgetItem.TodoItem -> {
-                                    TodoItemWidget(item.todo, surfaceColor, textColor, textVariantColor, expandedTodos.contains(item.todo.id))
+                                    TodoItemWidget(item.todo, surfaceColor, textColor, textVariantColor, expandedTodos.contains(item.todo.id), todayStr)
                                 }
                             }
                         }
@@ -258,7 +259,12 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
 }
 
 @Composable
-fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProvider, textVariantColor: ColorProvider, isExpanded: Boolean) {
+fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProvider, textVariantColor: ColorProvider, isExpanded: Boolean, todayStr: String) {
+    val isCompletedToShow = todo.completed || (
+        (todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) &&
+        todo.completedDates.any { it.startsWith(todayStr) }
+    )
+
     Column(modifier = GlanceModifier.fillMaxWidth()) {
         Row(
             modifier = GlanceModifier
@@ -277,7 +283,7 @@ fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProv
 
             Image(
                 provider = ImageProvider(
-                    if (todo.completed) android.R.drawable.checkbox_on_background
+                    if (isCompletedToShow) android.R.drawable.checkbox_on_background
                     else android.R.drawable.checkbox_off_background
                 ),
                 contentDescription = "Toggle",
@@ -291,8 +297,8 @@ fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProv
             Text(
                 text = todo.content,
                 style = TextStyle(
-                    color = if (todo.completed) textVariantColor else textColor,
-                    textDecoration = if (todo.completed) androidx.glance.text.TextDecoration.LineThrough else androidx.glance.text.TextDecoration.None,
+                    color = if (isCompletedToShow) textVariantColor else textColor,
+                    textDecoration = if (isCompletedToShow) androidx.glance.text.TextDecoration.LineThrough else androidx.glance.text.TextDecoration.None,
                     fontSize = 15.sp
                 ),
                 maxLines = 1,

@@ -194,16 +194,24 @@
           <div id="throughput-verdict" class="throughput-verdict">清单正在变轻盈 ✨</div>
         </div>
 
-        <!-- 平均寿命 + 沉睡数量 -->
+        <!-- 平均寿命 + 积压时长 + 沉睡数量 -->
         <div class="metrics-row">
           <div class="metric-card">
             <div class="metric-icon">⏱️</div>
             <div class="metric-value" id="metric-avg-age">0.0 天</div>
+            <div class="metric-trend" id="metric-avg-age-trend"></div>
             <div class="metric-label">平均任务寿命</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon">⏳</div>
+            <div class="metric-value" id="metric-backlog-age">0.0 天</div>
+            <div class="metric-trend" id="metric-backlog-age-trend"></div>
+            <div class="metric-label">积压任务时长</div>
           </div>
           <div class="metric-card">
             <div class="metric-icon">💤</div>
             <div class="metric-value" id="metric-sleeping-count">0 项</div>
+            <div class="metric-trend" id="metric-sleeping-count-trend"></div>
             <div class="metric-label">沉睡任务</div>
           </div>
         </div>
