@@ -2259,28 +2259,111 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
 
 function renderHealth(todayStr, tomorrowStr) {
     const activeTodos = appState.todoData.todos.filter(t => !t.deleted && t.task_type !== 'weekly_checkin' && t.task_type !== 'monthly_checkin' && t.recurring !== 'daily_repeat');
-    const incompleteTodos = activeTodos.filter(t => {
-        if (t.completed) return false;
-        return true;
-    });
+    const incompleteTodos = activeTodos.filter(t => !t.completed);
+    const completedTodos = activeTodos.filter(t => t.completed && t.completed_at);
     
-    // 1. 计算未完成任务的平均寿命
     const now = new Date();
-    let totalAgeDays = 0;
-    let incompleteCount = 0;
+    
+    // 1. 计算三个指标的当前值
+    // 1.1 平均任务寿命 (所有任务从设置到完成的平均时间)
+    let totalCompletedAge = 0;
+    completedTodos.forEach(t => {
+        const age = calcTaskAgeDays(t.created_at, new Date(t.completed_at));
+        if (age >= 0) totalCompletedAge += age;
+    });
+    const avgCompletedLife = completedTodos.length === 0 ? 0 : totalCompletedAge / completedTodos.length;
+    
+    // 1.2 积压任务平均时长 (未完成任务从设置到当前的平均存活时间)
+    let totalIncompleteAge = 0;
     incompleteTodos.forEach(t => {
         const age = calcTaskAgeDays(t.created_at, now);
-        if (age >= 0) {
-            totalAgeDays += age;
-            incompleteCount++;
+        if (age >= 0) totalIncompleteAge += age;
+    });
+    const avgBacklogLife = incompleteTodos.length === 0 ? 0 : totalIncompleteAge / incompleteTodos.length;
+    
+    // 1.3 沉睡任务数
+    const sleepingTodosVal = incompleteTodos.filter(t => {
+        const age = calcTaskAgeDays(t.created_at, now);
+        return age >= 7;
+    });
+    const currentSleepingCount = sleepingTodosVal.length;
+    
+    // 2. 计算基准值 (今天凌晨 0 点)
+    const localTodayStart = new Date();
+    localTodayStart.setHours(0, 0, 0, 0);
+    
+    let baselineCompletedSum = 0;
+    let baselineCompletedCount = 0;
+    let baselineIncompleteSum = 0;
+    let baselineIncompleteCount = 0;
+    let baselineSleepingCount = 0;
+    
+    activeTodos.forEach(t => {
+        const createdTime = t.created_at ? new Date(t.created_at) : null;
+        if (!createdTime || isNaN(createdTime.getTime()) || createdTime >= localTodayStart) {
+            return; // 今天创建的任务不参与昨天的基准计算
+        }
+        
+        const completedTime = t.completed_at ? new Date(t.completed_at) : null;
+        const wasCompletedBeforeToday = t.completed && (!completedTime || isNaN(completedTime.getTime()) || completedTime < localTodayStart);
+        
+        if (wasCompletedBeforeToday) {
+            if (completedTime && !isNaN(completedTime.getTime())) {
+                const age = calcTaskAgeDays(t.created_at, completedTime);
+                if (age >= 0) {
+                    baselineCompletedSum += age;
+                    baselineCompletedCount++;
+                }
+            }
+        } else {
+            const age = calcTaskAgeDays(t.created_at, localTodayStart);
+            if (age >= 0) {
+                baselineIncompleteSum += age;
+                baselineIncompleteCount++;
+                if (age >= 7) {
+                    baselineSleepingCount++;
+                }
+            }
         }
     });
     
-    const avgAge = incompleteCount === 0 ? 0 : totalAgeDays / incompleteCount;
-    document.getElementById('metric-avg-age').textContent = `${avgAge.toFixed(1)} 天`;
- 
-    // 2. 健康评级
-    const healthGrade = getHealthGrade(avgAge);
+    const baselineAvgCompletedLife = baselineCompletedCount === 0 ? avgCompletedLife : baselineCompletedSum / baselineCompletedCount;
+    const baselineAvgBacklogLife = baselineIncompleteCount === 0 ? avgBacklogLife : baselineIncompleteSum / baselineIncompleteCount;
+    const baselineSleepingVal = baselineSleepingCount;
+    
+    // 3. 渲染数值到 DOM
+    document.getElementById('metric-avg-age').textContent = `${avgCompletedLife.toFixed(1)} 天`;
+    document.getElementById('metric-backlog-age').textContent = `${avgBacklogLife.toFixed(1)} 天`;
+    document.getElementById('metric-sleeping-count').textContent = `${currentSleepingCount} 项`;
+    
+    // 4. 计算并更新趋势图表
+    function updateMetricTrend(elementId, change, isItemCount = false) {
+        const el = document.getElementById(elementId);
+        if (!el) return;
+        el.className = 'metric-trend';
+        
+        if (change < -0.01) {
+            el.classList.add('good');
+            el.innerHTML = `↓ ${Math.abs(change).toFixed(isItemCount ? 0 : 1)}${isItemCount ? '' : '天'}`;
+        } else if (change > 0.01) {
+            el.classList.add('bad');
+            el.innerHTML = `↑ ${change.toFixed(isItemCount ? 0 : 1)}${isItemCount ? '' : '天'}`;
+        } else {
+            el.classList.add('neutral');
+            el.innerHTML = '—';
+        }
+    }
+    
+    const changeCompleted = avgCompletedLife - baselineAvgCompletedLife;
+    const changeBacklog = avgBacklogLife - baselineAvgBacklogLife;
+    const changeSleeping = currentSleepingCount - baselineSleepingVal;
+    
+    updateMetricTrend('metric-avg-age-trend', changeCompleted, false);
+    updateMetricTrend('metric-backlog-age-trend', changeBacklog, false);
+    updateMetricTrend('metric-sleeping-count-trend', changeSleeping, true);
+    
+    // 5. 健康评级 (以积压任务时长为依据)
+    const healthGrade = getHealthGrade(avgBacklogLife);
     const gradeLetterEl = document.getElementById('health-grade-letter');
     const gradeTextEl = document.getElementById('health-grade-text');
     gradeLetterEl.textContent = healthGrade.grade;

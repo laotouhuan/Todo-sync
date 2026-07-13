@@ -1121,13 +1121,100 @@ fun HealthContent(viewModel: TodoViewModel) {
     }
 
     val nowTime = OffsetDateTime.now()
+    val localTodayStart = LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault()).toOffsetDateTime()
 
-    // 1. Average age
-    val totalAge = incompleteTodos.sumOf { calcTaskAgeDays(it.createdAt, nowTime).toDouble() }
-    val avgAge = if (incompleteTodos.isEmpty()) 0.0 else totalAge / incompleteTodos.size
+    // Helpers to parse dates robustly
+    fun parseOffsetDateTime(dtStr: String?, defaultVal: OffsetDateTime): OffsetDateTime {
+        if (dtStr.isNullOrEmpty()) return defaultVal
+        return try {
+            OffsetDateTime.parse(dtStr)
+        } catch (_: Exception) {
+            try {
+                OffsetDateTime.ofInstant(java.time.Instant.parse(dtStr), java.time.ZoneId.systemDefault())
+            } catch (_: Exception) {
+                try {
+                    LocalDate.parse(dtStr.take(10)).atStartOfDay(java.time.ZoneId.systemDefault()).toOffsetDateTime()
+                } catch (_: Exception) {
+                    defaultVal
+                }
+            }
+        }
+    }
 
-    // 2. Health Grade
-    val healthGrade = getHealthGrade(avgAge)
+    // 1. Calculate current metrics
+    // 1.1 平均任务寿命 (all completed tasks from creation to completion)
+    val completedTodos = remember(activeTodos) {
+        activeTodos.filter { it.completed && !it.completedAt.isNullOrEmpty() }
+    }
+    val currentAvgCompletedLife = remember(completedTodos) {
+        if (completedTodos.isEmpty()) 0.0 else {
+            val total = completedTodos.sumOf { t ->
+                val compTime = parseOffsetDateTime(t.completedAt, nowTime)
+                calcTaskAgeDays(t.createdAt, compTime).toDouble()
+            }
+            total / completedTodos.size
+        }
+    }
+
+    // 1.2 积压任务平均时长 (incomplete tasks from creation to now)
+    val currentAvgBacklogLife = remember(incompleteTodos, nowTime) {
+        if (incompleteTodos.isEmpty()) 0.0 else {
+            val total = incompleteTodos.sumOf { calcTaskAgeDays(it.createdAt, nowTime).toDouble() }
+            total / incompleteTodos.size
+        }
+    }
+
+    // 1.3 沉睡任务已在下面定义为 sleepingTodos.size
+
+    // 2. Calculate baseline values (start of today)
+    val baselineData = remember(activeTodos) {
+        var baselineCompletedSum = 0.0
+        var baselineCompletedCount = 0
+        var baselineIncompleteSum = 0.0
+        var baselineIncompleteCount = 0
+        var baselineSleepingCount = 0
+
+        activeTodos.forEach { t ->
+            val createdTime = parseOffsetDateTime(t.createdAt, nowTime)
+            if (createdTime.isBefore(localTodayStart)) {
+                val completedTime = if (t.completed && !t.completedAt.isNullOrEmpty()) {
+                    parseOffsetDateTime(t.completedAt, nowTime)
+                } else null
+
+                val wasCompletedBeforeToday = t.completed && (completedTime == null || completedTime.isBefore(localTodayStart))
+
+                if (wasCompletedBeforeToday) {
+                    if (completedTime != null) {
+                        val age = calcTaskAgeDays(t.createdAt, completedTime).toDouble()
+                        if (age >= 0) {
+                            baselineCompletedSum += age
+                            baselineCompletedCount++
+                        }
+                    }
+                } else {
+                    val age = calcTaskAgeDays(t.createdAt, localTodayStart).toDouble()
+                    if (age >= 0) {
+                        baselineIncompleteSum += age
+                        baselineIncompleteCount++
+                        if (age >= 7) {
+                            baselineSleepingCount++
+                        }
+                    }
+                }
+            }
+        }
+
+        val baseAvgCompleted = if (baselineCompletedCount == 0) currentAvgCompletedLife else baselineCompletedSum / baselineCompletedCount
+        val baseAvgBacklog = if (baselineIncompleteCount == 0) currentAvgBacklogLife else baselineIncompleteSum / baselineIncompleteCount
+        Triple(baseAvgCompleted, baseAvgBacklog, baselineSleepingCount)
+    }
+
+    val baselineAvgCompletedLife = baselineData.first
+    val baselineAvgBacklogLife = baselineData.second
+    val baselineSleepingCountVal = baselineData.third
+
+    // 3. Health Grade (based on backlog average age)
+    val healthGrade = getHealthGrade(currentAvgBacklogLife)
 
     // 3. Throughput calculation
     val thresholdDate = nowTime.minusDays(throughputDays.toLong())
@@ -1286,37 +1373,77 @@ fun HealthContent(viewModel: TodoViewModel) {
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Card 1: 平均任务寿命
                 ElevatedCard(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp).fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text("⏱️", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(4.dp))
-                        Text(String.format(Locale.US, "%.1f 天", avgAge), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = String.format(Locale.US, "%.1f 天", currentAvgCompletedLife),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold
+                        )
                         Spacer(Modifier.height(2.dp))
-                        Text("平均任务寿命", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val changeCompleted = currentAvgCompletedLife - baselineAvgCompletedLife
+                        TrendIndicator(change = changeCompleted, isItemCount = false)
+                        Spacer(Modifier.height(2.dp))
+                        Text("平均任务寿命", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
+                // Card 2: 积压任务时长
                 ElevatedCard(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("⏳", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = String.format(Locale.US, "%.1f 天", currentAvgBacklogLife),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        val changeBacklog = currentAvgBacklogLife - baselineAvgBacklogLife
+                        TrendIndicator(change = changeBacklog, isItemCount = false)
+                        Spacer(Modifier.height(2.dp))
+                        Text("积压任务时长", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
+                // Card 3: 沉睡任务
+                ElevatedCard(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp).fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text("💤", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(4.dp))
-                        Text("${sleepingTodos.size} 项", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "${sleepingTodos.size} 项",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold
+                        )
                         Spacer(Modifier.height(2.dp))
-                        Text("沉睡任务", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val changeSleeping = (sleepingTodos.size - baselineSleepingCountVal).toDouble()
+                        TrendIndicator(change = changeSleeping, isItemCount = true)
+                        Spacer(Modifier.height(2.dp))
+                        Text("沉睡任务", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -1431,6 +1558,36 @@ private data class PlottedDot(
     val color: Color,
     val shape: String
 )
+
+@Composable
+private fun TrendIndicator(change: Double, isItemCount: Boolean = false) {
+    val isGood = change < -0.01
+    val isBad = change > 0.01
+    val color = when {
+        isGood -> Color(0xFF22C55E)
+        isBad -> Color(0xFFEF4444)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    }
+    val text = when {
+        isGood -> {
+            val formatted = if (isItemCount) String.format(Locale.US, "%.0f", Math.abs(change)) else String.format(Locale.US, "%.1f", Math.abs(change))
+            "↓ $formatted" + (if (isItemCount) "" else "天")
+        }
+        isBad -> {
+            val formatted = if (isItemCount) String.format(Locale.US, "%.0f", change) else String.format(Locale.US, "%.1f", change)
+            "↑ $formatted" + (if (isItemCount) "" else "天")
+        }
+        else -> "—"
+    }
+
+    Text(
+        text = text,
+        color = color,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(top = 1.dp)
+    )
+}
 
 private fun parseTimeToHourMinute(completedAt: String): Pair<Int, Int>? {
     return try {

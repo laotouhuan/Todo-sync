@@ -630,11 +630,23 @@ private fun EditTodoSubtasksSection(
 
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text("子步骤/备注", style = MaterialTheme.typography.titleMedium)
-
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = {
                 if (subtasks.isEmpty()) return@TextButton
-                onSubtasksChange(subtasks.sortedBy { it.completed })
+                onSubtasksChange(
+                    subtasks.sortedWith(
+                        compareBy<Subtask> { it.completed }
+                            .thenComparator { a, b ->
+                                if (a.completed && b.completed) {
+                                    val timeA = a.completedAt ?: ""
+                                    val timeB = b.completedAt ?: ""
+                                    timeB.compareTo(timeA)
+                                } else {
+                                    0
+                                }
+                            }
+                    )
+                )
                 performAutoSave()
             }) { Text("排序") }
 

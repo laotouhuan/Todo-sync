@@ -1708,6 +1708,25 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   font-weight: 500;
 }
 
+.metric-trend {
+  font-size: 0.75rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: -2px;
+  margin-bottom: 2px;
+}
+.metric-trend.good {
+  color: #22c55e;
+}
+.metric-trend.bad {
+  color: #ef4444;
+}
+.metric-trend.neutral {
+  color: var(--text-secondary);
+}
+
 /* Sleeping Tasks Section */
 .sleeping-section {
   display: flex;
