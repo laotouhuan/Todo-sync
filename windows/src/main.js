@@ -3494,16 +3494,23 @@ window.addEventListener("DOMContentLoaded", () => {
                 if (compareVersions(latestVersion, currentVersion) > 0) {
                     let userConfirmed = false;
                     try {
-                        userConfirmed = confirm(`发现新版本 v${latestVersion}！\n\n更新日志：\n${release.body || '无'}\n\n是否立即前往下载页面下载最新安装包？`);
+                        userConfirmed = confirm(`发现新版本 v${latestVersion}！\n\n更新日志：\n${release.body || '无'}\n\n是否立即下载最新安装包？`);
                     } catch (confirmErr) {
                         // 兼容 WebView2 在透明无边框模式下可能导致的 confirm 崩溃
-                        showToast(`发现新版本 v${latestVersion}！即将尝试打开下载页面。`);
+                        showToast(`发现新版本 v${latestVersion}！即将尝试下载安装包。`);
                         userConfirmed = true;
                     }
 
                     if (userConfirmed) {
                         try {
-                            await invoke('plugin:opener|open_url', { url: release.html_url });
+                            let downloadUrl = release.html_url;
+                            if (release.assets && Array.isArray(release.assets)) {
+                                const exeAsset = release.assets.find(a => a.name.endsWith('.exe'));
+                                if (exeAsset && exeAsset.browser_download_url) {
+                                    downloadUrl = exeAsset.browser_download_url;
+                                }
+                            }
+                            await invoke('plugin:opener|open_url', { url: downloadUrl });
                         } catch (openErr) {
                             throw new Error(`系统浏览器拉起失败 (plugin:opener|open_url)。\n原始报错: ${String(openErr)}\n\n请手动访问此链接下载最新版: \n${release.html_url}`);
                         }
