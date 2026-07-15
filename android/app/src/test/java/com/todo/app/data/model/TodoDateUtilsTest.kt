@@ -88,4 +88,17 @@ class TodoDateUtilsTest {
         val monthlyTodo = Todo.create("Test", date = "2026-06")
         assertEquals("月任务", monthlyTodo.getDateLabel("2026-06-15", "2026-06-16"))
     }
+
+    @Test
+    fun testParseIsoToLocalDateTime() {
+        // UTC format
+        val ldt1 = parseIsoToLocalDateTime("2026-06-15T03:00:00Z")
+        val instant1 = ldt1.atZone(java.time.ZoneId.systemDefault()).toInstant()
+        assertEquals(java.time.Instant.parse("2026-06-15T03:00:00Z"), instant1)
+
+        // Offset format (+08:00)
+        val ldt2 = parseIsoToLocalDateTime("2026-06-15T11:00:00+08:00")
+        val instant2 = ldt2.atZone(java.time.ZoneId.systemDefault()).toInstant()
+        assertEquals(java.time.Instant.parse("2026-06-15T03:00:00Z"), instant2)
+    }
 }

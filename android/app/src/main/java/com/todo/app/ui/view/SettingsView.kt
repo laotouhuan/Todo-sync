@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,11 +34,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
 import com.todo.app.ui.viewmodel.TodoViewModel
 import com.todo.app.utils.AppUpdater
 import com.todo.app.utils.UpdateInfo
 import com.todo.app.utils.UpdateResult
 import kotlinx.coroutines.launch
+
+import android.util.Base64
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import com.todo.app.data.model.ShareCodePayload
+import com.todo.app.data.model.CollaborationSource
+import java.util.UUID
 
 @Composable
 fun SettingsView(viewModel: TodoViewModel) {
@@ -45,6 +55,18 @@ fun SettingsView(viewModel: TodoViewModel) {
     var username by remember { mutableStateOf(viewModel.configManager.username) }
     var appPassword by remember { mutableStateOf(viewModel.configManager.appPassword) }
     var filePath by remember { mutableStateOf(viewModel.configManager.filePath) }
+    var nickname by remember { mutableStateOf(viewModel.configManager.nickname) }
+    var collaborations by remember { mutableStateOf(viewModel.configManager.collaborations) }
+
+    var defaultDueDate by remember { mutableStateOf(viewModel.configManager.defaultDueDate) }
+    var defaultInsertion by remember { mutableStateOf(viewModel.configManager.defaultInsertion) }
+
+    var shareCodeOutput by remember { mutableStateOf("") }
+    var shareExpireDays by remember { mutableStateOf(0) } // 0: 永久, 7: 7天, 30: 30天
+
+    var importCodeInput by remember { mutableStateOf("") }
+    var importNameInput by remember { mutableStateOf("") }
+
     var showBackupDialog by remember { mutableStateOf(false) }
     var backupsList by remember { mutableStateOf<List<String>>(emptyList()) }
     var showConfirmForcePull by remember { mutableStateOf(false) }
@@ -87,6 +109,9 @@ fun SettingsView(viewModel: TodoViewModel) {
         }
     }
 
+    var activeTab by remember { mutableStateOf(0) }
+    val tabTitles = listOf("同步", "协作", "偏好", "维护", "关于")
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
@@ -95,86 +120,413 @@ fun SettingsView(viewModel: TodoViewModel) {
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(16.dp)
-                .verticalScroll(rememberScrollState())
         ) {
-            Text("坚果云 WebDAV 设置", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(bottom = 16.dp))
-
-            ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    OutlinedTextField(
-                        value = serverUrl,
-                        onValueChange = { serverUrl = it },
-                        label = { Text("WebDAV 服务器地址") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = { username = it },
-                        label = { Text("坚果云账号 (邮箱)") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = appPassword,
-                        onValueChange = { appPassword = it },
-                        label = { Text("第三方应用密码") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = filePath,
-                        onValueChange = { filePath = it },
-                        label = { Text("云端文件路径") },
-                        modifier = Modifier.fillMaxWidth()
+            TabRow(
+                selectedTabIndex = activeTab,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            ) {
+                tabTitles.forEachIndexed { index, title ->
+                    Tab(
+                        selected = activeTab == index,
+                        onClick = { activeTab = index },
+                        text = { Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
                     )
                 }
-            } // Close ElevatedCard
+            }
 
-            Spacer(modifier = Modifier.height(24.dp))
-            Button(
-                onClick = {
-                    viewModel.saveConfig(serverUrl, username, appPassword, filePath)
-                    coroutineScope.launch {
-                        snackbarHostState.showSnackbar("配置已保存")
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                when (activeTab) {
+                    0 -> {
+                        // 1. 同步配置
+                        Text("坚果云 WebDAV 设置", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
+
+                        ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                OutlinedTextField(
+                                    value = serverUrl,
+                                    onValueChange = { serverUrl = it },
+                                    label = { Text("WebDAV 服务器地址") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = username,
+                                    onValueChange = { username = it },
+                                    label = { Text("坚果云账号 (邮箱)") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = appPassword,
+                                    onValueChange = { appPassword = it },
+                                    label = { Text("第三方应用密码") },
+                                    visualTransformation = PasswordVisualTransformation(),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = filePath,
+                                    onValueChange = { filePath = it },
+                                    label = { Text("云端文件路径") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(
+                            onClick = {
+                                viewModel.saveConfig(serverUrl, username, appPassword, filePath)
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("连接配置已保存")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = buttonShape
+                        ) {
+                            Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("保存连接设置")
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                viewModel.syncWithCloud()
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("同步已触发")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = buttonShape,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                        ) {
+                            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("立即同步 (根据时间戳)")
+                        }
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = buttonShape
-            ) {
-                Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("保存配置")
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = {
-                    viewModel.syncWithCloud()
-                    coroutineScope.launch {
-                        snackbarHostState.showSnackbar("同步已触发")
+                    1 -> {
+                        // 2. 协作共享
+                        Text("协作共享设置", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
+                        ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                // 1. 协作时我的昵称
+                                TextDivider("协作时我的昵称")
+                                OutlinedTextField(
+                                    value = nickname,
+                                    onValueChange = {
+                                        nickname = it
+                                        viewModel.configManager.nickname = it
+                                    },
+                                    label = { Text("输入昵称 (如: 李四)") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                // 2. 已绑定的共享协作清单
+                                if (collaborations.isNotEmpty()) {
+                                    TextDivider("已绑定的共享协作清单")
+                                    Spacer(Modifier.height(4.dp))
+                                    collaborations.forEach { collab ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(collab.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                                                val expireText = if (collab.expireAt != null) {
+                                                    val date = java.time.Instant.ofEpochSecond(collab.expireAt)
+                                                        .atZone(java.time.ZoneId.systemDefault())
+                                                        .toLocalDate()
+                                                    "过期时间: $date"
+                                                } else {
+                                                    "永久有效"
+                                                }
+                                                Text(expireText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    val list = viewModel.configManager.collaborations.toMutableList()
+                                                    list.removeAll { it.id == collab.id }
+                                                    viewModel.configManager.collaborations = list
+                                                    collaborations = list
+                                                    
+                                                    val active = viewModel.activeSource.value
+                                                    if (active is TodoViewModel.ActiveSource.Collaboration && active.collab.id == collab.id) {
+                                                        viewModel.switchToPersonal()
+                                                    }
+                                                    coroutineScope.launch { snackbarHostState.showSnackbar("解绑成功") }
+                                                }
+                                            ) {
+                                                Icon(Icons.Filled.Delete, contentDescription = "解绑", tint = MaterialTheme.colorScheme.error)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 3. 导入他人共享清单并命名
+                                TextDivider("导入他人授权码并命名")
+                                OutlinedTextField(
+                                    value = importCodeInput,
+                                    onValueChange = { importCodeInput = it },
+                                    label = { Text("粘贴授权口令") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = importNameInput,
+                                    onValueChange = { importNameInput = it },
+                                    label = { Text("为协作清单命名") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        val code = importCodeInput.trim()
+                                        val name = importNameInput.trim()
+                                        if (code.isEmpty()) {
+                                            coroutineScope.launch { snackbarHostState.showSnackbar("请输入授权口令") }
+                                            return@Button
+                                        }
+                                        if (name.isEmpty()) {
+                                            coroutineScope.launch { snackbarHostState.showSnackbar("请输入协作清单名字") }
+                                            return@Button
+                                        }
+                                        try {
+                                            val decodedBytes = Base64.decode(code, Base64.DEFAULT)
+                                            val decodedJson = String(decodedBytes, Charsets.UTF_8)
+                                            val payload = Json.decodeFromString<ShareCodePayload>(decodedJson)
+                                            
+                                            val newCollab = CollaborationSource(
+                                                id = UUID.randomUUID().toString(),
+                                                name = name,
+                                                webdavUrl = payload.url,
+                                                webdavUsername = payload.user,
+                                                webdavPassword = payload.pass,
+                                                webdavFilepath = payload.path,
+                                                expireAt = if (payload.exp > 0) payload.exp else null
+                                            )
+                                            val list = viewModel.configManager.collaborations.toMutableList()
+                                            list.add(newCollab)
+                                            viewModel.configManager.collaborations = list
+                                            collaborations = list
+                                            
+                                            importCodeInput = ""
+                                            importNameInput = ""
+                                            coroutineScope.launch { snackbarHostState.showSnackbar("共享清单导入成功") }
+                                        } catch (e: Exception) {
+                                            coroutineScope.launch { snackbarHostState.showSnackbar("口令无效或解析失败: ${e.message}") }
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = buttonShape,
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                                ) {
+                                    Text("导入口令并绑定")
+                                }
+
+                                // 4. 生成我的共享授权口令
+                                TextDivider("生成我的共享授权口令")
+                                Text("允许被授权者将新待办追加到您的列表中，他们对现有待办仅有只读权限。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text("口令有效期：", style = MaterialTheme.typography.bodyMedium)
+                                    val expireLabels = listOf("永久", "7天", "30天")
+                                    val expireValues = listOf(0, 7, 30)
+                                    expireValues.forEachIndexed { idx, days ->
+                                        FilterChip(
+                                            selected = shareExpireDays == days,
+                                            onClick = { shareExpireDays = days },
+                                            label = { Text(expireLabels[idx]) }
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        if (!viewModel.configManager.isConfigured()) {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("请先在同步页配置并保存您的 WebDAV 账号")
+                                            }
+                                            return@Button
+                                        }
+                                        try {
+                                            val expTime = if (shareExpireDays > 0) (System.currentTimeMillis() / 1000) + shareExpireDays * 86400L else 0L
+                                            val payload = ShareCodePayload(
+                                                url = serverUrl,
+                                                user = username,
+                                                pass = appPassword,
+                                                path = filePath,
+                                                exp = expTime
+                                            )
+                                            val payloadJson = Json.encodeToString(payload)
+                                            val code = Base64.encodeToString(payloadJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP or Base64.URL_SAFE)
+                                            shareCodeOutput = code
+                                        } catch (e: Exception) {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("生成口令失败: ${e.message}")
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = buttonShape,
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                ) {
+                                    Text("生成授权口令")
+                                }
+                                
+                                if (shareCodeOutput.isNotEmpty()) {
+                                    Spacer(Modifier.height(8.dp))
+                                    OutlinedTextField(
+                                        value = shareCodeOutput,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { Text("授权口令（长按可全选复制）") },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = buttonShape,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
-            ) {
-                Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("立即同步 (根据时间戳)")
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = {
-                    showConfirmForcePull = true
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = buttonShape,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-            ) {
-                Icon(Icons.Filled.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("强制从云端恢复到手机 (覆盖本地)")
+                    2 -> {
+                        // 3. 偏好习惯
+                        Text("偏好习惯设置", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
+                        ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text("默认截止日期 (新建无 @ 待办时)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val opts = listOf("none" to "无日期", "today" to "今天", "tomorrow" to "明天")
+                                    opts.forEach { (value, label) ->
+                                        FilterChip(
+                                            selected = defaultDueDate == value,
+                                            onClick = { defaultDueDate = value },
+                                            label = { Text(label) }
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                Text("新待办默认插入位置", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val opts = listOf("top" to "最上方", "bottom" to "最下方")
+                                    opts.forEach { (value, label) ->
+                                        FilterChip(
+                                            selected = defaultInsertion == value,
+                                            onClick = { defaultInsertion = value },
+                                            label = { Text(label) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(
+                            onClick = {
+                                viewModel.configManager.defaultDueDate = defaultDueDate
+                                viewModel.configManager.defaultInsertion = defaultInsertion
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("偏好习惯已保存")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = buttonShape
+                        ) {
+                            Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("保存偏好设置")
+                        }
+                    }
+                    3 -> {
+                        // 4. 数据维护
+                        Text("高级与维护", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
+                        ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text("如果因为误操作同步导致数据丢失，可以从本地自动生成的快照中恢复。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.height(16.dp))
+                                Button(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            backupsList = viewModel.listBackups()
+                                            showBackupDialog = true
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = buttonShape,
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                                ) {
+                                    Icon(Icons.Filled.List, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("历史数据恢复")
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = {
+                                showConfirmForcePull = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = buttonShape,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Icon(Icons.Filled.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("强制从云端恢复覆盖本地")
+                        }
+                    }
+                    4 -> {
+                        // 5. 关于与更新
+                        Text("关于与更新", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
+                        ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text("当前版本: v$versionName", style = MaterialTheme.typography.bodyMedium)
+                                Spacer(Modifier.height(16.dp))
+                                var checkingForUpdate by remember { mutableStateOf(false) }
+                                Button(
+                                    onClick = {
+                                        checkingForUpdate = true
+                                        coroutineScope.launch {
+                                            val result = AppUpdater.checkForUpdates(versionName)
+                                            checkingForUpdate = false
+                                            when (result) {
+                                                is UpdateResult.NewVersion -> {
+                                                    updateInfo = result.info
+                                                    showUpdateDialog = true
+                                                }
+                                                is UpdateResult.LatestVersion -> {
+                                                    snackbarHostState.showSnackbar("当前已是最新版本")
+                                                }
+                                                is UpdateResult.Error -> {
+                                                    snackbarHostState.showSnackbar("检测更新失败: ${result.message}")
+                                                }
+                                            }
+                                        }
+                                    },
+                                    enabled = !checkingForUpdate,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = buttonShape
+                                ) {
+                                    Text(if (checkingForUpdate) "正在检查更新..." else "检查更新")
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             if (showConfirmForcePull) {
@@ -198,29 +550,6 @@ fun SettingsView(viewModel: TodoViewModel) {
                         TextButton(onClick = { showConfirmForcePull = false }) { Text("取消") }
                     }
                 )
-            }
-
-            Text("高级与维护", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(bottom = 16.dp))
-            ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("如果因为误操作同步导致数据丢失，可以从本地自动生成的快照中恢复。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(16.dp))
-                    Button(
-                        onClick = {
-                            coroutineScope.launch {
-                                backupsList = viewModel.listBackups()
-                                showBackupDialog = true
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = buttonShape,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-                    ) {
-                        Icon(Icons.Filled.List, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("历史数据恢复")
-                    }
-                }
             }
 
             if (showBackupDialog) {
@@ -256,43 +585,6 @@ fun SettingsView(viewModel: TodoViewModel) {
                         }
                     }
                 )
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text("关于与更新", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(bottom = 16.dp))
-            ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("当前版本: v$versionName", style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.height(16.dp))
-                    var checkingForUpdate by remember { mutableStateOf(false) }
-                    Button(
-                        onClick = {
-                            checkingForUpdate = true
-                            coroutineScope.launch {
-                                val result = AppUpdater.checkForUpdates(versionName)
-                                checkingForUpdate = false
-                                when (result) {
-                                    is UpdateResult.NewVersion -> {
-                                        updateInfo = result.info
-                                        showUpdateDialog = true
-                                    }
-                                    is UpdateResult.LatestVersion -> {
-                                        snackbarHostState.showSnackbar("当前已是最新版本")
-                                    }
-                                    is UpdateResult.Error -> {
-                                        snackbarHostState.showSnackbar("检测更新失败: ${result.message}")
-                                    }
-                                }
-                            }
-                        },
-                        enabled = !checkingForUpdate,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = buttonShape
-                    ) {
-                        Text(if (checkingForUpdate) "正在检查更新..." else "检查更新")
-                    }
-                }
             }
 
             if (showUpdateDialog && updateInfo != null) {
@@ -350,5 +642,25 @@ fun SettingsView(viewModel: TodoViewModel) {
                 )
             }
         }
+    }
+}
+
+@Composable
+fun TextDivider(text: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+        )
     }
 }

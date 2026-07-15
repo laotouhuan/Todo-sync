@@ -2209,3 +2209,383 @@ input:checked + .slider:before {
   font-size: 12px;
 }
 
+/* ====== 协作共享新增样式 ====== */
+.source-selector {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  outline: none;
+  cursor: pointer;
+  max-width: 140px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.source-selector:focus {
+  border-color: var(--accent-color);
+}
+
+.source-selector option {
+  background: var(--modal-bg-solid);
+  color: var(--text-primary);
+}
+
+.collab-banner {
+  background: rgba(123, 97, 255, 0.12);
+  color: #cbbfff;
+  border: 1px solid rgba(123, 97, 255, 0.2);
+  padding: 6px 12px;
+  border-radius: 8px;
+  text-align: center;
+  margin: 6px 10px;
+  font-size: 0.75rem;
+  box-shadow: 0 4px 12px rgba(123, 97, 255, 0.1);
+}
+
+.collab-loading, .collab-error {
+  padding: 48px 24px;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.collab-error {
+  color: var(--urgency-high);
+  background: rgba(255, 77, 79, 0.05);
+  border-radius: 12px;
+  margin: 10px;
+  border: 1px dashed rgba(255, 77, 79, 0.15);
+}
+
+.collab-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  margin-bottom: 4px;
+}
+
+.collab-item .collab-name-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-primary);
+}
+
+.collab-item .collab-expire-time {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.collab-item .collab-delete-btn {
+  background: none;
+  border: none;
+  color: var(--urgency-high);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.collab-item .collab-delete-btn:hover {
+  background: rgba(255, 77, 79, 0.15);
+}
+
+
+
+/* 设置页面 Tabs 重构样式 */
+.settings-tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.settings-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.settings-tab-btn.active {
+  background: rgba(24, 144, 255, 0.15);
+  color: var(--accent-color);
+}
+
+.settings-panel {
+  display: none;
+}
+
+  height: 0;
+}
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.1);
+  transition: .4s;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background-color: var(--text-primary);
+  transition: .4s;
+  border-radius: 50%;
+}
+input:checked + .slider {
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+}
+input:checked + .slider:before {
+  transform: translateX(16px);
+}
+
+.autocomplete-list {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  background: rgba(30, 30, 30, 0.85);
+  backdrop-filter: blur(15px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  list-style: none;
+  padding: 6px 0;
+  margin: 4px 0 0 0;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: var(--z-autocomplete);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+/* 主页面输入框在底部，因此联想弹窗向上弹出；闪电录入在中央，向下弹出 */
+#app-footer .autocomplete-list {
+  bottom: 100%;
+  margin-bottom: 8px;
+}
+.autocomplete-item {
+  padding: 10px 16px;
+  color: var(--text-primary, #fff);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background 0.2s;
+  font-size: 14px;
+}
+.autocomplete-item:hover, .autocomplete-item.active {
+  background: rgba(255, 255, 255, 0.1);
+}
+.autocomplete-item .shortcut-desc {
+  color: var(--text-secondary, #888);
+  font-size: 12px;
+}
+
+/* ====== 协作共享新增样式 ====== */
+.source-selector {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  outline: none;
+  cursor: pointer;
+  max-width: 140px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.source-selector:focus {
+  border-color: var(--accent-color);
+}
+
+.source-selector option {
+  background: var(--modal-bg-solid);
+  color: var(--text-primary);
+}
+
+.collab-banner {
+  background: rgba(123, 97, 255, 0.12);
+  color: #cbbfff;
+  border: 1px solid rgba(123, 97, 255, 0.2);
+  padding: 6px 12px;
+  border-radius: 8px;
+  text-align: center;
+  margin: 6px 10px;
+  font-size: 0.75rem;
+  box-shadow: 0 4px 12px rgba(123, 97, 255, 0.1);
+}
+
+.collab-loading, .collab-error {
+  padding: 48px 24px;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.collab-error {
+  color: var(--urgency-high);
+  background: rgba(255, 77, 79, 0.05);
+  border-radius: 12px;
+  margin: 10px;
+  border: 1px dashed rgba(255, 77, 79, 0.15);
+}
+
+.collab-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  margin-bottom: 4px;
+}
+
+.collab-item .collab-name-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-primary);
+}
+
+.collab-item .collab-expire-time {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.collab-item .collab-delete-btn {
+  background: none;
+  border: none;
+  color: var(--urgency-high);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.collab-item .collab-delete-btn:hover {
+  background: rgba(255, 77, 79, 0.15);
+}
+
+
+
+/* 设置页面 Tabs 重构样式 */
+.settings-tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.settings-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.settings-tab-btn.active {
+  background: rgba(24, 144, 255, 0.15);
+  color: var(--accent-color);
+}
+
+.settings-panel {
+  display: none;
+}
+
+.settings-panel.active {
+  display: block;
+  animation: fadeInTab 0.25s ease-out;
+}
+
+@keyframes fadeInTab {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 图标化数据源切换容器与元素 */
+.select-icon-wrapper {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.select-icon-wrapper:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.select-icon-wrapper select.source-selector-hidden {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.select-icon-wrapper select.source-selector-hidden option {
+  background: var(--modal-bg-solid);
+  color: var(--text-primary);
+}
+
+.divider-with-text {
+  display: flex;
+  align-items: center;
+  margin: 16px 0 10px 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  user-select: none;
+}
+.divider-with-text::after {
+  content: "";
+  flex: 1;
+  margin-left: 8px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}

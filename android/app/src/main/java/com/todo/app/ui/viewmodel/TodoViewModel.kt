@@ -18,7 +18,58 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+import java.util.UUID
+import java.time.LocalDate
+
 class TodoViewModel(private val repository: TodoRepository, val configManager: ConfigManager) : ViewModel() {
+
+    sealed class ActiveSource {
+        object Personal : ActiveSource()
+        data class Collaboration(val collab: com.todo.app.data.model.CollaborationSource) : ActiveSource()
+    }
+
+    private val _activeSource = MutableStateFlow<ActiveSource>(ActiveSource.Personal)
+    val activeSource: StateFlow<ActiveSource> = _activeSource.asStateFlow()
+
+    private val _collabData = MutableStateFlow<List<Todo>?>(null)
+    val collabData: StateFlow<List<Todo>?> = _collabData.asStateFlow()
+
+    private val _collabLoading = MutableStateFlow(false)
+    val collabLoading: StateFlow<Boolean> = _collabLoading.asStateFlow()
+
+    private val _collabError = MutableStateFlow<String?>(null)
+    val collabError: StateFlow<String?> = _collabError.asStateFlow()
+
+    fun switchToPersonal() {
+        _activeSource.value = ActiveSource.Personal
+        _collabData.value = null
+        _collabError.value = null
+    }
+
+    fun switchToCollaboration(collab: com.todo.app.data.model.CollaborationSource) {
+        _activeSource.value = ActiveSource.Collaboration(collab)
+        loadCollabData(collab)
+    }
+
+    fun loadCollabData(collab: com.todo.app.data.model.CollaborationSource) {
+        viewModelScope.launch {
+            _collabLoading.value = true
+            _collabError.value = null
+            val result = repository.readCollaborationTodos(collab)
+            if (result.isSuccess) {
+                _collabData.value = result.getOrNull()?.todos?.filter { !it.deleted }
+            } else {
+                _collabData.value = null
+                val err = result.exceptionOrNull()?.message ?: "未知错误"
+                _collabError.value = if (err == "EXPIRED") {
+                    "授权已过期，请联系对方重新生成授权码"
+                } else {
+                    err
+                }
+            }
+            _collabLoading.value = false
+        }
+    }
 
     private val _todayDate = MutableStateFlow(java.time.LocalDate.now().toString())
     val todayDate: StateFlow<String> = _todayDate.asStateFlow()
@@ -106,22 +157,116 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         if (rawContent.isBlank()) return
 
         val parsed = parseDateSyntax(rawContent)
-
         if (parsed.content.isBlank()) return
+
+        var finalDate: String? = null
+        if (parsed.hasExplicitDateSyntax) {
+            finalDate = parsed.date
+        } else if (parsed.taskType == com.todo.app.data.model.TaskType.NORMAL) {
+            val defaultPref = configManager.defaultDueDate
+            finalDate = when (defaultPref) {
+                "today" -> LocalDate.now().toString()
+                "tomorrow" -> LocalDate.now().plusDays(1).toString()
+                else -> null
+            }
+        } else {
+            finalDate = parsed.date
+        }
+
+        val defaultInsertion = configManager.defaultInsertion
 
         viewModelScope.launch {
             try {
                 val currentList = todos.value
-                val minOrder = currentList.filter { !it.completed }.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()
-                val todo = Todo.create(parsed.content, parsed.date).copy(
+                val activeLocal = currentList.filter { !it.completed }
+                val orderVal = if (defaultInsertion == "bottom") {
+                    (activeLocal.maxOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) + 1.0
+                } else {
+                    (activeLocal.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) - 1.0
+                }
+                
+                val subtaskList = parsed.subtasks.map {
+                    com.todo.app.data.model.Subtask(
+                        id = UUID.randomUUID().toString(),
+                        content = it,
+                        completed = false,
+                        completedAt = null
+                    )
+                }
+
+                val todo = Todo.create(parsed.content, finalDate).copy(
                     taskType = parsed.taskType,
                     targetCount = parsed.targetCount,
                     recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
-                    order = minOrder - 1.0
+                    order = orderVal,
+                    subtasks = subtaskList
                 )
                 repository.addTodo(todo)
             } catch (e: Exception) {
                 _uiEvent.emit("添加失败: ${e.message}")
+            }
+        }
+    }
+
+    fun addCollabTodoSmart(collab: com.todo.app.data.model.CollaborationSource, rawContent: String) {
+        if (rawContent.isBlank()) return
+        val parsed = parseDateSyntax(rawContent)
+        if (parsed.content.isBlank()) return
+
+        val nickname = configManager.nickname.ifBlank { "匿名" }
+        val signedContent = "${parsed.content} (由 [$nickname] 添加)"
+        
+        var finalDate: String? = null
+        if (parsed.hasExplicitDateSyntax) {
+            finalDate = parsed.date
+        } else if (parsed.taskType == com.todo.app.data.model.TaskType.NORMAL) {
+            val defaultPref = configManager.defaultDueDate
+            finalDate = when (defaultPref) {
+                "today" -> LocalDate.now().toString()
+                "tomorrow" -> LocalDate.now().plusDays(1).toString()
+                else -> null
+            }
+        } else {
+            finalDate = parsed.date
+        }
+
+        val defaultInsertion = configManager.defaultInsertion
+
+        viewModelScope.launch {
+            try {
+                val subtaskList = parsed.subtasks.map {
+                    com.todo.app.data.model.Subtask(
+                        id = UUID.randomUUID().toString(),
+                        content = it,
+                        completed = false,
+                        completedAt = null
+                    )
+                }
+                
+                val currentList = _collabData.value ?: emptyList()
+                val activeCollab = currentList.filter { !it.completed }
+                val orderVal = if (defaultInsertion == "bottom") {
+                    (activeCollab.maxOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) + 1.0
+                } else {
+                    (activeCollab.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) - 1.0
+                }
+                
+                val todo = Todo.create(signedContent, finalDate).copy(
+                    taskType = parsed.taskType,
+                    targetCount = parsed.targetCount,
+                    recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
+                    order = orderVal,
+                    subtasks = subtaskList
+                )
+                
+                val res = repository.writeCollaborationTodo(collab, todo)
+                if (res.isSuccess) {
+                    loadCollabData(collab)
+                } else {
+                    _uiEvent.emit("协作写入失败: ${res.exceptionOrNull()?.message}")
+                }
+            } catch (e: Exception) {
+                _uiEvent.emit("协作写入失败: ${e.message}")
             }
         }
     }

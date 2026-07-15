@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
+import kotlinx.serialization.encodeToString
 class ConfigManager(context: Context) {
 
     companion object {
@@ -39,6 +40,32 @@ class ConfigManager(context: Context) {
     var filePath: String
         get() = prefs.getString("file_path", DEFAULT_FILE_PATH) ?: DEFAULT_FILE_PATH
         set(value) = prefs.edit().putString("file_path", value).apply()
+
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+    var nickname: String
+        get() = prefs.getString("nickname", "") ?: ""
+        set(value) = prefs.edit().putString("nickname", value).apply()
+
+    var collaborations: List<com.todo.app.data.model.CollaborationSource>
+        get() {
+            val raw = prefs.getString("collaborations", "[]") ?: "[]"
+            return try {
+                json.decodeFromString<List<com.todo.app.data.model.CollaborationSource>>(raw)
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+        set(value) = prefs.edit().putString("collaborations", json.encodeToString<List<com.todo.app.data.model.CollaborationSource>>(value)).apply()
+
+
+    var defaultDueDate: String
+        get() = prefs.getString("default_due_date", "none") ?: "none"
+        set(value) = prefs.edit().putString("default_due_date", value).apply()
+
+    var defaultInsertion: String
+        get() = prefs.getString("default_insertion", "top") ?: "top"
+        set(value) = prefs.edit().putString("default_insertion", value).apply()
 
     fun isConfigured(): Boolean {
         return username.isNotEmpty() && appPassword.isNotEmpty()

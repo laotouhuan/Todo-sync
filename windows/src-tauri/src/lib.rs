@@ -243,7 +243,12 @@ pub fn run() {
             todo_store::save_app_config,
             todo_store::sync_to_cloud,
             todo_store::fetch_from_cloud,
-            todo_store::get_latest_release
+            todo_store::get_latest_release,
+            todo_store::generate_share_code,
+            todo_store::import_share_code,
+            todo_store::delete_collaboration,
+            todo_store::read_collaboration_todos,
+            todo_store::write_collaboration_todo
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

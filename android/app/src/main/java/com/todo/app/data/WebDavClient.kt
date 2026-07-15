@@ -173,4 +173,32 @@ class WebDavClient(
             throw e  // Let callers decide how to handle network errors
         }
     }
+
+    data class CollabDownloadResult(
+        val content: String,
+        val serverTime: String
+    )
+
+    suspend fun downloadCollaborationFile(filePath: String): CollabDownloadResult = withContext(Dispatchers.IO) {
+        val credential = Credentials.basic(username, appPassword)
+        val url = buildUrl(filePath)
+
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", credential)
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (response.isSuccessful) {
+                val body = response.body?.string() ?: ""
+                val serverTime = response.header("Date") ?: ""
+                return@withContext CollabDownloadResult(body, serverTime)
+            } else if (response.code == 404) {
+                throw Exception("文件不存在 (404)")
+            } else {
+                throw Exception("HTTP ${response.code}: ${response.message}")
+            }
+        }
+    }
 }
