@@ -50,6 +50,19 @@ fun formatIso(instant: Instant): String =
     OffsetDateTime.ofInstant(instant, ZoneId.systemDefault())
         .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
 
+/** Parse an ISO-8601 timestamp (with offset or Z) into local LocalDateTime. */
+fun parseIsoToLocalDateTime(isoStr: String): java.time.LocalDateTime {
+    return try {
+        OffsetDateTime.parse(isoStr)
+            .atZoneSameInstant(ZoneId.systemDefault())
+            .toLocalDateTime()
+    } catch (e: Exception) {
+        val instant = Instant.parse(isoStr)
+        OffsetDateTime.ofInstant(instant, ZoneId.systemDefault())
+            .toLocalDateTime()
+    }
+}
+
 // ====== Sorting ======
 
 /** Standard comparator for Todo lists: incomplete first, then by order, then by createdAt desc. */

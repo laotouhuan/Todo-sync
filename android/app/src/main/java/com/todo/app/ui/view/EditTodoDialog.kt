@@ -60,6 +60,7 @@ import com.todo.app.data.model.Subtask
 import com.todo.app.data.model.Todo
 import com.todo.app.data.model.nowIso
 import com.todo.app.data.model.nowInstant
+import com.todo.app.data.model.parseIsoToLocalDateTime
 import com.todo.app.data.model.getWeeklyCompletedCount
 import com.todo.app.data.model.getMonthlyCompletedCount
 import com.todo.app.data.model.isWeekDate
@@ -495,9 +496,7 @@ private fun EditTodoSubtasksSection(
                 if (parentCompletedAt != null) {
                     if (parentCompletedAt.contains('T')) {
                         try {
-                            val ldt = java.time.Instant.parse(parentCompletedAt)
-                                .atZone(java.time.ZoneId.systemDefault())
-                                .toLocalDateTime()
+                            val ldt = parseIsoToLocalDateTime(parentCompletedAt)
                             val mm = String.format("%02d", ldt.monthValue)
                             val dd = String.format("%02d", ldt.dayOfMonth)
                             mutableStateOf("${ldt.year}-$mm-$dd")
@@ -518,9 +517,7 @@ private fun EditTodoSubtasksSection(
             var timeText by remember(parentCompletedAt) {
                 if (parentCompletedAt != null && parentCompletedAt.contains('T')) {
                     try {
-                        val ldt = java.time.Instant.parse(parentCompletedAt)
-                            .atZone(java.time.ZoneId.systemDefault())
-                            .toLocalDateTime()
+                        val ldt = parseIsoToLocalDateTime(parentCompletedAt)
                         val hh = String.format("%02d", ldt.hour)
                         val min = String.format("%02d", ldt.minute)
                         mutableStateOf("$hh:$min")
@@ -904,9 +901,7 @@ fun EditWeekCheckinGrid(
                                 val initialTime = remember(matchedDate) {
                                     if (isChecked && matchedDate != null && matchedDate.contains('T')) {
                                         try {
-                                            val ldt = java.time.Instant.parse(matchedDate)
-                                                .atZone(java.time.ZoneId.systemDefault())
-                                                .toLocalDateTime()
+                                            val ldt = parseIsoToLocalDateTime(matchedDate)
                                             val hh = String.format("%02d", ldt.hour)
                                             val min = String.format("%02d", ldt.minute)
                                             "$hh:$min"
@@ -1155,9 +1150,7 @@ fun EditMonthCheckinGrid(
                                         val initialTime = remember(matchedDate) {
                                             if (isChecked && matchedDate != null && matchedDate.contains('T')) {
                                                 try {
-                                                    val ldt = java.time.Instant.parse(matchedDate)
-                                                        .atZone(java.time.ZoneId.systemDefault())
-                                                        .toLocalDateTime()
+                                                    val ldt = parseIsoToLocalDateTime(matchedDate)
                                                     val hh = String.format("%02d", ldt.hour)
                                                     val min = String.format("%02d", ldt.minute)
                                                     "$hh:$min"

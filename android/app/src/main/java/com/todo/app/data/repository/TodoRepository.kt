@@ -598,4 +598,86 @@ class TodoRepository(private val context: Context) {
             _uiEvent.send(UiEvent.ShowMessage("任务已存在，无需重复导入"))
         }
     }}
+
+    suspend fun readCollaborationTodos(collab: com.todo.app.data.model.CollaborationSource): Result<TodoData> = withContext(Dispatchers.IO) {
+        try {
+            val client = WebDavClient(collab.webdavUrl, collab.webdavUsername, collab.webdavPassword)
+            val result = client.downloadCollaborationFile(collab.webdavFilepath)
+            
+            if (collab.expireAt != null) {
+                val serverTime = result.serverTime
+                if (serverTime.isNotEmpty()) {
+                    try {
+                        val zdt = java.time.ZonedDateTime.parse(serverTime, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME)
+                        val epochSeconds = zdt.toEpochSecond()
+                        if (epochSeconds > collab.expireAt) {
+                            return@withContext Result.failure(Exception("EXPIRED"))
+                        }
+                    } catch (e: Exception) {
+                        if (e.message == "EXPIRED") return@withContext Result.failure(e)
+                        return@withContext Result.failure(Exception("无法校验网络安全时间，授权已锁定"))
+                    }
+                } else {
+                    return@withContext Result.failure(Exception("无法校验网络安全时间，授权已锁定"))
+                }
+            }
+
+            val data = jsonFormat.decodeFromString<TodoData>(result.content)
+            data.todos.forEach {
+                if (it.recurring == "daily") {
+                    it.recurring = "daily_repeat"
+                } else if (it.recurring == "weekly") {
+                    it.taskType = TaskType.WEEKLY_CHECKIN
+                    it.recurring = "none"
+                } else if (it.recurring == "monthly") {
+                    it.taskType = TaskType.MONTHLY_CHECKIN
+                    it.recurring = "none"
+                }
+            }
+            Result.success(data)
+        } catch (e: Exception) {
+            Log.e(TAG, "readCollaborationTodos failed", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun writeCollaborationTodo(collab: com.todo.app.data.model.CollaborationSource, todo: Todo): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val client = WebDavClient(collab.webdavUrl, collab.webdavUsername, collab.webdavPassword)
+            val result = client.downloadCollaborationFile(collab.webdavFilepath)
+
+            if (collab.expireAt != null) {
+                val serverTime = result.serverTime
+                if (serverTime.isNotEmpty()) {
+                    try {
+                        val zdt = java.time.ZonedDateTime.parse(serverTime, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME)
+                        val epochSeconds = zdt.toEpochSecond()
+                        if (epochSeconds > collab.expireAt) {
+                            return@withContext Result.failure(Exception("EXPIRED"))
+                        }
+                    } catch (e: Exception) {
+                        if (e.message == "EXPIRED") return@withContext Result.failure(e)
+                        return@withContext Result.failure(Exception("无法校验网络安全时间，授权已锁定"))
+                    }
+                } else {
+                    return@withContext Result.failure(Exception("无法校验网络安全时间，授权已锁定"))
+                }
+            }
+
+            val data = jsonFormat.decodeFromString<TodoData>(result.content)
+            val alreadyExists = data.todos.any { it.id == todo.id }
+            val updatedTodos = if (alreadyExists) data.todos else data.todos + todo
+
+            val updated = data.copy(
+                todos = updatedTodos,
+                last_updated = nowIso()
+            )
+            val json = jsonFormat.encodeToString(updated)
+            val ok = client.uploadFile(collab.webdavFilepath, json)
+            if (ok) Result.success(Unit) else Result.failure(Exception("上传失败"))
+        } catch (e: Exception) {
+            Log.e(TAG, "writeCollaborationTodo failed", e)
+            Result.failure(e)
+        }
+    }
 }

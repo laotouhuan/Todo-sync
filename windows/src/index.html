@@ -19,26 +19,34 @@
         <div class="status-indicator" id="sync-status"></div>
       </div>
       <div class="header-right">
-        <button id="search-btn" class="icon-btn" title="搜索待办" aria-label="搜索待办">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
-            <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" fill="currentColor"/>
-          </svg>
-        </button>
+        <!-- 1. 刷新 -->
         <button id="manual-sync-btn" class="icon-btn" title="云同步" aria-label="云同步">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
             <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="currentColor"/>
           </svg>
         </button>
-        <button id="stats-btn" class="icon-btn" title="统计" aria-label="统计">
+        <!-- 2. 切换代办 -->
+        <div class="select-icon-wrapper" title="切换清单">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
-            <path d="M3 3V21H21V19H5V3H3ZM7 17H10V10H7V17ZM12 17H15V6H12V17ZM17 17H20V13H17V17Z" fill="currentColor"/>
+            <path d="M4 14h6v-4H4v4zm0 5h6v-4H4v4zM4 9h6V5H4v4zm8 5h8v-4h-8v4zm0 5h8v-4h-8v4zM12 5v4h8V5h-8z" fill="currentColor"/>
+          </svg>
+          <select id="source-selector" class="source-selector-hidden" title="切换清单">
+            <option value="personal">我的待办</option>
+          </select>
+        </div>
+        <!-- 3. 搜索 -->
+        <button id="search-btn" class="icon-btn" title="搜索待办" aria-label="搜索待办">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
+            <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" fill="currentColor"/>
           </svg>
         </button>
+        <!-- 4. 设置 -->
         <button id="settings-btn" class="icon-btn" title="设置" aria-label="设置">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
             <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22l-1.92 3.32c-.12.21-.07.47.12.61l2.03 1.58c-.05.3-.09.62-.09.94s.04.64.09.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.03-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" fill="currentColor"/>
           </svg>
         </button>
+        <!-- 5. 置顶 -->
         <button id="pin-btn" class="icon-btn" title="固定置顶" aria-label="固定置顶">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
             <path d="M16 12V4H17V2H7V4H8V12L6 14V16H11.2V22H12.8V16H18V14L16 12Z" fill="currentColor"/>
@@ -51,6 +59,7 @@
     <div class="tabs-container" role="tablist" aria-label="视图切换">
       <button class="tab-btn active" id="tab-today" role="tab" aria-selected="true" aria-controls="main-content">今天聚焦</button>
       <button class="tab-btn" id="tab-all" role="tab" aria-selected="false" aria-controls="main-content">全部待办</button>
+      <button class="tab-btn" id="stats-btn" role="tab" aria-selected="false" aria-controls="main-content">效率统计</button>
     </div>
 
     <!-- Search Bar -->
@@ -400,62 +409,140 @@
   
   <!-- Settings Modal -->
   <div id="settings-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
-    <div class="modal-content glass-panel" style="max-width: 450px;">
-      <h3 id="settings-modal-title">设置</h3>
-      <div class="modal-body">
-        <div class="input-group">
-          <label>同步模式</label>
-          <select id="setting-sync-mode" class="custom-select">
-            <option value="local">本地坚果云目录</option>
-            <option value="webdav">坚果云 WebDAV (直连)</option>
-          </select>
+    <div class="modal-content glass-panel settings-large-modal" style="max-width: 580px;">
+      <h3 id="settings-modal-title" style="margin-top: 0; margin-bottom: 15px; user-select: none;">设置</h3>
+      <div class="settings-container" style="display: flex; gap: 20px; min-height: 320px;">
+        <!-- 左侧导航 -->
+        <div class="settings-sidebar" id="settings-tabs-menu" style="display: flex; flex-direction: column; gap: 6px; width: 110px; border-right: 1px solid var(--border-color); padding-right: 12px; user-select: none;">
+          <button class="settings-tab-btn active" data-target="panel-sync">同步连接</button>
+          <button class="settings-tab-btn" data-target="panel-collab">协作共享</button>
+          <button class="settings-tab-btn" data-target="panel-pref">偏好习惯</button>
+          <button class="settings-tab-btn" data-target="panel-maintenance">数据维护</button>
+          <button class="settings-tab-btn" data-target="panel-about">关于软件</button>
         </div>
+        
+        <!-- 右侧内容 -->
+        <div class="settings-body-area" id="settings-tabs-content" style="flex: 1; display: flex; flex-direction: column; overflow-y: auto; max-height: 320px; padding-right: 4px;">
+          <!-- 1. 同步配置 -->
+          <div id="panel-sync" class="settings-panel active">
+            <div class="input-group">
+              <label>同步模式</label>
+              <select id="setting-sync-mode" class="custom-select">
+                <option value="local">本地同步盘目录</option>
+                <option value="webdav">坚果云 WebDAV (直连)</option>
+              </select>
+            </div>
+            <div id="setting-local-group" class="input-group">
+              <label>本地同步目录</label>
+              <div style="display: flex; gap: 8px;">
+                <input type="text" id="setting-sync-path" readonly placeholder="未选择" style="flex: 1;" />
+                <button id="setting-choose-dir-btn" class="modal-btn secondary">选择</button>
+              </div>
+            </div>
+            <div id="setting-webdav-group" style="display: none;">
+              <div class="input-group">
+                <label>WebDAV 服务器地址</label>
+                <input type="text" id="setting-webdav-url" placeholder="https://dav.jianguoyun.com/dav/" />
+              </div>
+              <div class="input-group">
+                <label>坚果云账号 (邮箱)</label>
+                <input type="text" id="setting-webdav-user" placeholder="您的邮箱" />
+              </div>
+              <div class="input-group">
+                <label>应用密码</label>
+                <input type="password" id="setting-webdav-pass" placeholder="坚果云第三方应用密码" />
+              </div>
+              <div class="input-group">
+                <label>云端文件路径</label>
+                <input type="text" id="setting-webdav-filepath" placeholder="我的坚果云/to-do/todo_data.json" />
+              </div>
+            </div>
+          </div>
 
-        <div id="setting-local-group" class="input-group">
-          <label>本地同步目录</label>
-          <div style="display: flex; gap: 8px;">
-            <input type="text" id="setting-sync-path" readonly placeholder="未选择" style="flex: 1;" />
-            <button id="setting-choose-dir-btn" class="modal-btn secondary">选择</button>
-          </div>
-        </div>
+          <!-- 2. 协作共享 -->
+          <div id="panel-collab" class="settings-panel">
+            <!-- 1. 协作时我的昵称 -->
+            <div class="divider-with-text">协作时我的昵称</div>
+            <div class="input-group">
+              <input type="text" id="setting-nickname" placeholder="输入昵称 (如: 李四)" style="width: 100%; box-sizing: border-box;" />
+            </div>
 
-        <div id="setting-webdav-group" style="display: none; border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 10px;">
-          <div class="input-group">
-            <label>WebDAV 服务器地址</label>
-            <input type="text" id="setting-webdav-url" placeholder="https://dav.jianguoyun.com/dav/" />
-          </div>
-          <div class="input-group">
-            <label>坚果云账号</label>
-            <input type="text" id="setting-webdav-user" placeholder="您的邮箱" />
-          </div>
-          <div class="input-group">
-            <label>应用密码</label>
-            <input type="password" id="setting-webdav-pass" placeholder="坚果云第三方应用密码" />
-          </div>
-          <div class="input-group">
-            <label>云端文件路径</label>
-            <input type="text" id="setting-webdav-filepath" placeholder="我的坚果云/to-do/todo_data.json" />
-          </div>
-        </div>
+            <!-- 2. 已绑定的共享协作清单 -->
+            <div class="divider-with-text">已绑定的共享协作清单</div>
+            <div class="input-group">
+              <div id="collab-list" class="collab-list" style="margin-top: 8px; max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
+                <!-- 动态渲染 -->
+              </div>
+            </div>
 
-        <div style="border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 10px;">
-          <label>数据恢复</label>
-          <button type="button" id="backup-btn" class="modal-btn secondary" style="width: 100%; margin-top: 8px;">从历史备份恢复</button>
-        </div>
+            <!-- 3. 导入他人授权码并命名 -->
+            <div class="divider-with-text">导入他人授权码并命名</div>
+            <div class="input-group">
+              <input type="text" id="import-code-input" placeholder="粘贴 tdsync://..." style="width: 100%; box-sizing: border-box; margin-bottom: 8px;" />
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" id="import-name-input" placeholder="设置协作清单名字" style="flex: 1; height: 32px;" />
+                <button id="import-share-btn" class="modal-btn secondary" style="padding: 4px 12px; margin: 0; font-size: 0.8rem; width: auto; height: 32px; line-height: 1;">导入</button>
+              </div>
+            </div>
 
-        <div style="border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 10px; display: flex; flex-direction: column; gap: 4px;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <label style="margin: 0;">软件更新</label>
-            <span id="current-version-text" style="font-size: 0.75rem; color: var(--text-secondary); font-weight: normal;">当前版本: v...</span>
+            <!-- 4. 生成授权码 -->
+            <div class="divider-with-text">生成授权码</div>
+            <div class="input-group">
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <select id="share-expire" class="custom-select" style="flex: 1; padding: 4px 8px; font-size: 0.85rem; height: 32px; background: rgba(255,255,255,0.05); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 6px;">
+                  <option value="7">7 天</option>
+                  <option value="30">30 天</option>
+                  <option value="">永久</option>
+                </select>
+                <button id="generate-share-btn" class="modal-btn secondary" style="padding: 4px 12px; margin: 0; font-size: 0.8rem; width: auto; height: 32px; line-height: 1;">生成</button>
+              </div>
+              <div id="share-code-output" class="share-code-box" style="display: none; word-break: break-all; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; font-size: 11px; margin-top: 6px; user-select: all; text-align: left; max-height: 80px; overflow-y: auto;"></div>
+            </div>
           </div>
-          <button type="button" id="check-update-btn" class="modal-btn secondary" style="width: 100%; margin-top: 4px;">手动检查更新</button>
+
+          <!-- 3. 个性偏好 -->
+          <div id="panel-pref" class="settings-panel">
+            <div class="input-group">
+              <label>默认任务截止日期</label>
+              <select id="setting-default-due-date" class="custom-select">
+                <option value="none">无日期 (需手动 @ 指定)</option>
+                <option value="today">今天 (@today)</option>
+                <option value="tomorrow">明天 (@tomorrow)</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label>新待办插入位置</label>
+              <select id="setting-default-insertion" class="custom-select">
+                <option value="top">列表最上方（置顶优先关注）</option>
+                <option value="bottom">列表最下方（顺序置底）</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- 4. 数据维护 -->
+          <div id="panel-maintenance" class="settings-panel">
+            <div class="input-group">
+              <label>数据恢复</label>
+              <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 8px; line-height: 1.4;">系统会自动保留最近几次写入的数据备份，您可以随时恢复到历史版本。</p>
+              <button type="button" id="backup-btn" class="modal-btn secondary" style="width: 100%;">从历史备份恢复</button>
+            </div>
+          </div>
+
+          <!-- 5. 关于与更新 -->
+          <div id="panel-about" class="settings-panel">
+            <div class="input-group" style="display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label style="margin: 0;">软件信息</label>
+                <span id="current-version-text" style="font-size: 0.75rem; color: var(--text-secondary); font-weight: normal;">当前版本: v...</span>
+              </div>
+              <button type="button" id="check-update-btn" class="modal-btn secondary" style="width: 100%;">手动检查更新</button>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="modal-footer">
-        <div class="footer-right" style="width: 100%; justify-content: flex-end;">
-          <button id="settings-cancel-btn" class="modal-btn secondary">取消</button>
-          <button id="settings-save-btn" class="modal-btn primary">保存</button>
-        </div>
+      <div class="modal-footer" style="padding-top: 15px; border-top: 1px solid var(--border-color); margin-top: 15px; display: flex; justify-content: flex-end; width: 100%;">
+        <button id="settings-cancel-btn" class="modal-btn secondary">取消</button>
+        <button id="settings-save-btn" class="modal-btn primary">保存</button>
       </div>
     </div>
   </div>

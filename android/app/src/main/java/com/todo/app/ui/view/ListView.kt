@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -208,6 +209,17 @@ fun ListView(viewModel: TodoViewModel) {
 fun ClassicListView(viewModel: TodoViewModel) {
     val todos by viewModel.todos.collectAsState()
     val isSyncing by viewModel.isSyncing.collectAsState()
+
+    val activeSource by viewModel.activeSource.collectAsState()
+    val collabData by viewModel.collabData.collectAsState()
+    val collabLoading by viewModel.collabLoading.collectAsState()
+    val collabError by viewModel.collabError.collectAsState()
+
+    val activeTodos = when (val source = activeSource) {
+        is TodoViewModel.ActiveSource.Personal -> todos
+        is TodoViewModel.ActiveSource.Collaboration -> collabData ?: emptyList()
+    }
+
     var selectedTab by remember { mutableStateOf(0) }
     var showEditDialogFor by remember { mutableStateOf<Todo?>(null) }
 
@@ -231,8 +243,8 @@ fun ClassicListView(viewModel: TodoViewModel) {
     var showAllHistory by remember { mutableStateOf(false) }
     var hoveredHeaderKey by remember { mutableStateOf<String?>(null) }
 
-    val filteredTodos = remember(todos, searchQuery) {
-        if (searchQuery.isBlank()) todos else todos.filter { it.content.contains(searchQuery, ignoreCase = true) }
+    val filteredTodos = remember(activeTodos, searchQuery) {
+        if (searchQuery.isBlank()) activeTodos else activeTodos.filter { it.content.contains(searchQuery, ignoreCase = true) }
     }
 
     val filtered = remember(filteredTodos, todayStr, thisWeekStr, thisMonthStr) {
@@ -390,7 +402,79 @@ fun ClassicListView(viewModel: TodoViewModel) {
         }
     }
 
+    val isReadOnly = activeSource is TodoViewModel.ActiveSource.Collaboration
+
     Column(modifier = Modifier.fillMaxSize()) {
+        var showSourceMenu by remember { mutableStateOf(false) }
+        val collabs = viewModel.configManager.collaborations
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box {
+                Row(
+                    modifier = Modifier.clickable { showSourceMenu = true },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val title = when (val src = activeSource) {
+                        is TodoViewModel.ActiveSource.Personal -> "我的待办"
+                        is TodoViewModel.ActiveSource.Collaboration -> src.collab.name
+                    }
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Filled.ArrowDropDown,
+                        contentDescription = "切换清单",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showSourceMenu,
+                    onDismissRequest = { showSourceMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("我的待办") },
+                        onClick = {
+                            viewModel.switchToPersonal()
+                            showSourceMenu = false
+                        }
+                    )
+                    collabs.forEach { collab ->
+                        DropdownMenuItem(
+                            text = { Text(collab.name) },
+                            onClick = {
+                                viewModel.switchToCollaboration(collab)
+                                showSourceMenu = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (isReadOnly) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.padding(start = 8.dp)
+                ) {
+                    Text(
+                        text = "只读清单",
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             TabRow(selectedTabIndex = selectedTab, modifier = Modifier.weight(1f)) {
                 Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("今天聚焦") })
@@ -407,11 +491,11 @@ fun ClassicListView(viewModel: TodoViewModel) {
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
-            IconButton(onClick = { viewModel.syncWithCloud() }) {
+            IconButton(onClick = { viewModel.syncWithCloud() }, enabled = !isReadOnly) {
                 if (isSyncing) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                 } else {
-                    Icon(Icons.Filled.Refresh, contentDescription = "同步", tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Filled.Refresh, contentDescription = "同步", tint = if (isReadOnly) Color.Gray else MaterialTheme.colorScheme.primary)
                 }
             }
         }
@@ -436,7 +520,21 @@ fun ClassicListView(viewModel: TodoViewModel) {
             )
         }
 
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        if (collabLoading) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else if (collabError != null) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = collabError ?: "",
+                    color = MaterialTheme.colorScheme.error,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+        } else {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             val uncompletedTodos = remember(filteredTodos) { filteredTodos.filter { !it.completed } }
             val sortedUncompletedGroups = remember(uncompletedTodos, todayStr) {
                 val groups = groupTodosByDate(uncompletedTodos, todayStr)
@@ -754,6 +852,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
             Column {
                 if (showShortcutBar) {
                     val shortcutItems = listOf(
+                        Pair("无日期", "@none"),
                         Pair("今天", "@today"),
                         Pair("明天", "@tomorrow"),
                         Pair("每天重复", "@daily"),
@@ -795,7 +894,12 @@ fun ClassicListView(viewModel: TodoViewModel) {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     IconButton(onClick = {
-                        viewModel.addTodoSmart(addInput)
+                        val src = activeSource
+                        if (src is TodoViewModel.ActiveSource.Collaboration) {
+                            viewModel.addCollabTodoSmart(src.collab, addInput)
+                        } else {
+                            viewModel.addTodoSmart(addInput)
+                        }
                         addInput = ""
                     }) {
                         Icon(Icons.Filled.Add, contentDescription = "Add")
@@ -803,6 +907,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                 }
             }
         }
+    }
     }
 
     showEditDialogFor?.let { todo ->
@@ -884,6 +989,7 @@ fun TodoItemRow(
     tomorrowStr: String = "",
     checkinDate: String? = null
 ) {
+    val isReadOnly = viewModel.activeSource.collectAsState().value is TodoViewModel.ActiveSource.Collaboration
     val coroutineScope = rememberCoroutineScope()
     val offsetX = remember { Animatable(0f) }
     val density = androidx.compose.ui.platform.LocalDensity.current.density
@@ -897,47 +1003,53 @@ fun TodoItemRow(
             .padding(vertical = 6.dp)
             .background(Color.Transparent)
     ) {
-        Row(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .padding(end = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = {
-                    coroutineScope.launch { offsetX.animateTo(0f) }
-                    onEdit()
-                },
-                modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+        if (!isReadOnly) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .padding(end = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Filled.Edit, contentDescription = "修改", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+                IconButton(
+                    onClick = {
+                        coroutineScope.launch { offsetX.animateTo(0f) }
+                        onEdit()
+                    },
+                    modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                ) {
+                    Icon(Icons.Filled.Edit, contentDescription = "修改", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+                }
             }
         }
 
         Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                .pointerInput(Unit) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = {
-                            coroutineScope.launch {
-                                if (offsetX.value < maxSwipePx / 5) {
-                                    offsetX.animateTo(maxSwipePx)
-                                } else {
-                                    offsetX.animateTo(0f)
+            modifier = if (isReadOnly) {
+                Modifier.fillMaxWidth()
+            } else {
+                Modifier
+                    .fillMaxWidth()
+                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                coroutineScope.launch {
+                                    if (offsetX.value < maxSwipePx / 5) {
+                                        offsetX.animateTo(maxSwipePx)
+                                    } else {
+                                        offsetX.animateTo(0f)
+                                    }
                                 }
                             }
-                        }
-                    ) { change, dragAmount ->
-                        change.consume()
-                        coroutineScope.launch {
-                            val newValue = (offsetX.value + dragAmount).coerceIn(maxSwipePx, 0f)
-                            offsetX.snapTo(newValue)
+                        ) { change, dragAmount ->
+                            change.consume()
+                            coroutineScope.launch {
+                                val newValue = (offsetX.value + dragAmount).coerceIn(maxSwipePx, 0f)
+                                offsetX.snapTo(newValue)
+                            }
                         }
                     }
-                },
+            },
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -953,12 +1065,15 @@ fun TodoItemRow(
                     Checkbox(
                         checked = isVisualCompleted,
                         onCheckedChange = {
-                            if (checkinDate != null) {
-                                viewModel.updateTodo(todo.withToggledCheckinDate(checkinDate))
-                            } else {
-                                viewModel.toggleTodoStatus(todo.id)
+                            if (!isReadOnly) {
+                                if (checkinDate != null) {
+                                    viewModel.updateTodo(todo.withToggledCheckinDate(checkinDate))
+                                } else {
+                                    viewModel.toggleTodoStatus(todo.id)
+                                }
                             }
-                        }
+                        },
+                        enabled = !isReadOnly
                     )
                     Column(modifier = Modifier.weight(1f).clickable {
                         if (todo.taskType == TaskType.MONTHLY_CHECKIN) {
@@ -1040,7 +1155,7 @@ fun TodoItemRow(
                                                 color = if (isToday) Color(0xFFFAAD14) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
                                                 shape = RoundedCornerShape(4.dp)
                                             )
-                                            .clickable {
+                                            .clickable(enabled = !isReadOnly) {
                                                 viewModel.updateTodo(todo.withToggledCheckinDate(dateStr))
                                             },
                                         contentAlignment = Alignment.Center
@@ -1132,7 +1247,7 @@ fun TodoItemRow(
                                                             shape = RoundedCornerShape(4.dp)
                                                         )
                                                         .then(
-                                                            if (isCurrentMonth || isChecked) {
+                                                            if ((isCurrentMonth || isChecked) && !isReadOnly) {
                                                                 Modifier.clickable {
                                                                     viewModel.updateTodo(todo.withToggledCheckinDate(dateStr))
                                                                 }
@@ -1169,23 +1284,26 @@ fun TodoItemRow(
                                 Checkbox(
                                     checked = sub.completed,
                                     onCheckedChange = { isChecked ->
-                                        val newSubs = todo.subtasks.toMutableList()
-                                        newSubs[index] = sub.copy(
-                                            completed = isChecked,
-                                            completedAt = if (isChecked) nowIso() else null
-                                        )
+                                        if (!isReadOnly) {
+                                            val newSubs = todo.subtasks.toMutableList()
+                                            newSubs[index] = sub.copy(
+                                                completed = isChecked,
+                                                completedAt = if (isChecked) nowIso() else null
+                                            )
 
-                                        val allCompleted = newSubs.isNotEmpty() && newSubs.all { s -> s.completed }
-                                        val parentCompleted = if (allCompleted && !todo.completed) true else todo.completed
-                                        val parentCompletedAt = if (allCompleted && !todo.completed) nowInstant() else todo.completedAt
+                                            val allCompleted = newSubs.isNotEmpty() && newSubs.all { s -> s.completed }
+                                            val parentCompleted = if (allCompleted && !todo.completed) true else todo.completed
+                                            val parentCompletedAt = if (allCompleted && !todo.completed) nowInstant() else todo.completedAt
 
-                                        viewModel.updateTodo(todo.copy(
-                                            subtasks = newSubs,
-                                            completed = parentCompleted,
-                                            completedAt = parentCompletedAt,
-                                            updatedAt = nowIso()
-                                        ))
+                                            viewModel.updateTodo(todo.copy(
+                                                subtasks = newSubs,
+                                                completed = parentCompleted,
+                                                completedAt = parentCompletedAt,
+                                                updatedAt = nowIso()
+                                            ))
+                                        }
                                     },
+                                    enabled = !isReadOnly,
                                     modifier = Modifier.size(24.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))

@@ -46,6 +46,11 @@ const appState = {
         monthly: true
     },
     showStatsList: false,
+    // ====== 协作清单状态 ======
+    activeSource: { type: 'personal' },  // { type: 'personal' } | { type: 'collaboration', id: '...' }
+    collabData: null,                     // 他人的 TodoData 缓存
+    collabLoading: false,                 // 是否正在拉取协作清单中
+    collabError: null                     // 协作异常信息
 };
 
 // 模块级拖拽状态（替代 window 全局属性）
@@ -112,6 +117,7 @@ function bindAutocomplete(inputEl, listEl) {
     if (!inputEl || !listEl) return;
     
     const items = [
+        { label: '无日期', value: '@none', desc: '强制为无日期任务' },
         { label: '今天', value: '@today', desc: '今天截止' },
         { label: '明天', value: '@tomorrow', desc: '明天截止' },
         { label: '每天重复', value: '@daily', desc: '每日重复任务' },
@@ -430,6 +436,7 @@ async function loadData() {
                 render();
             }
         }
+        updateSourceSelector();
 
         if (statusEl && !statusEl.classList.contains('error')) {
             setTimeout(() => setSyncStatus(SyncState.IDLE), 500);
@@ -440,7 +447,157 @@ async function loadData() {
     }
 }
 
-// ====== 方案二：定期物理清理过期（已删除超 7 天）的任务 ======
+async function loadCollabData(collabId) {
+    appState.collabLoading = true;
+    appState.collabError = null;
+    render(); // 先触发一次渲染展示 Loading 状态
+
+    try {
+        const result = await invoke("read_collaboration_todos", { collabId: collabId });
+        const data = JSON.parse(result.data);
+        if (data && data.todos) {
+            data.todos.forEach(migrateAndNormalize);
+        }
+        appState.collabData = data || { version: 1, last_updated: new Date().toISOString(), todos: [] };
+        appState.collabError = null;
+    } catch (e) {
+        console.error("加载协作清单失败:", e);
+        appState.collabData = null;
+        if (e === "EXPIRED") {
+            appState.collabError = "授权已过期，请联系对方重新生成授权码";
+        } else {
+            appState.collabError = e || "加载协作清单失败，请检查网络或配置";
+        }
+    } finally {
+        appState.collabLoading = false;
+        render(); // 加载完成再次渲染
+    }
+}
+
+function getActiveTodos() {
+    if (appState.activeSource.type === 'collaboration') {
+        return appState.collabData ? appState.collabData.todos : [];
+    }
+    return appState.todoData.todos;
+}
+
+function getCollabName(collabId) {
+    if (appState.appConfig && appState.appConfig.collaborations) {
+        const collab = appState.appConfig.collaborations.find(c => c.id === collabId);
+        return collab ? collab.name : '未知协作清单';
+    }
+    return '未知协作清单';
+}
+
+function applyReadOnlyRestrictions() {
+    if (appState.activeSource.type !== 'collaboration') {
+        const oldBanner = document.getElementById('collab-banner');
+        if (oldBanner) oldBanner.remove();
+        return;
+    }
+
+    let banner = document.getElementById('collab-banner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'collab-banner';
+        banner.className = 'collab-banner';
+        const mainContent = document.getElementById('main-content');
+        if (mainContent) {
+            mainContent.parentNode.insertBefore(banner, mainContent);
+        }
+    }
+    const collabName = getCollabName(appState.activeSource.id);
+    banner.innerHTML = `正在查看 <strong>${escapeHtml(collabName)}</strong> 的协作清单（只读）`;
+
+    const checkboxes = document.querySelectorAll('#todo-list input[type="checkbox"]');
+    checkboxes.forEach(cb => {
+        cb.disabled = true;
+        cb.style.opacity = '0.5';
+        cb.style.pointerEvents = 'none';
+    });
+
+    const interactiveElements = document.querySelectorAll('#todo-list .edit-btn, #todo-list .delete-btn, #todo-list .drag-handle, #todo-list .makeup-col');
+    interactiveElements.forEach(el => {
+        el.style.display = 'none';
+    });
+
+    const plottedDots = document.querySelectorAll('.plotted-dot');
+    plottedDots.forEach(dot => {
+        dot.style.pointerEvents = 'none';
+        dot.style.cursor = 'default';
+    });
+}
+
+function renderCollabListInSettings() {
+    const listContainer = document.getElementById('collab-list');
+    if (!listContainer) return;
+    listContainer.innerHTML = '';
+    
+    const collabs = (appState.appConfig && appState.appConfig.collaborations) || [];
+    if (collabs.length === 0) {
+        listContainer.innerHTML = '<div style="font-size: 0.75rem; color: var(--text-secondary); text-align: center; padding: 10px;">暂无绑定的协作清单</div>';
+        return;
+    }
+    
+    collabs.forEach(collab => {
+        const item = document.createElement('div');
+        item.className = 'collab-item';
+        
+        let expireText = '永久';
+        if (collab.expire_at) {
+            const expDate = new Date(collab.expire_at * 1000);
+            expireText = `过期: ${expDate.toLocaleDateString()}`;
+        }
+        
+        item.innerHTML = `
+            <div class="collab-name-info">
+                <strong>${escapeHtml(collab.name)}</strong>
+                <span class="collab-expire-time">${expireText}</span>
+            </div>
+            <button class="collab-delete-btn" data-id="${collab.id}">解绑</button>
+        `;
+        
+        item.querySelector('.collab-delete-btn').addEventListener('click', async (e) => {
+            const id = e.target.dataset.id;
+            if (confirm(`确定要解绑“${collab.name}”的协作清单吗？`)) {
+                try {
+                    await invoke('delete_collaboration', { id: id });
+                    appState.appConfig = await invoke('get_app_config');
+                    renderCollabListInSettings();
+                    updateSourceSelector();
+                } catch (err) {
+                    showToast('解绑失败: ' + err);
+                }
+            }
+        });
+        
+        listContainer.appendChild(item);
+    });
+}
+
+function updateSourceSelector() {
+    const selector = document.getElementById('source-selector');
+    if (!selector) return;
+    
+    selector.innerHTML = '<option value="personal">我的待办</option>';
+    
+    const collabs = (appState.appConfig && appState.appConfig.collaborations) || [];
+    collabs.forEach(collab => {
+        const opt = document.createElement('option');
+        opt.value = collab.id;
+        opt.textContent = collab.name;
+        selector.appendChild(opt);
+    });
+    
+    if (appState.activeSource.type === 'collaboration') {
+        selector.value = appState.activeSource.id;
+    } else {
+        selector.value = 'personal';
+    }
+}
+
+
+
 function purgeOldDeletedTodos() {
     if (!appState.todoData || !appState.todoData.todos) return;
     const sevenDaysAgo = new Date();
@@ -1609,7 +1766,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     const targetMonthStr = `${appState.statsTargetDate.getFullYear()}-${String(appState.statsTargetDate.getMonth() + 1).padStart(2, '0')}`;
     const labelEl = document.getElementById('stats-date-label');
 
-    const activeTodos = appState.todoData.todos.filter(t => !t.deleted);
+    const activeTodos = getActiveTodos().filter(t => !t.deleted);
     let periodTodos = [];
     if (appState.statsPeriod === 'day') {
         labelEl.textContent = targetDayStr;
@@ -2258,7 +2415,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
 }
 
 function renderHealth(todayStr, tomorrowStr) {
-    const activeTodos = appState.todoData.todos.filter(t => !t.deleted && t.task_type !== 'weekly_checkin' && t.task_type !== 'monthly_checkin' && t.recurring !== 'daily_repeat');
+    const activeTodos = getActiveTodos().filter(t => !t.deleted && t.task_type !== 'weekly_checkin' && t.task_type !== 'monthly_checkin' && t.recurring !== 'daily_repeat');
     const incompleteTodos = activeTodos.filter(t => !t.completed);
     const completedTodos = activeTodos.filter(t => t.completed && t.completed_at);
     
@@ -2586,7 +2743,24 @@ function renderFlatPendingGroup(group, label, themeColor, todayStr, tomorrowStr,
 }
 
 // ====== Main Render Function ======
+
 function render() {
+    // 协作模式下的 Loading 与 Error 阻断渲染
+    const inputEl = document.getElementById('todo-input');
+    if (appState.activeSource.type === 'collaboration') {
+        if (appState.collabLoading) {
+            listEl.innerHTML = '<div class="collab-loading">正在拉取最新的协作待办清单...</div>';
+            if (inputEl) inputEl.disabled = true;
+            return;
+        }
+        if (appState.collabError || !appState.collabData) {
+            listEl.innerHTML = `<div class="collab-error">${escapeHtml(appState.collabError || '无法连接对方网盘')}</div>`;
+            if (inputEl) inputEl.disabled = true;
+            return;
+        }
+    }
+    if (inputEl) inputEl.disabled = false;
+
     // 差异更新：如果 todo 数据和 UI 状态均未变化则跳过渲染
     const uiStateHash = [
         appState.dateFilter,
@@ -2605,9 +2779,13 @@ function render() {
         appState.statsFilters.daily,
         appState.statsFilters.weekly,
         appState.statsFilters.monthly,
-        appState.showStatsList
+        appState.showStatsList,
+        appState.activeSource.type,
+        appState.activeSource.id || '',
+        appState.collabLoading ? 'L' : 'D',
+        appState.collabError || ''
     ].join('|');
-    const _hash = appState.todoData.todos.map(t => `${t.id}:${t.updated_at}:${t.completed}`).join('|') + '|' + uiStateHash;
+    const _hash = getActiveTodos().map(t => `${t.id}:${t.updated_at}:${t.completed}`).join('|') + '|' + uiStateHash;
     if (_hash === _lastRenderedHash) return;
     _lastRenderedHash = _hash;
 
@@ -2617,7 +2795,8 @@ function render() {
     const thisMonthStr = getThisMonthString();
 
     // 根据 appState.dateFilter 过滤数据
-    let filteredTodos = [...appState.todoData.todos].filter(t => !t.deleted);
+    let filteredTodos = [...getActiveTodos()].filter(t => !t.deleted);
+
     if (appState.searchQuery) {
         const queryLower = appState.searchQuery.toLowerCase();
         filteredTodos = filteredTodos.filter(t => t.content.toLowerCase().includes(queryLower));
@@ -2958,6 +3137,9 @@ function render() {
             });
         }
     }
+    
+    // 协作模式下的只读限制应用
+    applyReadOnlyRestrictions();
 }
 
 // ====== Import Modal ======
@@ -3073,6 +3255,22 @@ window.addEventListener("DOMContentLoaded", () => {
     const settingWebdavPass = document.getElementById('setting-webdav-pass');
     const settingWebdavFilepath = document.getElementById('setting-webdav-filepath');
 
+    // 设置选项卡 Tab 物理切换逻辑
+    const tabBtns = document.querySelectorAll('.settings-tab-btn');
+    const panels = document.querySelectorAll('.settings-panel');
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            tabBtns.forEach(b => b.classList.remove('active'));
+            panels.forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            const targetId = btn.getAttribute('data-target');
+            const targetPanel = document.getElementById(targetId);
+            if (targetPanel) {
+                targetPanel.classList.add('active');
+            }
+        });
+    });
+
     if (settingsBtn) {
         settingsBtn.addEventListener('click', async () => {
             appState.appConfig = await invoke("get_app_config");
@@ -3083,6 +3281,14 @@ window.addEventListener("DOMContentLoaded", () => {
             settingWebdavPass.value = appState.appConfig.webdav_password || '';
             settingWebdavFilepath.value = appState.appConfig.webdav_filepath || '我的坚果云/to-do/todo_data.json';
             
+            // 重置侧边栏 Tab 为第一个 panel-sync
+            tabBtns.forEach(b => b.classList.remove('active'));
+            panels.forEach(p => p.classList.remove('active'));
+            const firstTab = document.querySelector('.settings-tab-btn[data-target="panel-sync"]');
+            if (firstTab) firstTab.classList.add('active');
+            const firstPanel = document.getElementById('panel-sync');
+            if (firstPanel) firstPanel.classList.add('active');
+
             // 获取并显示当前版本号
             try {
                 const currentVersion = await invoke('get_app_version');
@@ -3101,6 +3307,15 @@ window.addEventListener("DOMContentLoaded", () => {
                 settingLocalGroup.style.display = 'block';
                 settingWebdavGroup.style.display = 'none';
             }
+            document.getElementById('setting-nickname').value = appState.appConfig.nickname || '';
+            document.getElementById('setting-default-due-date').value = appState.appConfig.default_due_date || 'none';
+            document.getElementById('setting-default-insertion').value = appState.appConfig.default_insertion || 'top';
+            
+            document.getElementById('share-code-output').style.display = 'none';
+            document.getElementById('share-code-output').textContent = '';
+            document.getElementById('import-code-input').value = '';
+            document.getElementById('import-name-input').value = '';
+            renderCollabListInSettings();
             settingsModal.classList.add('active');
         });
 
@@ -3141,12 +3356,83 @@ window.addEventListener("DOMContentLoaded", () => {
                 webdav_username: settingWebdavUser.value,
                 webdav_password: settingWebdavPass.value,
                 webdav_filepath: settingWebdavFilepath.value,
+                nickname: document.getElementById('setting-nickname').value.trim() || null,
+                default_due_date: document.getElementById('setting-default-due-date').value,
+                default_insertion: document.getElementById('setting-default-insertion').value,
+                collaborations: appState.appConfig.collaborations || []
             };
             await invoke("save_app_config", { config: newConfig });
             appState.appConfig = newConfig;
             
             settingsModal.classList.remove('active');
             await loadData();
+        });
+    }
+
+    // ====== 协作共享相关事件绑定 ======
+    // 1. 清单源切换
+    const sourceSelector = document.getElementById('source-selector');
+    if (sourceSelector) {
+        sourceSelector.addEventListener('change', async (e) => {
+            const val = e.target.value;
+            if (val === 'personal') {
+                appState.activeSource = { type: 'personal' };
+                appState.collabData = null;
+                appState.collabError = null;
+                render();
+            } else {
+                appState.activeSource = { type: 'collaboration', id: val };
+                await loadCollabData(val);
+            }
+        });
+    }
+
+    // 2. 生成协作授权口令
+    const generateShareBtn = document.getElementById('generate-share-btn');
+    const shareExpireSelect = document.getElementById('share-expire');
+    const shareCodeOutput = document.getElementById('share-code-output');
+    if (generateShareBtn) {
+        generateShareBtn.addEventListener('click', async () => {
+            try {
+                const expVal = shareExpireSelect.value;
+                const expireDays = expVal ? parseInt(expVal, 10) : null;
+                const code = await invoke('generate_share_code', { expireDays: expireDays });
+                shareCodeOutput.textContent = code;
+                shareCodeOutput.style.display = 'block';
+                showToast('授权口令生成成功，已显示在下方，双击可全选复制');
+            } catch (err) {
+                showToast('生成失败: ' + err);
+            }
+        });
+    }
+
+    // 3. 导入他人的协作授权口令
+    const importShareBtn = document.getElementById('import-share-btn');
+    const importCodeInput = document.getElementById('import-code-input');
+    const importNameInput = document.getElementById('import-name-input');
+    if (importShareBtn) {
+        importShareBtn.addEventListener('click', async () => {
+            const code = importCodeInput.value.trim();
+            const name = importNameInput.value.trim();
+            if (!code) {
+                showToast('请粘贴要导入的授权码');
+                return;
+            }
+            if (!name) {
+                showToast('请为该协作清单命名');
+                return;
+            }
+            try {
+                await invoke('import_share_code', { code: code, name: name });
+                showToast('协作清单导入成功');
+                importCodeInput.value = '';
+                importNameInput.value = '';
+                appState.appConfig = await invoke('get_app_config');
+                renderCollabListInSettings();
+                updateSourceSelector();
+            } catch (err) {
+                showToast('导入失败: ' + err);
+            }
         });
     }
     // 版本号比较函数 (例如比较 "1.0.1" 和 "1.0.0")
@@ -3293,6 +3579,8 @@ window.addEventListener("DOMContentLoaded", () => {
     const statsBtn = document.getElementById('stats-btn');
 
     const toggleStatsView = (enterStats) => {
+        const tabToday = document.getElementById('tab-today');
+        const tabAll = document.getElementById('tab-all');
         if (enterStats) {
             appState.currentView = 'stats';
             appState.statsTargetDate = new Date();
@@ -3302,10 +3590,11 @@ window.addEventListener("DOMContentLoaded", () => {
                 else btn.classList.remove('active');
             });
             document.getElementById('todo-list').classList.add('hidden');
-            if (tabsContainerEl) tabsContainerEl.classList.add('hidden');
             if (appFooterEl) appFooterEl.classList.add('hidden');
             statsContainerEl.classList.remove('hidden');
-            statsBtn.classList.add('active');
+            if (statsBtn) statsBtn.classList.add('active');
+            if (tabToday) tabToday.classList.remove('active');
+            if (tabAll) tabAll.classList.remove('active');
 
             // 隐藏搜索栏和二级页签，防止在统计（回顾）界面产生冗余
             const searchBar = document.getElementById('search-bar');
@@ -3319,7 +3608,14 @@ window.addEventListener("DOMContentLoaded", () => {
             if (tabsContainerEl) tabsContainerEl.classList.remove('hidden');
             if (appFooterEl) appFooterEl.classList.remove('hidden');
             statsContainerEl.classList.add('hidden');
-            statsBtn.classList.remove('active');
+            if (statsBtn) statsBtn.classList.remove('active');
+            if (appState.dateFilter === 'today') {
+                if (tabToday) tabToday.classList.add('active');
+                if (tabAll) tabAll.classList.remove('active');
+            } else {
+                if (tabAll) tabAll.classList.add('active');
+                if (tabToday) tabToday.classList.remove('active');
+            }
 
             // 返回主列表时，如果是在“全部待办”选项卡，恢复显示二级页签
             const allSubTabs = document.getElementById('all-sub-tabs');
@@ -3337,7 +3633,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
     if (statsBtn) {
         statsBtn.addEventListener('click', () => {
-            toggleStatsView(appState.currentView !== 'stats');
+            toggleStatsView(true);
         });
     }
 
@@ -3461,7 +3757,7 @@ window.addEventListener("DOMContentLoaded", () => {
         tabToday.classList.add('active');
         tabAll.classList.remove('active');
         if (allSubTabs) allSubTabs.classList.add('hidden');
-        render();
+        toggleStatsView(false);
     });
 
     tabAll.addEventListener('click', () => {
@@ -3479,7 +3775,7 @@ window.addEventListener("DOMContentLoaded", () => {
                 subTabUncompleted.classList.remove('active');
             }
         }
-        render();
+        toggleStatsView(false);
     });
 
     // 搜索按钮切换显隐
@@ -3768,21 +4064,76 @@ window.addEventListener("DOMContentLoaded", () => {
         setTimeout(() => copyModal.style.display = 'none', 200);
     });
 
-
 // ====== 创建并添加待办的统一逻辑 ======
 async function createAndAddTodo(raw) {
-    const { content, taskDate, taskType, targetCount } = parseInputSyntax(raw);
+    const { content, taskDate, taskType, targetCount, subtasks, hasExplicitDate } = parseInputSyntax(raw);
     if (!content) return false;
 
-    const finalDate = taskDate || null;
-    let minOrder = Date.now();
-    appState.todoData.todos.forEach(t => {
-        if (!t.deleted && !t.completed && typeof t.order === 'number' && t.order < minOrder) {
-            minOrder = t.order;
+    let finalDate = null;
+    if (hasExplicitDate) {
+        finalDate = taskDate; // 显式指定（含 @none 解析出的 null），无条件服从
+    } else if (taskType === 'normal') {
+        // 普通任务未显式指定，应用本地偏好
+        const defaultDueDate = appState.appConfig.default_due_date || 'none';
+        if (defaultDueDate === 'today') {
+            finalDate = getTodayString();
+        } else if (defaultDueDate === 'tomorrow') {
+            finalDate = getTomorrowString();
+        } else {
+            finalDate = null;
         }
-    });
-    const todo = createTodo(content, finalDate);
-    todo.order = minOrder - 1;
+    } else {
+        finalDate = taskDate; // 循环或打卡任务本身自带周期日期，不污染
+    }
+
+    const defaultInsertion = appState.appConfig.default_insertion || 'top';
+
+    // 协作清单模式：写入对方网盘
+    if (appState.activeSource.type === 'collaboration') {
+        const nickname = appState.appConfig.nickname || '匿名';
+        const signedContent = `${content} (由 [${nickname}] 添加)`;
+        const todo = createTodo(signedContent, finalDate, subtasks);
+        applyTaskType(todo, taskType, targetCount);
+        
+        // 计算在协作清单中的 order 权重
+        if (appState.collabData && appState.collabData.todos) {
+            const activeCollab = appState.collabData.todos.filter(t => !t.deleted && !t.completed && typeof t.order === 'number');
+            if (defaultInsertion === 'bottom') {
+                const maxOrder = activeCollab.length > 0 ? Math.max(...activeCollab.map(t => t.order)) : Date.now();
+                todo.order = maxOrder + 1;
+            } else {
+                const minOrder = activeCollab.length > 0 ? Math.min(...activeCollab.map(t => t.order)) : Date.now();
+                todo.order = minOrder - 1;
+            }
+        }
+
+        try {
+            await invoke('write_collaboration_todo', {
+                collabId: appState.activeSource.id,
+                todoJson: JSON.stringify(todo)
+            });
+            // 写入成功后，从云端拉取最新数据
+            await loadCollabData(appState.activeSource.id);
+            return true;
+        } catch (e) {
+            showToast('协作写入失败: ' + e);
+            return false;
+        }
+    }
+
+    // 个人模式
+    const activeLocal = appState.todoData.todos.filter(t => !t.deleted && !t.completed && typeof t.order === 'number');
+    let orderVal = Date.now();
+    if (defaultInsertion === 'bottom') {
+        const maxOrder = activeLocal.length > 0 ? Math.max(...activeLocal.map(t => t.order)) : Date.now();
+        orderVal = maxOrder + 1;
+    } else {
+        const minOrder = activeLocal.length > 0 ? Math.min(...activeLocal.map(t => t.order)) : Date.now();
+        orderVal = minOrder - 1;
+    }
+
+    const todo = createTodo(content, finalDate, subtasks);
+    todo.order = orderVal;
     applyTaskType(todo, taskType, targetCount);
 
     appState.todoData.todos.push(todo);
@@ -3790,6 +4141,7 @@ async function createAndAddTodo(raw) {
     await saveData();
     return true;
 }
+
     // 添加新待办表单
     formEl.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -3815,6 +4167,13 @@ async function createAndAddTodo(raw) {
     bindAutocomplete(quickAddInput, quickAddAutocompleteList);
     
     listen('trigger-quick-add', (event) => {
+        if (appState.activeSource.type !== 'personal') {
+            appState.activeSource = { type: 'personal' };
+            appState.collabData = null;
+            appState.collabError = null;
+            updateSourceSelector();
+            render();
+        }
         if (quickAddModal && quickAddInput) {
             quickAddModal.classList.add('active');
             quickAddInput.value = '';

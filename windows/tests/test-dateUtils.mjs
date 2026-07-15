@@ -317,6 +317,19 @@ describe('parseInputSyntax', () => {
         assert.equal(res2.taskDate, getTodayString());
         assert.equal(res2.taskType, 'daily_repeat');
     });
+
+    it('解析 @none 为显式无日期任务', () => {
+        const result = parseInputSyntax('清理房间 @none');
+        assert.equal(result.content, '清理房间');
+        assert.equal(result.taskDate, null);
+        assert.equal(result.taskType, 'normal');
+        assert.equal(result.hasExplicitDate, true);
+    });
+
+    it('无日期语法时 hasExplicitDate 应为 false', () => {
+        const result = parseInputSyntax('无日期任务');
+        assert.equal(result.hasExplicitDate, false);
+    });
 });
 
 // ====== createTodo ======

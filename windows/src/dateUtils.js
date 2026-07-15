@@ -96,19 +96,35 @@ export function sortFunc(a, b) {
  * Supports: @today, @tomorrow, @week, @month, @YYYY-MM-DD, @MM-DD
  */
 export function parseInputSyntax(rawContent) {
-    const dateRegex = /(?:\s+|^)@(today|tomorrow|week|month|day|daily|\d{4}-\d{2}-\d{2}|\d{2}-\d{2})(?:[*/:](\d*))?$/i;
-
     let content = rawContent.trim();
+    
+    // 提取 #子任务（要求紧跟非空白字符，并且非 @ 和 #）
+    const subtaskRegex = /#([^\s#@][^#@]*)/g;
+    const subtasks = [];
+    let match;
+    while ((match = subtaskRegex.exec(content)) !== null) {
+        const st = match[1].trim();
+        if (st) subtasks.push(st);
+    }
+    content = content.replace(subtaskRegex, '').trim();
+
+    const dateRegex = /(?:\s+|^)@(today|tomorrow|none|week|month|day|daily|\d{4}-\d{2}-\d{2}|\d{2}-\d{2})(?:[*/:](\d*))?$/i;
+
     let taskDate = null;
     let taskType = 'normal';
     let targetCount = null;
+    let hasExplicitDate = false;
 
     const dateMatch = content.match(dateRegex);
     if (dateMatch) {
+        hasExplicitDate = true;
         const v = dateMatch[1].toLowerCase();
         const countStr = dateMatch[2];
         
-        if (v === 'today') taskDate = getTodayString();
+        if (v === 'none') {
+            taskDate = null;
+        }
+        else if (v === 'today') taskDate = getTodayString();
         else if (v === 'tomorrow') taskDate = getTomorrowString();
         else if (v === 'day' || v === 'daily') {
             taskDate = getTodayString();
@@ -130,12 +146,12 @@ export function parseInputSyntax(rawContent) {
         content = content.replace(dateRegex, '').trim();
     }
 
-    return { content, taskDate, taskType, targetCount };
+    return { content, taskDate, taskType, targetCount, subtasks, hasExplicitDate };
 }
 
 // ====== Todo Factory ======
 
-export function createTodo(content, date = null) {
+export function createTodo(content, date = null, subtaskContents = []) {
     return {
         id: crypto.randomUUID(),
         content,
@@ -151,11 +167,14 @@ export function createTodo(content, date = null) {
         task_type: 'normal',
         completed_dates: [],
         target_count: null,
-        subtasks: []
+        subtasks: subtaskContents.map(sc => ({
+            id: crypto.randomUUID(),
+            content: sc,
+            completed: false,
+            completed_at: null
+        }))
     };
 }
-
-// ====== Todo Grouping (for "all" view) ======
 
 /**
  * Group todos by date category for the "all tasks" view.
