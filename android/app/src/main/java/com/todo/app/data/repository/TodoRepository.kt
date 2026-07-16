@@ -58,6 +58,8 @@ class TodoRepository(private val context: Context) {
 
     private val dataFile = File(context.filesDir, "todo_data.json")
     private val tmpFile = File(context.filesDir, "todo_data.tmp")
+    private val collabFile = File(context.filesDir, "collaborations.json")
+    private val collabTmpFile = File(context.filesDir, "collaborations.tmp")
     private val configManager = ConfigManager(context)
     @Volatile private var webDavClient: WebDavClient? = null
     private val webDavMutex = Mutex()
@@ -69,6 +71,85 @@ class TodoRepository(private val context: Context) {
 
     private val _uiEvent = Channel<UiEvent>(Channel.BUFFERED)
     val uiEvent: Flow<UiEvent> = _uiEvent.receiveAsFlow()
+
+    private val _collaborations = MutableStateFlow<List<com.todo.app.data.model.CollaborationSource>>(emptyList())
+    val collaborations = _collaborations.asStateFlow()
+
+    init {
+        repoScope.launch {
+            loadCollaborationsLocally()
+        }
+    }
+
+    private fun writeCollaborationsFile(json: String) {
+        try {
+            collabTmpFile.outputStream().use { fos ->
+                fos.write(json.toByteArray(Charsets.UTF_8))
+                fos.fd.sync()
+            }
+            if (!collabTmpFile.renameTo(collabFile)) {
+                collabFile.outputStream().use { fos ->
+                    fos.write(collabTmpFile.readBytes())
+                    fos.fd.sync()
+                }
+                collabTmpFile.delete()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write collaborations file atomically", e)
+        }
+    }
+
+    private suspend fun loadCollaborationsLocally() = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            // 1. 检查 SharedPreferences 中是否有旧数据（迁移逻辑）
+            val legacyCollabs = configManager.collaborations
+            if (legacyCollabs.isNotEmpty()) {
+                Log.d(TAG, "Migrating legacy collaborations from SharedPreferences...")
+                var currentData = if (collabFile.exists()) {
+                    try {
+                        val content = collabFile.readText(Charsets.UTF_8)
+                        jsonFormat.decodeFromString<com.todo.app.data.model.CollaborationData>(content)
+                    } catch (e: Exception) {
+                        com.todo.app.data.model.CollaborationData()
+                    }
+                } else {
+                    com.todo.app.data.model.CollaborationData()
+                }
+
+                val nowStr = nowIso()
+                val mergedList = currentData.collaborations.toMutableList()
+                for (item in legacyCollabs) {
+                    if (mergedList.none { it.id == item.id }) {
+                        mergedList.add(item.copy(updatedAt = nowStr, deleted = false))
+                    }
+                }
+
+                val migratedData = com.todo.app.data.model.CollaborationData(
+                    version = 1,
+                    lastUpdated = nowStr,
+                    collaborations = mergedList
+                )
+
+                writeCollaborationsFile(jsonFormat.encodeToString(migratedData))
+                configManager.collaborations = emptyList()
+                Log.d(TAG, "Legacy collaborations migration completed.")
+            }
+
+            // 2. 读取 collaborations.json 并加载到内存
+            if (collabFile.exists()) {
+                try {
+                    val content = collabFile.readText(Charsets.UTF_8)
+                    val data = jsonFormat.decodeFromString<com.todo.app.data.model.CollaborationData>(content)
+                    _collaborations.value = data.collaborations.filter { !it.deleted }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to load collaborations.json", e)
+                    _collaborations.value = emptyList()
+                }
+            } else {
+                _collaborations.value = emptyList()
+            }
+        }
+    }
 
     private suspend fun initWebDavClient() {
         webDavMutex.withLock {
@@ -678,6 +759,275 @@ class TodoRepository(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "writeCollaborationTodo failed", e)
             Result.failure(e)
+        }
+    }
+
+    fun generateShareCode(expireDays: Int?): Pair<String, String> {
+        val expTime = if (expireDays != null && expireDays > 0) {
+            (System.currentTimeMillis() / 1000) + expireDays * 86400L
+        } else {
+            0L
+        }
+        val payload = com.todo.app.data.model.ShareCodePayload(
+            url = configManager.webDavUrl,
+            user = configManager.username,
+            pass = configManager.appPassword,
+            path = configManager.filePath,
+            exp = expTime
+        )
+        val json = jsonFormat.encodeToString(payload)
+        val key = (1..12).map {
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"[(0 until 62).random()]
+        }.joinToString("")
+
+        // Derivate key via SHA-256
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val keyBytes = digest.digest(key.trim().toByteArray(Charsets.UTF_8))
+        val secretKeySpec = javax.crypto.spec.SecretKeySpec(keyBytes, "AES")
+
+        // Generate random 12-byte IV
+        val iv = ByteArray(12)
+        java.security.SecureRandom().nextBytes(iv)
+
+        // AES-GCM-256 encrypt
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        val gcmParameterSpec = javax.crypto.spec.GCMParameterSpec(128, iv)
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, secretKeySpec, gcmParameterSpec)
+        
+        val ciphertextWithTag = cipher.doFinal(json.toByteArray(Charsets.UTF_8))
+
+        // Pack IV + ciphertext + tag
+        val packed = ByteArray(12 + ciphertextWithTag.size)
+        System.arraycopy(iv, 0, packed, 0, 12)
+        System.arraycopy(ciphertextWithTag, 0, packed, 12, ciphertextWithTag.size)
+
+        val base64 = android.util.Base64.encodeToString(packed, android.util.Base64.NO_WRAP)
+        return Pair("tdsync://$base64", key)
+    }
+
+    fun decryptShareCode(code: String, keyStr: String): String {
+        val cleanCode = code.removePrefix("tdsync://")
+        val packed = android.util.Base64.decode(cleanCode, android.util.Base64.DEFAULT)
+        
+        if (packed.size < 12 + 16) {
+            throw Exception("授权码数据损坏")
+        }
+
+        // 1. 解析出 IV (12字节) 和 密文+Tag
+        val iv = packed.sliceArray(0 until 12)
+        val ciphertextWithTag = packed.sliceArray(12 until packed.size)
+
+        // 2. 从密钥字符串派生密钥 (SHA-256)
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val keyBytes = digest.digest(keyStr.trim().toByteArray(Charsets.UTF_8))
+
+        // 3. AES-GCM-256 解密
+        val secretKeySpec = javax.crypto.spec.SecretKeySpec(keyBytes, "AES")
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        val gcmParameterSpec = javax.crypto.spec.GCMParameterSpec(128, iv)
+        cipher.init(javax.crypto.Cipher.DECRYPT_MODE, secretKeySpec, gcmParameterSpec)
+        
+        val decryptedBytes = cipher.doFinal(ciphertextWithTag)
+        return String(decryptedBytes, Charsets.UTF_8)
+    }
+
+    suspend fun importCollaboration(code: String, key: String, name: String): Result<com.todo.app.data.model.CollaborationSource> = withContext(Dispatchers.IO) {
+        try {
+            val plaintext = decryptShareCode(code, key)
+            val json = Json { ignoreUnknownKeys = true }
+            val payload = json.decodeFromString<com.todo.app.data.model.ShareCodePayload>(plaintext)
+            
+            if (!payload.url.startsWith("https://")) {
+                return@withContext Result.failure(Exception("URL 必须使用 https"))
+            }
+
+            mutex.withLock {
+                val content = if (collabFile.exists()) collabFile.readText(Charsets.UTF_8) else ""
+                var collabData = try {
+                    jsonFormat.decodeFromString<com.todo.app.data.model.CollaborationData>(content)
+                } catch (e: Exception) {
+                    com.todo.app.data.model.CollaborationData()
+                }
+
+                val collabs = collabData.collaborations.toMutableList()
+                val nowStr = nowIso()
+                val existingIdx = collabs.indexOfFirst {
+                    it.webdavUrl == payload.url && it.webdavUsername == payload.user && it.webdavFilepath == payload.path
+                }
+
+                val resultCollab: com.todo.app.data.model.CollaborationSource
+                if (existingIdx != -1) {
+                    val existing = collabs[existingIdx]
+                    val updated = existing.copy(
+                        webdavPassword = payload.pass,
+                        expireAt = if (payload.exp == 0L) null else payload.exp,
+                        updatedAt = nowStr,
+                        deleted = false,
+                        name = name
+                    )
+                    collabs[existingIdx] = updated
+                    resultCollab = updated
+                } else {
+                    val newCollab = com.todo.app.data.model.CollaborationSource(
+                        id = UUID.randomUUID().toString(),
+                        name = name,
+                        webdavUrl = payload.url,
+                        webdavUsername = payload.user,
+                        webdavPassword = payload.pass,
+                        webdavFilepath = payload.path,
+                        expireAt = if (payload.exp == 0L) null else payload.exp,
+                        updatedAt = nowStr,
+                        deleted = false
+                    )
+                    collabs.add(newCollab)
+                    resultCollab = newCollab
+                }
+
+                val updatedData = collabData.copy(
+                    lastUpdated = nowStr,
+                    collaborations = collabs
+                )
+
+                writeCollaborationsFile(jsonFormat.encodeToString(updatedData))
+                _collaborations.value = collabs.filter { !it.deleted }
+                
+                repoScope.launch {
+                    syncCollaborations()
+                }
+
+                return@withContext Result.success(resultCollab)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Import collaboration failed", e)
+            return@withContext Result.failure(e)
+        }
+    }
+
+    suspend fun deleteCollaboration(id: String): Result<Unit> = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            if (!collabFile.exists()) return@withContext Result.success(Unit)
+            val content = collabFile.readText(Charsets.UTF_8)
+            var collabData = try {
+                jsonFormat.decodeFromString<com.todo.app.data.model.CollaborationData>(content)
+            } catch (e: Exception) {
+                com.todo.app.data.model.CollaborationData()
+            }
+
+            val collabs = collabData.collaborations.toMutableList()
+            val idx = collabs.indexOfFirst { it.id == id }
+            if (idx != -1) {
+                val nowStr = nowIso()
+                collabs[idx] = collabs[idx].copy(deleted = true, updatedAt = nowStr)
+                val updatedData = collabData.copy(
+                    lastUpdated = nowStr,
+                    collaborations = collabs
+                )
+                writeCollaborationsFile(jsonFormat.encodeToString(updatedData))
+                _collaborations.value = collabs.filter { !it.deleted }
+                
+                repoScope.launch {
+                    syncCollaborations()
+                }
+            }
+            Result.success(Unit)
+        }
+    }
+
+    fun mergeCollaborations(
+        local: com.todo.app.data.model.CollaborationData,
+        cloud: com.todo.app.data.model.CollaborationData
+    ): Pair<com.todo.app.data.model.CollaborationData, Boolean> {
+        val mergedList = mutableListOf<com.todo.app.data.model.CollaborationSource>()
+        val localList = local.collaborations
+        val cloudList = cloud.collaborations
+        
+        val allIds = (localList.map { it.id } + cloudList.map { it.id }).toSet()
+        var changed = false
+        
+        for (id in allIds) {
+            val localItem = localList.find { it.id == id }
+            val cloudItem = cloudList.find { it.id == id }
+            
+            if (localItem != null && cloudItem != null) {
+                val localTime = try { OffsetDateTime.parse(localItem.updatedAt).toInstant().toEpochMilli() } catch (e: Exception) { 0L }
+                val cloudTime = try { OffsetDateTime.parse(cloudItem.updatedAt).toInstant().toEpochMilli() } catch (e: Exception) { 0L }
+                
+                if (cloudTime > localTime) {
+                    mergedList.add(cloudItem)
+                    changed = true
+                } else {
+                    mergedList.add(localItem)
+                    if (localTime > cloudTime) {
+                        changed = true
+                    }
+                }
+            } else if (localItem != null) {
+                mergedList.add(localItem)
+                changed = true
+            } else if (cloudItem != null) {
+                mergedList.add(cloudItem)
+                changed = true
+            }
+        }
+        
+        val nowStr = nowIso()
+        val mergedData = com.todo.app.data.model.CollaborationData(
+            version = 1,
+            lastUpdated = if (changed) nowStr else (local.lastUpdated.takeIf { it.isNotEmpty() } ?: cloud.lastUpdated.takeIf { it.isNotEmpty() } ?: nowStr),
+            collaborations = mergedList
+        )
+        
+        return Pair(mergedData, changed)
+    }
+
+    suspend fun syncCollaborations() = withContext(Dispatchers.IO) {
+        initWebDavClient()
+        val client = webDavClient ?: return@withContext
+        
+        val basePath = configManager.filePath
+        val lastSlash = basePath.lastIndexOf('/')
+        val parentPath = if (lastSlash != -1) basePath.substring(0, lastSlash) else ""
+        val collabFilePath = if (parentPath.isNotEmpty()) "$parentPath/collaborations.json" else "collaborations.json"
+        
+        mutex.withLock {
+            val localContent = if (collabFile.exists()) collabFile.readText(Charsets.UTF_8) else ""
+            var localData = try {
+                jsonFormat.decodeFromString<com.todo.app.data.model.CollaborationData>(localContent)
+            } catch (e: Exception) {
+                com.todo.app.data.model.CollaborationData()
+            }
+
+            var cloudData: com.todo.app.data.model.CollaborationData? = null
+            try {
+                val cloudContent = client.downloadFile(collabFilePath)
+                if (cloudContent != null) {
+                    cloudData = jsonFormat.decodeFromString<com.todo.app.data.model.CollaborationData>(cloudContent)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to download collaborations.json from cloud", e)
+            }
+
+            if (cloudData != null) {
+                val (merged, changed) = mergeCollaborations(localData, cloudData)
+                if (changed) {
+                    val mergedStr = jsonFormat.encodeToString(merged)
+                    writeCollaborationsFile(mergedStr)
+                    try {
+                        client.uploadFile(collabFilePath, mergedStr)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to upload collaborations.json to cloud", e)
+                    }
+                }
+                _collaborations.value = merged.collaborations.filter { !it.deleted }
+            } else {
+                val localStr = jsonFormat.encodeToString(localData)
+                try {
+                    client.uploadFile(collabFilePath, localStr)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to upload collaborations.json to cloud", e)
+                }
+                _collaborations.value = localData.collaborations.filter { !it.deleted }
+            }
         }
     }
 }

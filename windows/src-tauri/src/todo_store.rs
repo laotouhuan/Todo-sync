@@ -10,6 +10,13 @@ use crate::{WebdavHttpClient, GithubHttpClient};
 use base64::Engine;
 use std::time::SystemTime;
 
+use aes_gcm::{
+    aead::{Aead, KeyInit},
+    Aes256Gcm, Nonce
+};
+use sha2::{Digest, Sha256};
+use rand::Rng;
+
 // 常量定义
 const MAX_BACKUP_COUNT: usize = 5;
 const LOCK_RETRY_COUNT: usize = 20;
@@ -28,6 +35,8 @@ pub struct CollaborationSource {
     pub webdav_password: String,
     pub webdav_filepath: String,
     pub expire_at: Option<i64>, // Unix 时间戳，None 表示永久
+    pub updated_at: String,     // 用于冲突合并的 ISO 8601 时间戳
+    pub deleted: bool,          // 软删除标记
 }
 
 #[derive(Serialize)]
@@ -45,7 +54,6 @@ pub struct AppConfig {
     pub webdav_password: Option<String>,
     pub webdav_filepath: Option<String>,
     pub nickname: Option<String>,
-    pub collaborations: Option<Vec<CollaborationSource>>,
     pub default_due_date: Option<String>,
     pub default_insertion: Option<String>,
 }
@@ -57,16 +65,143 @@ pub fn get_config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(path.join("config.json"))
 }
 
+fn get_iso_timestamp() -> String {
+    let now = SystemTime::now();
+    let seconds = now.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let days = seconds / 86400;
+    let seconds_in_day = seconds % 86400;
+    let hours = seconds_in_day / 3600;
+    let minutes = (seconds_in_day % 3600) / 60;
+    let secs = seconds_in_day % 60;
+    
+    // 简易公历算法（适用于 1970-2099 年）
+    let mut year = 1970;
+    let mut day_count = days;
+    loop {
+        let is_leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+        let days_in_year = if is_leap { 366 } else { 365 };
+        if day_count < days_in_year {
+            break;
+        }
+        day_count -= days_in_year;
+        year += 1;
+    }
+    
+    let is_leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    let month_days = vec![31, if is_leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut month = 1;
+    for m_days in month_days {
+        if day_count < m_days {
+            break;
+        }
+        day_count -= m_days;
+        month += 1;
+    }
+    let day = day_count + 1;
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, hours, minutes, secs)
+}
+
+pub fn get_collaborations_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let config = load_config(app);
+    if let Some(p) = config.sync_path {
+        let pb = PathBuf::from(p);
+        fs::create_dir_all(&pb).map_err(|e| format!("Failed to create sync dir: {e}"))?;
+        Ok(pb.join("collaborations.json"))
+    } else {
+        let path = app.path().app_data_dir()
+            .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+        fs::create_dir_all(&path).map_err(|e| format!("Failed to create data dir: {e}"))?;
+        Ok(path.join("collaborations.json"))
+    }
+}
+
+pub fn read_collaborations_file(app: &AppHandle) -> Result<String, String> {
+    let path = get_collaborations_path(app)?;
+    if !path.exists() {
+        return Ok("{\"version\":1,\"last_updated\":\"\",\"collaborations\":[]}".to_string());
+    }
+    let _guard = acquire_lock(&path, false);
+    fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+pub fn write_collaborations_file(app: &AppHandle, data: &str) -> Result<(), String> {
+    let path = get_collaborations_path(app)?;
+    let _guard = acquire_lock(&path, true);
+    atomic_write(&path, data)
+}
+
 pub fn load_config(app: &AppHandle) -> AppConfig {
     let path = match get_config_path(app) {
         Ok(p) => p,
         Err(_) => return AppConfig::default(),
     };
-    if let Ok(data) = fs::read_to_string(&path) {
-        serde_json::from_str(&data).unwrap_or_default()
-    } else {
-        AppConfig::default()
+    let data = match fs::read_to_string(&path) {
+        Ok(d) => d,
+        Err(_) => return AppConfig::default(),
+    };
+
+    // 尝试解析为 JSON Value 来处理老配置迁移
+    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&data) {
+        if let Some(collabs_val) = val.get_mut("collaborations") {
+            if let Some(collabs) = collabs_val.as_array() {
+                if !collabs.is_empty() {
+                    // 写入新的 collaborations.json
+                    let mut new_collab_data = serde_json::json!({
+                        "version": 1,
+                        "last_updated": get_iso_timestamp(),
+                        "collaborations": []
+                    });
+                    
+                    if let Some(arr) = new_collab_data["collaborations"].as_array_mut() {
+                        let now_iso = get_iso_timestamp();
+                        for item in collabs {
+                            let mut mapped_item = item.clone();
+                            if mapped_item.get("updated_at").is_none() {
+                                mapped_item["updated_at"] = serde_json::json!(now_iso);
+                            }
+                            if mapped_item.get("deleted").is_none() {
+                                mapped_item["deleted"] = serde_json::json!(false);
+                            }
+                            arr.push(mapped_item);
+                        }
+                    }
+
+                    if let Ok(collab_path) = get_collaborations_path(app) {
+                        // 合并现有数据
+                        if collab_path.exists() {
+                            if let Ok(existing_str) = fs::read_to_string(&collab_path) {
+                                if let Ok(mut existing_val) = serde_json::from_str::<serde_json::Value>(&existing_str) {
+                                    if let Some(existing_arr) = existing_val["collaborations"].as_array_mut() {
+                                        if let Some(new_arr) = new_collab_data["collaborations"].as_array() {
+                                            for item in new_arr {
+                                                if !existing_arr.iter().any(|existing_item| existing_item["id"].as_str() == item["id"].as_str()) {
+                                                    existing_arr.push(item.clone());
+                                                }
+                                            }
+                                        }
+                                        new_collab_data = existing_val;
+                                    }
+                                }
+                            }
+                        }
+                        if let Ok(data_str) = serde_json::to_string_pretty(&new_collab_data) {
+                            let _ = write_collaborations_file(app, &data_str);
+                        }
+                    }
+                }
+            }
+            // 移出 config 中的 collaborations 字段并重新保存
+            if let Some(obj) = val.as_object_mut() {
+                obj.remove("collaborations");
+                if let Ok(cleaned_config) = serde_json::from_value::<AppConfig>(serde_json::Value::Object(obj.clone())) {
+                    let _ = save_config(app, &cleaned_config);
+                    return cleaned_config;
+                }
+            }
+        }
     }
+
+    serde_json::from_str(&data).unwrap_or_default()
 }
 
 pub fn save_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
@@ -161,6 +296,88 @@ async fn check_parent_folder_exists(client: &reqwest::Client, parent_url: &str, 
 pub async fn fetch_from_cloud(app: AppHandle) -> Result<String, String> {
     let config = load_config(&app);
     let conn = build_webdav_conn(&config)?;
+    let client = app.state::<WebdavHttpClient>().inner().0.clone();
+
+    let resp = client.get(&conn.target)
+        .basic_auth(&conn.user, Some(&conn.pass))
+        .send().await.map_err(|e| e.to_string())?;
+
+    if resp.status().is_success() {
+        resp.text().await.map_err(|e| e.to_string())
+    } else if resp.status().as_u16() == 404 {
+        let last_slash = conn.target.rfind('/').unwrap_or(0);
+        if last_slash > 0 {
+            let parent_url = &conn.target[..last_slash];
+            if check_parent_folder_exists(&client, parent_url, &conn.user, &conn.pass).await {
+                Err("FILE_NOT_FOUND".to_string())
+            } else {
+                Err("云端同步目录不存在，请先在坚果云中手动创建该文件夹。".to_string())
+            }
+        } else {
+            Err("FILE_NOT_FOUND".to_string())
+        }
+    } else {
+        Err(format!("WebDAV GET Error: {}", resp.status()))
+    }
+}
+
+fn build_collaborations_webdav_conn(config: &AppConfig) -> Result<WebDavConn, String> {
+    if config.sync_mode.as_deref() != Some("webdav") {
+        return Err("Not in WebDAV mode".to_string());
+    }
+    let url = config.webdav_url.as_deref().unwrap_or("https://dav.jianguoyun.com/dav/");
+    let user = config.webdav_username.as_deref().unwrap_or("").to_string();
+    let pass = config.webdav_password.as_deref().unwrap_or("").to_string();
+    let file_path = config.webdav_filepath.as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("我的坚果云/to-do/todo_data.json");
+
+    // 1.4 路径解析契约: 提取父目录并拼接 collaborations.json
+    let parent_path = if let Some(idx) = file_path.rfind('/') {
+        &file_path[..idx]
+    } else if let Some(idx) = file_path.rfind('\\') {
+        &file_path[..idx]
+    } else {
+        ""
+    };
+    let collab_file_path = if parent_path.is_empty() {
+        "collaborations.json".to_string()
+    } else {
+        format!("{}/collaborations.json", parent_path)
+    };
+
+    let encoded_path = collab_file_path.split('/').map(|s| {
+        if s.is_empty() { String::new() } else { urlencoding::encode(s).into_owned() }
+    }).collect::<Vec<_>>().join("/");
+
+    let target = if url.ends_with('/') { format!("{}{}", url, encoded_path) } else { format!("{}/{}", url, encoded_path) };
+
+    Ok(WebDavConn { user, pass, target })
+}
+
+#[tauri::command]
+pub async fn sync_collaborations_to_cloud(app: AppHandle, data: String) -> Result<(), String> {
+    let config = load_config(&app);
+    let conn = build_collaborations_webdav_conn(&config)?;
+    let client = app.state::<WebdavHttpClient>().inner().0.clone();
+
+    let resp = client.put(&conn.target)
+        .basic_auth(&conn.user, Some(&conn.pass))
+        .header("Content-Type", "application/json; charset=utf-8")
+        .body(data)
+        .send().await.map_err(|e| e.to_string())?;
+
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("WebDAV PUT Error: {}", resp.status()))
+    }
+}
+
+#[tauri::command]
+pub async fn fetch_collaborations_from_cloud(app: AppHandle) -> Result<String, String> {
+    let config = load_config(&app);
+    let conn = build_collaborations_webdav_conn(&config)?;
     let client = app.state::<WebdavHttpClient>().inner().0.clone();
 
     let resp = client.get(&conn.target)
@@ -381,6 +598,16 @@ pub fn write_todo_data(app: AppHandle, data: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn read_collaborations_data(app: AppHandle) -> Result<String, String> {
+    read_collaborations_file(&app)
+}
+
+#[tauri::command]
+pub fn write_collaborations_data(app: AppHandle, data: String) -> Result<(), String> {
+    write_collaborations_file(&app, &data)
+}
+
+#[tauri::command]
 pub async fn get_latest_release(app: AppHandle) -> Result<String, String> {
     let client = app.state::<GithubHttpClient>().inner().0.clone();
 
@@ -397,8 +624,91 @@ pub async fn get_latest_release(app: AppHandle) -> Result<String, String> {
     }
 }
 
+fn find_collaboration_source(app: &AppHandle, collab_id: &str) -> Result<CollaborationSource, String> {
+    let collab_path = get_collaborations_path(app)?;
+    if !collab_path.exists() {
+        return Err("未找到协作清单".into());
+    }
+    let content = read_collaborations_file(app)?;
+    let collab_data: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    
+    let list = collab_data["collaborations"].as_array()
+        .ok_or("数据损坏")?;
+    
+    for v in list {
+        let c: CollaborationSource = serde_json::from_value(v.clone()).map_err(|e| e.to_string())?;
+        if c.id == collab_id {
+            if c.deleted {
+                return Err("该协作清单已被删除".into());
+            }
+            return Ok(c);
+        }
+    }
+    Err("未找到协作清单".into())
+}
+
 #[tauri::command]
-pub fn generate_share_code(app: AppHandle, expire_days: Option<u32>) -> Result<String, String> {
+pub fn get_collaborations(app: AppHandle) -> Result<Vec<CollaborationSource>, String> {
+    let collab_path = get_collaborations_path(&app)?;
+    if !collab_path.exists() {
+        return Ok(vec![]);
+    }
+    let content = read_collaborations_file(&app)?;
+    let collab_data: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    
+    let list = collab_data["collaborations"].as_array()
+        .ok_or("数据损坏")?;
+    
+    let mut result = Vec::new();
+    for v in list {
+        let c: CollaborationSource = serde_json::from_value(v.clone()).map_err(|e| e.to_string())?;
+        if !c.deleted {
+            result.push(c);
+        }
+    }
+    
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn decrypt_share_code(
+    code: String,
+    key_str: String
+) -> Result<serde_json::Value, String> {
+    let b64 = code.strip_prefix("tdsync://").ok_or("授权码须以 tdsync:// 开头")?;
+    let packed = base64::engine::general_purpose::STANDARD.decode(b64)
+        .map_err(|_| "Base64 解码失败")?;
+
+    if packed.len() < 12 + 16 {
+        return Err("授权码数据损坏".into());
+    }
+
+    // 1. 解析出 IV 和 密文+Tag
+    let (iv, ciphertext_with_tag) = packed.split_at(12);
+
+    // 2. 从密钥字符串派生密钥
+    let mut hasher = Sha256::new();
+    hasher.update(key_str.trim().as_bytes());
+    let key_bytes = hasher.finalize();
+
+    // 3. AES-GCM-256 解密
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes).map_err(|e| e.to_string())?;
+    let nonce = Nonce::from_slice(iv);
+    
+    let decrypted_bytes = cipher.decrypt(nonce, ciphertext_with_tag)
+        .map_err(|e| format!("口令错误或已被篡改 (解密失败: {})", e))?;
+
+    let plaintext = String::from_utf8(decrypted_bytes)
+        .map_err(|_| "解密后的数据无效 (编码错误)")?;
+
+    let v: serde_json::Value = serde_json::from_str(&plaintext)
+        .map_err(|_| "解密后的 JSON 无效")?;
+
+    Ok(v)
+}
+
+#[tauri::command]
+pub fn generate_share_code(app: AppHandle, expire_days: Option<u32>) -> Result<(String, String), String> {
     let config = load_config(&app);
     if config.sync_mode.as_deref() != Some("webdav") {
         return Err("请先配置 WebDAV 同步模式".into());
@@ -416,68 +726,164 @@ pub fn generate_share_code(app: AppHandle, expire_days: Option<u32>) -> Result<S
             + (d as i64) * 86400,
         None => 0,
     };
+    
+    // 1. 生成 12 位随机提取密钥 (A-Z, a-z, 0-9)
+    let charset: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut rng = rand::thread_rng();
+    let key_str: String = (0..12)
+        .map(|_| {
+            let idx = rng.gen_range(0..charset.len());
+            charset[idx] as char
+        })
+        .collect();
+
+    // 2. 从密钥字符串派生 256 位密钥 (SHA-256)
+    let mut hasher = Sha256::new();
+    hasher.update(key_str.as_bytes());
+    let key_bytes = hasher.finalize();
+
+    // 3. 构建待加密的明文 JSON
     let json = serde_json::json!({ "url": url, "user": user, "pass": pass, "path": path, "exp": exp });
-    let encoded = base64::engine::general_purpose::STANDARD
-        .encode(serde_json::to_string(&json).unwrap());
-    Ok(format!("tdsync://{}", encoded))
+    let plaintext = serde_json::to_string(&json).unwrap();
+
+    // 4. AES-GCM-256 加密
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes).map_err(|e| e.to_string())?;
+    
+    // 生成 12 字节随机 IV
+    let mut iv = [0u8; 12];
+    rng.fill(&mut iv);
+    let nonce = Nonce::from_slice(&iv);
+
+    let ciphertext_with_tag = cipher.encrypt(nonce, plaintext.as_bytes())
+        .map_err(|e| format!("加密错误: {}", e))?;
+
+    // 5. 拼接结构: IV (12 字节) + Ciphertext + Tag
+    let mut packed = Vec::with_capacity(iv.len() + ciphertext_with_tag.len());
+    packed.extend_from_slice(&iv);
+    packed.extend_from_slice(&ciphertext_with_tag);
+
+    // 6. Base64 编码并加上 tdsync:// 前缀
+    let base64_str = base64::engine::general_purpose::STANDARD.encode(&packed);
+    let share_code = format!("tdsync://{}", base64_str);
+
+    Ok((share_code, key_str))
 }
 
 #[tauri::command]
-pub fn import_share_code(app: AppHandle, code: String, name: String) -> Result<CollaborationSource, String> {
-    let b64 = code.strip_prefix("tdsync://").ok_or("授权码须以 tdsync:// 开头")?;
-    let bytes = base64::engine::general_purpose::STANDARD.decode(b64)
-        .map_err(|_| "Base64 解码失败")?;
-    let json_str = String::from_utf8(bytes).map_err(|_| "无效字符")?;
-    let v: serde_json::Value = serde_json::from_str(&json_str).map_err(|_| "JSON 解析失败")?;
-    let url = v["url"].as_str().ok_or("缺少 url")?.to_string();
-    let user = v["user"].as_str().ok_or("缺少 user")?.to_string();
-    let pass = v["pass"].as_str().ok_or("缺少 pass")?.to_string();
-    let path = v["path"].as_str().ok_or("缺少 path")?.to_string();
-    let exp = v["exp"].as_i64().unwrap_or(0);
+pub fn import_share_code(
+    app: AppHandle,
+    code: String,
+    key: String,
+    name: String
+) -> Result<CollaborationSource, String> {
+    // 1. 解密
+    let decrypted = decrypt_share_code(code, key)?;
+    let url = decrypted["url"].as_str().ok_or("缺少 url")?.to_string();
+    let user = decrypted["user"].as_str().ok_or("缺少 user")?.to_string();
+    let pass = decrypted["pass"].as_str().ok_or("缺少 pass")?.to_string();
+    let path = decrypted["path"].as_str().ok_or("缺少 path")?.to_string();
+    let exp = decrypted["exp"].as_i64().unwrap_or(0);
     if !url.starts_with("https://") { return Err("URL 必须使用 https".into()); }
 
-    let mut config = load_config(&app);
-    let collabs = config.collaborations.get_or_insert_with(Vec::new);
-    // 去重：相同 (url, user, filepath) 视为同源，覆盖更新过期时间和密码
-    if let Some(existing) = collabs.iter_mut().find(|c|
-        c.webdav_url == url && c.webdav_username == user && c.webdav_filepath == path
-    ) {
-        existing.webdav_password = pass;
-        existing.expire_at = if exp == 0 { None } else { Some(exp) };
-        let result = existing.clone();
-        save_config(&app, &config)?;
-        return Ok(result);
-    }
-    let src = CollaborationSource {
-        id: uuid::Uuid::new_v4().to_string(),
-        name,
-        webdav_url: url,
-        webdav_username: user,
-        webdav_password: pass,
-        webdav_filepath: path,
-        expire_at: if exp == 0 { None } else { Some(exp) },
+    // 2. 加锁读取现有的 collaborations.json
+    let collab_path = get_collaborations_path(&app)?;
+    let mut collab_data = if collab_path.exists() {
+        let content = read_collaborations_file(&app)?;
+        serde_json::from_str::<serde_json::Value>(&content).unwrap_or(serde_json::json!({
+            "version": 1,
+            "last_updated": "",
+            "collaborations": []
+        }))
+    } else {
+        serde_json::json!({
+            "version": 1,
+            "last_updated": "",
+            "collaborations": []
+        })
     };
-    collabs.push(src.clone());
-    save_config(&app, &config)?;
-    Ok(src)
+
+    let collabs = collab_data["collaborations"].as_array_mut().ok_or("数据损坏")?;
+    
+    // 3. 查重并合并 (LWW)
+    let now_iso = get_iso_timestamp();
+    let mut result = None;
+    if let Some(existing) = collabs.iter_mut().find(|c| {
+        c["webdav_url"].as_str() == Some(&url)
+            && c["webdav_username"].as_str() == Some(&user)
+            && c["webdav_filepath"].as_str() == Some(&path)
+    }) {
+        existing["webdav_password"] = serde_json::json!(pass);
+        existing["expire_at"] = if exp == 0 { serde_json::Value::Null } else { serde_json::json!(exp) };
+        existing["updated_at"] = serde_json::json!(now_iso);
+        existing["deleted"] = serde_json::json!(false);
+        existing["name"] = serde_json::json!(name);
+        
+        let src: CollaborationSource = serde_json::from_value(existing.clone()).map_err(|e| e.to_string())?;
+        result = Some(src);
+    } else {
+        let src = CollaborationSource {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            webdav_url: url,
+            webdav_username: user,
+            webdav_password: pass,
+            webdav_filepath: path,
+            expire_at: if exp == 0 { None } else { Some(exp) },
+            updated_at: now_iso.clone(),
+            deleted: false,
+        };
+        collabs.push(serde_json::to_value(&src).unwrap());
+        result = Some(src);
+    }
+
+    collab_data["last_updated"] = serde_json::json!(now_iso);
+    
+    // 4. 写回 collaborations.json
+    let data_str = serde_json::to_string_pretty(&collab_data).map_err(|e| e.to_string())?;
+    write_collaborations_file(&app, &data_str)?;
+
+    Ok(result.unwrap())
 }
 
 #[tauri::command]
 pub fn delete_collaboration(app: AppHandle, id: String) -> Result<(), String> {
-    let mut config = load_config(&app);
-    if let Some(collabs) = config.collaborations.as_mut() {
-        collabs.retain(|c| c.id != id);
+    let collab_path = get_collaborations_path(&app)?;
+    if !collab_path.exists() {
+        return Ok(());
     }
-    save_config(&app, &config)
+
+    let content = read_collaborations_file(&app)?;
+    let mut collab_data = serde_json::from_str::<serde_json::Value>(&content).unwrap_or(serde_json::json!({
+        "version": 1,
+        "last_updated": "",
+        "collaborations": []
+    }));
+
+    let collabs = collab_data["collaborations"].as_array_mut().ok_or("数据损坏")?;
+    let now_iso = get_iso_timestamp();
+    let mut found = false;
+    for c in collabs.iter_mut() {
+        if c["id"].as_str() == Some(&id) {
+            c["deleted"] = serde_json::json!(true);
+            c["updated_at"] = serde_json::json!(now_iso);
+            found = true;
+            break;
+        }
+    }
+
+    if found {
+        collab_data["last_updated"] = serde_json::json!(now_iso);
+        let data_str = serde_json::to_string_pretty(&collab_data).map_err(|e| e.to_string())?;
+        write_collaborations_file(&app, &data_str)?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn read_collaboration_todos(app: AppHandle, collab_id: String) -> Result<CollabReadResult, String> {
-    let config = load_config(&app);
-    let collab = config.collaborations.as_ref()
-        .and_then(|cs| cs.iter().find(|c| c.id == collab_id))
-        .ok_or("未找到协作清单")?;
-    let target = build_collab_url(collab);
+    let collab = find_collaboration_source(&app, &collab_id)?;
+    let target = build_collab_url(&collab);
     let client = app.state::<WebdavHttpClient>().inner().0.clone();
     let resp = client.get(&target)
         .basic_auth(&collab.webdav_username, Some(&collab.webdav_password))
@@ -514,11 +920,8 @@ pub async fn read_collaboration_todos(app: AppHandle, collab_id: String) -> Resu
 pub async fn write_collaboration_todo(
     app: AppHandle, collab_id: String, todo_json: String
 ) -> Result<(), String> {
-    let config = load_config(&app);
-    let collab = config.collaborations.as_ref()
-        .and_then(|cs| cs.iter().find(|c| c.id == collab_id))
-        .ok_or("未找到协作清单")?;
-    let target = build_collab_url(collab);
+    let collab = find_collaboration_source(&app, &collab_id)?;
+    let target = build_collab_url(&collab);
     let client = app.state::<WebdavHttpClient>().inner().0.clone();
     
     // 1. 拉取

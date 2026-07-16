@@ -48,6 +48,7 @@ const appState = {
     showStatsList: false,
     // ====== 协作清单状态 ======
     activeSource: { type: 'personal' },  // { type: 'personal' } | { type: 'collaboration', id: '...' }
+    collaborations: [],                   // 协作源配置列表
     collabData: null,                     // 他人的 TodoData 缓存
     collabLoading: false,                 // 是否正在拉取协作清单中
     collabError: null                     // 协作异常信息
@@ -378,6 +379,56 @@ function mergeTodoData(localData, cloudData) {
     };
 }
 
+function mergeCollaborations(local, cloud) {
+    let localData = local || { version: 1, last_updated: "", collaborations: [] };
+    let cloudData = cloud || { version: 1, last_updated: "", collaborations: [] };
+    
+    let mergedList = [];
+    let localList = localData.collaborations || [];
+    let cloudList = cloudData.collaborations || [];
+    
+    let allIds = new Set([
+        ...localList.map(c => c.id),
+        ...cloudList.map(c => c.id)
+    ]);
+    
+    let changed = false;
+    
+    for (let id of allIds) {
+        let localItem = localList.find(c => c.id === id);
+        let cloudItem = cloudList.find(c => c.id === id);
+        
+        if (localItem && cloudItem) {
+            let localTime = new Date(localItem.updated_at || 0).getTime();
+            let cloudTime = new Date(cloudItem.updated_at || 0).getTime();
+            
+            if (cloudTime > localTime) {
+                mergedList.push(cloudItem);
+                changed = true;
+            } else {
+                mergedList.push(localItem);
+                if (localTime > cloudTime) {
+                    changed = true;
+                }
+            }
+        } else if (localItem) {
+            mergedList.push(localItem);
+            changed = true;
+        } else if (cloudItem) {
+            mergedList.push(cloudItem);
+            changed = true;
+        }
+    }
+    
+    let mergedData = {
+        version: 1,
+        last_updated: changed ? new Date().toISOString() : (localData.last_updated || cloudData.last_updated || new Date().toISOString()),
+        collaborations: mergedList
+    };
+    
+    return { data: mergedData, changed: changed };
+}
+
 // ====== Data I/O ======
 async function loadData() {
     try {
@@ -436,6 +487,37 @@ async function loadData() {
                 render();
             }
         }
+
+        // 同步协作源数据
+        let localCollabsStr = await invoke("read_collaborations_data").catch(() => "{}");
+        let localCollabs = null;
+        try { localCollabs = JSON.parse(localCollabsStr); } catch (e) {}
+        if (!localCollabs || !localCollabs.collaborations) {
+            localCollabs = { version: 1, last_updated: "", collaborations: [] };
+        }
+
+        if (appState.appConfig.sync_mode === 'webdav') {
+            try {
+                let cloudCollabsStr = await invoke("fetch_collaborations_from_cloud");
+                let cloudCollabs = JSON.parse(cloudCollabsStr);
+
+                let { data: mergedCollabs, changed: collabsChanged } = mergeCollaborations(localCollabs, cloudCollabs);
+                if (collabsChanged) {
+                    await invoke("write_collaborations_data", { data: JSON.stringify(mergedCollabs) });
+                    await invoke("sync_collaborations_to_cloud", { data: JSON.stringify(mergedCollabs) }).catch(err => console.error("Sync collabs failed:", err));
+                }
+            } catch (e) {
+                if (e === "FILE_NOT_FOUND") {
+                    await invoke("sync_collaborations_to_cloud", { data: JSON.stringify(localCollabs) }).catch(err => console.error("Sync collabs failed:", err));
+                } else {
+                    console.error("Fetch collaborations from cloud failed:", e);
+                }
+            }
+        }
+
+        // 重新获取活跃的协作列表
+        appState.collaborations = await invoke("get_collaborations").catch(() => []);
+
         updateSourceSelector();
 
         if (statusEl && !statusEl.classList.contains('error')) {
@@ -482,8 +564,8 @@ function getActiveTodos() {
 }
 
 function getCollabName(collabId) {
-    if (appState.appConfig && appState.appConfig.collaborations) {
-        const collab = appState.appConfig.collaborations.find(c => c.id === collabId);
+    if (appState.collaborations) {
+        const collab = appState.collaborations.find(c => c.id === collabId);
         return collab ? collab.name : '未知协作清单';
     }
     return '未知协作清单';
@@ -533,7 +615,7 @@ function renderCollabListInSettings() {
     if (!listContainer) return;
     listContainer.innerHTML = '';
     
-    const collabs = (appState.appConfig && appState.appConfig.collaborations) || [];
+    const collabs = appState.collaborations || [];
     if (collabs.length === 0) {
         listContainer.innerHTML = '<div style="font-size: 0.75rem; color: var(--text-secondary); text-align: center; padding: 10px;">暂无绑定的协作清单</div>';
         return;
@@ -562,9 +644,32 @@ function renderCollabListInSettings() {
             if (confirm(`确定要解绑“${collab.name}”的协作清单吗？`)) {
                 try {
                     await invoke('delete_collaboration', { id: id });
-                    appState.appConfig = await invoke('get_app_config');
+                    
+                    // 获取本地的最新协作配置（包含软删除标记的）
+                    let localCollabsStr = await invoke("read_collaborations_data").catch(() => "{}");
+                    let localCollabs = null;
+                    try { localCollabs = JSON.parse(localCollabsStr); } catch (err) {}
+                    
+                    // 重新获取活跃的协作列表
+                    appState.collaborations = await invoke("get_collaborations").catch(() => []);
+                    
+                    if (appState.appConfig.sync_mode === 'webdav' && localCollabs) {
+                        await invoke("sync_collaborations_to_cloud", { data: JSON.stringify(localCollabs) })
+                            .catch(err => console.error("Sync collabs failed:", err));
+                    }
+                    
                     renderCollabListInSettings();
                     updateSourceSelector();
+                    
+                    // 如果解绑的是当前激活的协作清单，切回“我的待办”
+                    if (appState.activeSource.type === 'collaboration' && appState.activeSource.id === id) {
+                        appState.activeSource = { type: 'personal' };
+                        appState.collabData = null;
+                        appState.collabError = null;
+                        const selector = document.getElementById('source-selector');
+                        if (selector) selector.value = 'personal';
+                        render();
+                    }
                 } catch (err) {
                     showToast('解绑失败: ' + err);
                 }
@@ -581,7 +686,7 @@ function updateSourceSelector() {
     
     selector.innerHTML = '<option value="personal">我的待办</option>';
     
-    const collabs = (appState.appConfig && appState.appConfig.collaborations) || [];
+    const collabs = appState.collaborations || [];
     collabs.forEach(collab => {
         const opt = document.createElement('option');
         opt.value = collab.id;
@@ -3358,8 +3463,7 @@ window.addEventListener("DOMContentLoaded", () => {
                 webdav_filepath: settingWebdavFilepath.value,
                 nickname: document.getElementById('setting-nickname').value.trim() || null,
                 default_due_date: document.getElementById('setting-default-due-date').value,
-                default_insertion: document.getElementById('setting-default-insertion').value,
-                collaborations: appState.appConfig.collaborations || []
+                default_insertion: document.getElementById('setting-default-insertion').value
             };
             await invoke("save_app_config", { config: newConfig });
             appState.appConfig = newConfig;
@@ -3390,15 +3494,21 @@ window.addEventListener("DOMContentLoaded", () => {
     // 2. 生成协作授权口令
     const generateShareBtn = document.getElementById('generate-share-btn');
     const shareExpireSelect = document.getElementById('share-expire');
+    const shareOutputContainer = document.getElementById('share-output-container');
     const shareCodeOutput = document.getElementById('share-code-output');
+    const shareKeyOutput = document.getElementById('share-key-output');
+    const copyShareKeyBtn = document.getElementById('copy-share-key-btn');
+    
     if (generateShareBtn) {
         generateShareBtn.addEventListener('click', async () => {
             try {
                 const expVal = shareExpireSelect.value;
                 const expireDays = expVal ? parseInt(expVal, 10) : null;
-                const code = await invoke('generate_share_code', { expireDays: expireDays });
+                const [code, key] = await invoke('generate_share_code', { expireDays: expireDays });
+                
                 shareCodeOutput.textContent = code;
-                shareCodeOutput.style.display = 'block';
+                shareKeyOutput.textContent = key;
+                shareOutputContainer.style.display = 'flex';
                 showToast('授权口令生成成功，已显示在下方，双击可全选复制');
             } catch (err) {
                 showToast('生成失败: ' + err);
@@ -3406,16 +3516,49 @@ window.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    if (copyShareKeyBtn) {
+        copyShareKeyBtn.addEventListener('click', () => {
+            const keyText = shareKeyOutput.textContent.trim();
+            if (keyText) {
+                navigator.clipboard.writeText(keyText).then(() => {
+                    showToast('密钥复制成功！');
+                }).catch(err => {
+                    showToast('复制失败: ' + err);
+                });
+            }
+        });
+    }
+
     // 3. 导入他人的协作授权口令
     const importShareBtn = document.getElementById('import-share-btn');
     const importCodeInput = document.getElementById('import-code-input');
+    const importKeyInput = document.getElementById('import-key-input');
     const importNameInput = document.getElementById('import-name-input');
+    
+    if (importCodeInput) {
+        importCodeInput.addEventListener('input', () => {
+            const val = importCodeInput.value.trim();
+            // 只要输入框里有内容，就滑出密钥输入框
+            if (val) {
+                importKeyInput.style.display = 'block';
+            } else {
+                importKeyInput.style.display = 'none';
+                importKeyInput.value = '';
+            }
+        });
+    }
+    
     if (importShareBtn) {
         importShareBtn.addEventListener('click', async () => {
             const code = importCodeInput.value.trim();
+            const key = importKeyInput.value.trim();
             const name = importNameInput.value.trim();
             if (!code) {
                 showToast('请粘贴要导入的授权码');
+                return;
+            }
+            if (!key) {
+                showToast('请输入 12 位提取密钥');
                 return;
             }
             if (!name) {
@@ -3423,11 +3566,27 @@ window.addEventListener("DOMContentLoaded", () => {
                 return;
             }
             try {
-                await invoke('import_share_code', { code: code, name: name });
+                await invoke('import_share_code', { code: code, key: key, name: name });
                 showToast('协作清单导入成功');
+                
                 importCodeInput.value = '';
+                importKeyInput.value = '';
+                importKeyInput.style.display = 'none';
                 importNameInput.value = '';
-                appState.appConfig = await invoke('get_app_config');
+                
+                // 重新获取本地的最新协作配置（包含导入结果的）
+                let localCollabsStr = await invoke("read_collaborations_data").catch(() => "{}");
+                let localCollabs = null;
+                try { localCollabs = JSON.parse(localCollabsStr); } catch (err) {}
+                
+                // 重新获取活跃协作列表
+                appState.collaborations = await invoke("get_collaborations").catch(() => []);
+                
+                if (appState.appConfig.sync_mode === 'webdav' && localCollabs) {
+                    await invoke("sync_collaborations_to_cloud", { data: JSON.stringify(localCollabs) })
+                        .catch(err => console.error("Sync collabs failed:", err));
+                }
+                
                 renderCollabListInSettings();
                 updateSourceSelector();
             } catch (err) {

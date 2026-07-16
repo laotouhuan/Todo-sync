@@ -406,7 +406,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
 
     Column(modifier = Modifier.fillMaxSize()) {
         var showSourceMenu by remember { mutableStateOf(false) }
-        val collabs = viewModel.configManager.collaborations
+        val collabs = viewModel.collaborations.collectAsState().value
 
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -434,6 +434,21 @@ fun ClassicListView(viewModel: TodoViewModel) {
                         contentDescription = "切换清单",
                         tint = MaterialTheme.colorScheme.primary
                     )
+
+                    if (isReadOnly) {
+                        Spacer(Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.errorContainer
+                        ) {
+                            Text(
+                                text = "只读清单",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
 
                 DropdownMenu(
@@ -459,45 +474,46 @@ fun ClassicListView(viewModel: TodoViewModel) {
                 }
             }
 
-            if (isReadOnly) {
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    modifier = Modifier.padding(start = 8.dp)
-                ) {
-                    Text(
-                        text = "只读清单",
-                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Search toggle button
+                IconButton(onClick = {
+                    showSearchBar = !showSearchBar
+                    if (!showSearchBar) searchQuery = ""
+                }) {
+                    Icon(
+                        imageVector = if (showSearchBar) Icons.Filled.Close else Icons.Filled.Search,
+                        contentDescription = "搜索",
+                        tint = MaterialTheme.colorScheme.primary
                     )
+                }
+                IconButton(
+                    onClick = {
+                        val source = activeSource
+                        if (source is TodoViewModel.ActiveSource.Collaboration) {
+                            viewModel.loadCollabData(source.collab)
+                        } else {
+                            viewModel.syncWithCloud()
+                        }
+                    },
+                    enabled = true
+                ) {
+                    val isLoading = if (activeSource is TodoViewModel.ActiveSource.Personal) isSyncing else collabLoading
+                    if (isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = "同步",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
         }
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TabRow(selectedTabIndex = selectedTab, modifier = Modifier.weight(1f)) {
-                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("今天聚焦") })
-                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("全部待办") })
-            }
-            // Search toggle button
-            IconButton(onClick = {
-                showSearchBar = !showSearchBar
-                if (!showSearchBar) searchQuery = ""
-            }) {
-                Icon(
-                    imageVector = if (showSearchBar) Icons.Filled.Close else Icons.Filled.Search,
-                    contentDescription = "搜索",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-            IconButton(onClick = { viewModel.syncWithCloud() }, enabled = !isReadOnly) {
-                if (isSyncing) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Filled.Refresh, contentDescription = "同步", tint = if (isReadOnly) Color.Gray else MaterialTheme.colorScheme.primary)
-                }
-            }
+        TabRow(selectedTabIndex = selectedTab, modifier = Modifier.fillMaxWidth()) {
+            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("今天聚焦") })
+            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("全部待办") })
         }
 
         // Real-time Search Input Bar

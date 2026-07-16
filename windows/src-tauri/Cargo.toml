@@ -1,6 +1,6 @@
 [package]
 name = "todo-app"
-version = "1.2.0"
+version = "1.2.1"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -38,6 +38,9 @@ tokio = { version = "1", features = ["sync"] }
 base64 = "0.22"
 httpdate = "1"
 uuid = { version = "1", features = ["v4"] }
+aes-gcm = "0.10"
+rand = "0.8"
+sha2 = "0.10"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"

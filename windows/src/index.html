@@ -479,6 +479,7 @@
             <div class="divider-with-text">导入他人授权码并命名</div>
             <div class="input-group">
               <input type="text" id="import-code-input" placeholder="粘贴 tdsync://..." style="width: 100%; box-sizing: border-box; margin-bottom: 8px;" />
+              <input type="text" id="import-key-input" placeholder="输入 12 位提取密钥" style="width: 100%; box-sizing: border-box; margin-bottom: 8px; display: none;" />
               <div style="display: flex; gap: 8px; align-items: center;">
                 <input type="text" id="import-name-input" placeholder="设置协作清单名字" style="flex: 1; height: 32px;" />
                 <button id="import-share-btn" class="modal-btn secondary" style="padding: 4px 12px; margin: 0; font-size: 0.8rem; width: auto; height: 32px; line-height: 1;">导入</button>
@@ -496,7 +497,15 @@
                 </select>
                 <button id="generate-share-btn" class="modal-btn secondary" style="padding: 4px 12px; margin: 0; font-size: 0.8rem; width: auto; height: 32px; line-height: 1;">生成</button>
               </div>
-              <div id="share-code-output" class="share-code-box" style="display: none; word-break: break-all; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; font-size: 11px; margin-top: 6px; user-select: all; text-align: left; max-height: 80px; overflow-y: auto;"></div>
+              <div id="share-output-container" style="display: none; margin-top: 8px; flex-direction: column; gap: 6px;">
+                <div style="font-size: 0.75rem; color: var(--text-secondary); text-align: left;">加密授权码（双击可复制）：</div>
+                <div id="share-code-output" class="share-code-box" style="word-break: break-all; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; font-size: 11px; user-select: all; text-align: left; max-height: 60px; overflow-y: auto;"></div>
+                <div style="font-size: 0.75rem; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                  <span>12 位提取密钥：</span>
+                  <button id="copy-share-key-btn" class="modal-btn secondary" style="padding: 2px 8px; margin: 0; font-size: 0.7rem; width: auto; height: 20px; line-height: 1; display: inline-block;">复制密钥</button>
+                </div>
+                <div id="share-key-output" style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; font-size: 13px; font-family: monospace; font-weight: bold; text-align: center; color: var(--accent-color); user-select: all;"></div>
+              </div>
             </div>
           </div>
 
