@@ -237,6 +237,8 @@ pub fn run() {
             todo_store::set_sync_path,
             todo_store::read_todo_data,
             todo_store::write_todo_data,
+            todo_store::read_collaborations_data,
+            todo_store::write_collaborations_data,
             todo_store::list_backups,
             todo_store::restore_backup,
             todo_store::get_app_config,
@@ -248,7 +250,10 @@ pub fn run() {
             todo_store::import_share_code,
             todo_store::delete_collaboration,
             todo_store::read_collaboration_todos,
-            todo_store::write_collaboration_todo
+            todo_store::write_collaboration_todo,
+            todo_store::get_collaborations,
+            todo_store::sync_collaborations_to_cloud,
+            todo_store::fetch_collaborations_from_cloud
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

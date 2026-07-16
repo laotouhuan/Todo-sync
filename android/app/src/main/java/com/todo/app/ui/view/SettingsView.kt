@@ -42,6 +42,7 @@ import com.todo.app.utils.UpdateInfo
 import com.todo.app.utils.UpdateResult
 import kotlinx.coroutines.launch
 
+import android.content.Context
 import android.util.Base64
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
@@ -56,15 +57,17 @@ fun SettingsView(viewModel: TodoViewModel) {
     var appPassword by remember { mutableStateOf(viewModel.configManager.appPassword) }
     var filePath by remember { mutableStateOf(viewModel.configManager.filePath) }
     var nickname by remember { mutableStateOf(viewModel.configManager.nickname) }
-    var collaborations by remember { mutableStateOf(viewModel.configManager.collaborations) }
+    val collaborations by viewModel.collaborations.collectAsState()
 
     var defaultDueDate by remember { mutableStateOf(viewModel.configManager.defaultDueDate) }
     var defaultInsertion by remember { mutableStateOf(viewModel.configManager.defaultInsertion) }
 
     var shareCodeOutput by remember { mutableStateOf("") }
+    var shareKeyOutput by remember { mutableStateOf("") }
     var shareExpireDays by remember { mutableStateOf(0) } // 0: 永久, 7: 7天, 30: 30天
 
     var importCodeInput by remember { mutableStateOf("") }
+    var importKeyInput by remember { mutableStateOf("") }
     var importNameInput by remember { mutableStateOf("") }
 
     var showBackupDialog by remember { mutableStateOf(false) }
@@ -196,18 +199,15 @@ fun SettingsView(viewModel: TodoViewModel) {
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(
                             onClick = {
-                                viewModel.syncWithCloud()
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("同步已触发")
-                                }
+                                showConfirmForcePull = true
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = buttonShape,
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                         ) {
-                            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Filled.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("立即同步 (根据时间戳)")
+                            Text("强制从云端恢复覆盖本地")
                         }
                     }
                     1 -> {
@@ -226,6 +226,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                                     label = { Text("输入昵称 (如: 李四)") },
                                     modifier = Modifier.fillMaxWidth()
                                 )
+                                Spacer(Modifier.height(8.dp))
 
                                 // 2. 已绑定的共享协作清单
                                 if (collaborations.isNotEmpty()) {
@@ -251,10 +252,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                                             }
                                             IconButton(
                                                 onClick = {
-                                                    val list = viewModel.configManager.collaborations.toMutableList()
-                                                    list.removeAll { it.id == collab.id }
-                                                    viewModel.configManager.collaborations = list
-                                                    collaborations = list
+                                                    viewModel.deleteCollaboration(collab.id)
                                                     
                                                     val active = viewModel.activeSource.value
                                                     if (active is TodoViewModel.ActiveSource.Collaboration && active.collab.id == collab.id) {
@@ -277,6 +275,15 @@ fun SettingsView(viewModel: TodoViewModel) {
                                     label = { Text("粘贴授权口令") },
                                     modifier = Modifier.fillMaxWidth()
                                 )
+                                if (importCodeInput.trim().startsWith("tdsync://")) {
+                                    Spacer(Modifier.height(8.dp))
+                                    OutlinedTextField(
+                                        value = importKeyInput,
+                                        onValueChange = { importKeyInput = it },
+                                        label = { Text("输入 12 位提取密钥") },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
                                 Spacer(Modifier.height(8.dp))
                                 OutlinedTextField(
                                     value = importNameInput,
@@ -288,40 +295,24 @@ fun SettingsView(viewModel: TodoViewModel) {
                                 Button(
                                     onClick = {
                                         val code = importCodeInput.trim()
+                                        val key = importKeyInput.trim()
                                         val name = importNameInput.trim()
                                         if (code.isEmpty()) {
                                             coroutineScope.launch { snackbarHostState.showSnackbar("请输入授权口令") }
+                                            return@Button
+                                        }
+                                        if (code.startsWith("tdsync://") && key.isEmpty()) {
+                                            coroutineScope.launch { snackbarHostState.showSnackbar("请输入 12 位提取密钥") }
                                             return@Button
                                         }
                                         if (name.isEmpty()) {
                                             coroutineScope.launch { snackbarHostState.showSnackbar("请输入协作清单名字") }
                                             return@Button
                                         }
-                                        try {
-                                            val decodedBytes = Base64.decode(code, Base64.DEFAULT)
-                                            val decodedJson = String(decodedBytes, Charsets.UTF_8)
-                                            val payload = Json.decodeFromString<ShareCodePayload>(decodedJson)
-                                            
-                                            val newCollab = CollaborationSource(
-                                                id = UUID.randomUUID().toString(),
-                                                name = name,
-                                                webdavUrl = payload.url,
-                                                webdavUsername = payload.user,
-                                                webdavPassword = payload.pass,
-                                                webdavFilepath = payload.path,
-                                                expireAt = if (payload.exp > 0) payload.exp else null
-                                            )
-                                            val list = viewModel.configManager.collaborations.toMutableList()
-                                            list.add(newCollab)
-                                            viewModel.configManager.collaborations = list
-                                            collaborations = list
-                                            
-                                            importCodeInput = ""
-                                            importNameInput = ""
-                                            coroutineScope.launch { snackbarHostState.showSnackbar("共享清单导入成功") }
-                                        } catch (e: Exception) {
-                                            coroutineScope.launch { snackbarHostState.showSnackbar("口令无效或解析失败: ${e.message}") }
-                                        }
+                                        viewModel.importCollaboration(code, key, name)
+                                        importCodeInput = ""
+                                        importKeyInput = ""
+                                        importNameInput = ""
                                     },
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = buttonShape,
@@ -360,17 +351,10 @@ fun SettingsView(viewModel: TodoViewModel) {
                                             return@Button
                                         }
                                         try {
-                                            val expTime = if (shareExpireDays > 0) (System.currentTimeMillis() / 1000) + shareExpireDays * 86400L else 0L
-                                            val payload = ShareCodePayload(
-                                                url = serverUrl,
-                                                user = username,
-                                                pass = appPassword,
-                                                path = filePath,
-                                                exp = expTime
-                                            )
-                                            val payloadJson = Json.encodeToString(payload)
-                                            val code = Base64.encodeToString(payloadJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP or Base64.URL_SAFE)
+                                            val expireDaysVal = if (shareExpireDays > 0) shareExpireDays else null
+                                            val (code, key) = viewModel.generateShareCode(expireDaysVal)
                                             shareCodeOutput = code
+                                            shareKeyOutput = key
                                         } catch (e: Exception) {
                                             coroutineScope.launch {
                                                 snackbarHostState.showSnackbar("生成口令失败: ${e.message}")
@@ -390,9 +374,45 @@ fun SettingsView(viewModel: TodoViewModel) {
                                         value = shareCodeOutput,
                                         onValueChange = {},
                                         readOnly = true,
-                                        label = { Text("授权口令（长按可全选复制）") },
+                                        label = { Text("加密授权码") },
                                         modifier = Modifier.fillMaxWidth()
                                     )
+                                    Spacer(Modifier.height(4.dp))
+                                    Button(
+                                        onClick = {
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                            val clip = android.content.ClipData.newPlainText("tdsync_code", shareCodeOutput)
+                                            clipboard.setPrimaryClip(clip)
+                                            coroutineScope.launch { snackbarHostState.showSnackbar("加密授权码已复制") }
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = buttonShape,
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                                    ) {
+                                        Text("复制加密授权码")
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    OutlinedTextField(
+                                        value = shareKeyOutput,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { Text("提取密钥") },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Button(
+                                        onClick = {
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                            val clip = android.content.ClipData.newPlainText("tdsync_key", shareKeyOutput)
+                                            clipboard.setPrimaryClip(clip)
+                                            coroutineScope.launch { snackbarHostState.showSnackbar("提取密钥已复制") }
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = buttonShape,
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                                    ) {
+                                        Text("复制提取密钥")
+                                    }
                                 }
                             }
                         }
@@ -474,19 +494,6 @@ fun SettingsView(viewModel: TodoViewModel) {
                                     Text("历史数据恢复")
                                 }
                             }
-                        }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(
-                            onClick = {
-                                showConfirmForcePull = true
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = buttonShape,
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                        ) {
-                            Icon(Icons.Filled.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("强制从云端恢复覆盖本地")
                         }
                     }
                     4 -> {

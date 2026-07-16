@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CollaborationData",
+  "description": "Schema for Nutstore To-Do App Collaboration Configuration",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "integer",
+      "description": "数据契约版本"
+    },
+    "last_updated": {
+      "type": "string",
+      "format": "date-time",
+      "description": "最后更新时间"
+    },
+    "collaborations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "唯一标识 UUID v4"
+          },
+          "name": {
+            "type": "string",
+            "description": "协作清单备注名称"
+          },
+          "webdav_url": {
+            "type": "string",
+            "description": "协作方的 WebDAV 服务器地址"
+          },
+          "webdav_username": {
+            "type": "string",
+            "description": "协作方的 WebDAV 账号"
+          },
+          "webdav_password": {
+            "type": "string",
+            "description": "协作方的 WebDAV 应用密码"
+          },
+          "webdav_filepath": {
+            "type": "string",
+            "description": "协作方的待办数据文件路径"
+          },
+          "expire_at": {
+            "type": ["integer", "null"],
+            "description": "过期时间，Unix 时间戳（秒），null 表示永久"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "最后修改时间，用于冲突合并"
+          },
+          "deleted": {
+            "type": "boolean",
+            "default": false,
+            "description": "软删除标记"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "webdav_url",
+          "webdav_username",
+          "webdav_password",
+          "webdav_filepath",
+          "updated_at",
+          "deleted"
+        ]
+      }
+    }
+  },
+  "required": ["version", "last_updated", "collaborations"]
+}

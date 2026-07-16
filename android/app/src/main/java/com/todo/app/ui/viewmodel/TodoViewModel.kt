@@ -31,6 +31,30 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     private val _activeSource = MutableStateFlow<ActiveSource>(ActiveSource.Personal)
     val activeSource: StateFlow<ActiveSource> = _activeSource.asStateFlow()
 
+    val collaborations: StateFlow<List<com.todo.app.data.model.CollaborationSource>> = repository.collaborations
+
+    fun importCollaboration(code: String, key: String, name: String) {
+        viewModelScope.launch {
+            val res = repository.importCollaboration(code, key, name)
+            if (res.isFailure) {
+                _uiEvent.emit("导入失败: ${res.exceptionOrNull()?.message ?: "未知错误"}")
+            } else {
+                _uiEvent.emit("协作清单导入成功")
+            }
+        }
+    }
+
+    fun deleteCollaboration(id: String) {
+        viewModelScope.launch {
+            val res = repository.deleteCollaboration(id)
+            if (res.isFailure) {
+                _uiEvent.emit("解绑失败: ${res.exceptionOrNull()?.message ?: "未知错误"}")
+            } else {
+                _uiEvent.emit("解绑成功")
+            }
+        }
+    }
+
     private val _collabData = MutableStateFlow<List<Todo>?>(null)
     val collabData: StateFlow<List<Todo>?> = _collabData.asStateFlow()
 
@@ -100,6 +124,21 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
 
     val todos = repository.getTodoData().map { data ->
         data.todos.filter { !it.deleted }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    val activeTodos: StateFlow<List<Todo>> = kotlinx.coroutines.flow.combine(
+        todos,
+        activeSource,
+        collabData
+    ) { personalList, activeSrc, collabList ->
+        when (activeSrc) {
+            is ActiveSource.Personal -> personalList
+            is ActiveSource.Collaboration -> collabList ?: emptyList()
+        }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -275,10 +314,15 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         viewModelScope.launch {
             try {
                 repository.syncWithCloud()
+                repository.syncCollaborations()
             } catch (e: Exception) {
                 _uiEvent.emit("同步失败: ${e.message}")
             }
         }
+    }
+
+    fun generateShareCode(expireDays: Int?): Pair<String, String> {
+        return repository.generateShareCode(expireDays)
     }
 
     fun importSelectedFromLastPeriod(type: String, selectedIds: List<String>) {

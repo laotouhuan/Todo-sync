@@ -13,6 +13,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.graphics.SolidColor
@@ -131,8 +133,105 @@ private fun MakeupIcon(shape: String, color: Color, dotRadius: androidx.compose.
 fun StatsView(viewModel: TodoViewModel) {
     var subTab by remember { mutableIntStateOf(0) } // 0 = Insights, 1 = Health
     var showEditDialogFor by remember { mutableStateOf<Todo?>(null) }
+    val activeSource by viewModel.activeSource.collectAsState()
+    val collabs = viewModel.collaborations.collectAsState().value
+    val collabLoading by viewModel.collabLoading.collectAsState()
+    val isSyncing by viewModel.isSyncing.collectAsState()
+    var showSourceMenu by remember { mutableStateOf(false) }
+    
+    val isReadOnly = activeSource is TodoViewModel.ActiveSource.Collaboration
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box {
+                Row(
+                    modifier = Modifier.clickable { showSourceMenu = true },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val title = when (val src = activeSource) {
+                        is TodoViewModel.ActiveSource.Personal -> "我的待办"
+                        is TodoViewModel.ActiveSource.Collaboration -> src.collab.name
+                    }
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Filled.ArrowDropDown,
+                        contentDescription = "切换清单",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+
+                    if (isReadOnly) {
+                        Spacer(Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.errorContainer
+                        ) {
+                            Text(
+                                text = "只读清单",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                DropdownMenu(
+                    expanded = showSourceMenu,
+                    onDismissRequest = { showSourceMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("我的待办") },
+                        onClick = {
+                            viewModel.switchToPersonal()
+                            showSourceMenu = false
+                        }
+                    )
+                    collabs.forEach { collab ->
+                        DropdownMenuItem(
+                            text = { Text(collab.name) },
+                            onClick = {
+                                viewModel.switchToCollaboration(collab)
+                                showSourceMenu = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            IconButton(
+                onClick = {
+                    val source = activeSource
+                    if (source is TodoViewModel.ActiveSource.Collaboration) {
+                        viewModel.loadCollabData(source.collab)
+                    } else {
+                        viewModel.syncWithCloud()
+                    }
+                },
+                enabled = true
+            ) {
+                val isLoading = if (activeSource is TodoViewModel.ActiveSource.Personal) isSyncing else collabLoading
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.Refresh,
+                        contentDescription = "同步",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+
         // 二级 Tab
         TabRow(selectedTabIndex = subTab) {
             Tab(selected = subTab == 0, onClick = { subTab = 0 }, text = { Text("效率洞察") })
@@ -167,7 +266,7 @@ fun StatsView(viewModel: TodoViewModel) {
 
 @Composable
 fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
-    val todos by viewModel.todos.collectAsState()
+    val todos by viewModel.activeTodos.collectAsState()
     var period by remember { mutableStateOf("day") }
     var targetDate by remember { mutableStateOf(LocalDate.now()) }
 
@@ -1104,7 +1203,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
 
 @Composable
 fun HealthContent(viewModel: TodoViewModel) {
-    val todos by viewModel.todos.collectAsState()
+    val todos by viewModel.activeTodos.collectAsState()
     var throughputDays by remember { mutableIntStateOf(30) }
     var expandedDropdown by remember { mutableStateOf(false) }
 
