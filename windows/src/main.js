@@ -2467,7 +2467,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
             shapeEl.setAttribute('stroke-width', strokeWidth);
             shapeEl.setAttribute('opacity', opacityVal);
             shapeEl.setAttribute('class', 'task-dot efficiency-dot');
-            shapeEl.style.transitionDelay = `${(fracHour / 24) * 1.0}s`;
+            shapeEl.style.transitionDelay = `${(fracHour / 24) * 0.8}s`;
             
             const pad = (n) => String(n).padStart(2, '0');
             const displayTime = `${pad(hour)}:${pad(minute)}`;
@@ -2503,9 +2503,12 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         });
 
         svgEl.appendChild(clockGroup);
-        // Force reflow and play entry animation
-        svgEl.offsetHeight;
-        clockGroup.classList.add('play-animation');
+        // Request animation frames to guarantee initial state is painted before triggering transition
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                clockGroup.classList.add('play-animation');
+            });
+        });
     }
 
     let displayTodos = periodTodos;
