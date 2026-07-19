@@ -278,6 +278,21 @@ function migrateAndNormalize(todo) {
     return todo;
 }
 
+function resolveCheckinConflict(checkinL, checkinC, lTime, cTime) {
+    if (checkinL && checkinC) {
+        return checkinL.length >= checkinC.length ? checkinL : checkinC;
+    }
+    if (checkinL) {
+        if (checkinL.length <= 10) return checkinL;
+        return new Date(checkinL).getTime() > cTime ? checkinL : null;
+    }
+    if (checkinC) {
+        if (checkinC.length <= 10) return checkinC;
+        return new Date(checkinC).getTime() > lTime ? checkinC : null;
+    }
+    return null;
+}
+
 function mergeTodoData(localData, cloudData) {
     if (!localData || !localData.todos) {
         if (cloudData && cloudData.todos) {
@@ -322,31 +337,9 @@ function mergeTodoData(localData, cloudData) {
             allDateParts.forEach(datePart => {
                 const checkinL = lDates.find(d => d.startsWith(datePart));
                 const checkinC = cDates.find(d => d.startsWith(datePart));
-
-                if (checkinL && checkinC) {
-                    if (checkinL.length >= checkinC.length) {
-                        mergedDates.push(checkinL);
-                    } else {
-                        mergedDates.push(checkinC);
-                    }
-                } else if (checkinL) {
-                    if (checkinL.length > 10) {
-                        const tCheck = new Date(checkinL).getTime();
-                        if (tCheck > cTime) {
-                            mergedDates.push(checkinL);
-                        }
-                    } else {
-                        mergedDates.push(checkinL);
-                    }
-                } else if (checkinC) {
-                    if (checkinC.length > 10) {
-                        const tCheck = new Date(checkinC).getTime();
-                        if (tCheck > lTime) {
-                            mergedDates.push(checkinC);
-                        }
-                    } else {
-                        mergedDates.push(checkinC);
-                    }
+                const resolved = resolveCheckinConflict(checkinL, checkinC, lTime, cTime);
+                if (resolved) {
+                    mergedDates.push(resolved);
                 }
             });
             mergedDates.sort();
@@ -397,19 +390,16 @@ function mergeCollaborations(local, cloud) {
     let cloudData = cloud || { version: 1, last_updated: "", collaborations: [] };
     
     let mergedList = [];
-    let localList = localData.collaborations || [];
-    let cloudList = cloudData.collaborations || [];
+    let localMap = new Map((localData.collaborations || []).map(c => [c.id, c]));
+    let cloudMap = new Map((cloudData.collaborations || []).map(c => [c.id, c]));
     
-    let allIds = new Set([
-        ...localList.map(c => c.id),
-        ...cloudList.map(c => c.id)
-    ]);
+    let allIds = new Set([...localMap.keys(), ...cloudMap.keys()]);
     
     let changed = false;
     
     for (let id of allIds) {
-        let localItem = localList.find(c => c.id === id);
-        let cloudItem = cloudList.find(c => c.id === id);
+        let localItem = localMap.get(id);
+        let cloudItem = cloudMap.get(id);
         
         if (localItem && cloudItem) {
             let localTime = new Date(localItem.updated_at || 0).getTime();
@@ -424,13 +414,7 @@ function mergeCollaborations(local, cloud) {
                     changed = true;
                 }
             }
-        } else if (localItem) {
-            mergedList.push(localItem);
-            changed = true;
-        } else if (cloudItem) {
-            mergedList.push(cloudItem);
-            changed = true;
-        }
+        } else { mergedList.push(localItem || cloudItem); changed = true; }
     }
     
     let mergedData = {
@@ -1797,6 +1781,8 @@ function updateEditModalFields(taskTypeVal) {
 function openEditModal(todo) {
     appState.currentEditingTodo = todo;
 
+    const modal = document.getElementById('edit-modal');
+    const input = document.getElementById('edit-content');
     const { cleanContent } = extractCollaborator(todo.content);
     input.value = cleanContent;
 

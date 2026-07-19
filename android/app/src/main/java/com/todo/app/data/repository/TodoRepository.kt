@@ -13,6 +13,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
@@ -241,6 +242,7 @@ class TodoRepository(private val context: Context) {
                     _todoData.value = migratedData
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Log.e(TAG, "loadFromDisk failed, using empty list", e)
                 _uiEvent.send(UiEvent.ShowError("数据加载失败，已使用空列表: ${e.message}"))
             }
@@ -281,26 +283,25 @@ class TodoRepository(private val context: Context) {
 
     suspend fun restoreFromBackup(filename: String): Boolean = mutex.withLock {
         withContext(Dispatchers.IO) {
-            try {
+            runCatching {
                 val backupFile = File(File(context.filesDir, "backups"), filename)
-                if (backupFile.exists()) {
-                    createLocalBackup() // backup the current state before restoring
+                if (!backupFile.exists()) return@withContext false
 
-                    val jsonString = backupFile.readText()
-                    val parsed = jsonFormat.decodeFromString<TodoData>(jsonString)
-                    _todoData.value = parsed
-                    atomicWriteJson(jsonString)
+                createLocalBackup() // backup the current state before restoring
 
-                    initWebDavClient()
-                    webDavClient?.uploadFile(configManager.filePath, jsonString)
+                val jsonString = backupFile.readText()
+                _todoData.value = jsonFormat.decodeFromString<TodoData>(jsonString)
+                atomicWriteJson(jsonString)
 
-                    com.todo.app.widget.refreshAllWidgets(context)
-                    return@withContext true
-                }
-            } catch (e: Exception) {
+                initWebDavClient()
+                webDavClient?.uploadFile(configManager.filePath, jsonString)
+
+                com.todo.app.widget.refreshAllWidgets(context)
+                true
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
                 Log.e(TAG, "restoreFromBackup failed", e)
-            }
-            return@withContext false
+            }.getOrDefault(false)
         }
     }
 
@@ -335,6 +336,7 @@ class TodoRepository(private val context: Context) {
                         client.uploadFile(configManager.filePath, mergedJson)
                     }
                 } catch (e: Exception) {
+                    if (e is CancellationException) throw e
                     Log.e(TAG, "syncWithCloud merge failed", e)
                 }
             } else {
@@ -344,6 +346,7 @@ class TodoRepository(private val context: Context) {
             _syncStatus.value = 0
             com.todo.app.widget.refreshAllWidgets(context)
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.e(TAG, "syncWithCloud failed", e)
             _syncStatus.value = 2
             com.todo.app.widget.refreshAllWidgets(context)
@@ -371,6 +374,7 @@ class TodoRepository(private val context: Context) {
                 _uiEvent.send(UiEvent.ShowError("下载失败：找不到文件或密码错误"))
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.e(TAG, "forcePullCloud failed", e)
             val msg = if (e.message?.contains("云端") == true) e.message!! else "云端同步失败，请检查网络连接和 WebDAV 配置"
             _uiEvent.send(UiEvent.ShowError(msg))
@@ -421,6 +425,7 @@ class TodoRepository(private val context: Context) {
             // 触发后台同步
             uploadChannel.trySend(Unit)
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.e(TAG, "saveTodos failed", e)
             _todoData.value = previous // rollback on write failure
             _uiEvent.send(UiEvent.ShowError("保存失败: ${e.message}"))
@@ -433,6 +438,7 @@ class TodoRepository(private val context: Context) {
             val currentData = _todoData.value
             jsonFormat.encodeToString(currentData)
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.e(TAG, "performBackgroundUpload serialize failed", e)
             return
         }
@@ -444,6 +450,7 @@ class TodoRepository(private val context: Context) {
             webDavClient?.uploadFile(configManager.filePath, jsonString)
             _syncStatus.value = 0
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.e(TAG, "performBackgroundUpload upload failed", e)
             _syncStatus.value = 2
         }
@@ -717,6 +724,7 @@ class TodoRepository(private val context: Context) {
             }
             Result.success(data)
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.e(TAG, "readCollaborationTodos failed", e)
             Result.failure(e)
         }
@@ -757,6 +765,7 @@ class TodoRepository(private val context: Context) {
             val ok = client.uploadFile(collab.webdavFilepath, json)
             if (ok) Result.success(Unit) else Result.failure(Exception("上传失败"))
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.e(TAG, "writeCollaborationTodo failed", e)
             Result.failure(e)
         }
@@ -1004,6 +1013,7 @@ class TodoRepository(private val context: Context) {
                     cloudData = jsonFormat.decodeFromString<com.todo.app.data.model.CollaborationData>(cloudContent)
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Log.e(TAG, "Failed to download collaborations.json from cloud", e)
             }
 
@@ -1015,6 +1025,7 @@ class TodoRepository(private val context: Context) {
                     try {
                         client.uploadFile(collabFilePath, mergedStr)
                     } catch (e: Exception) {
+                        if (e is CancellationException) throw e
                         Log.e(TAG, "Failed to upload collaborations.json to cloud", e)
                     }
                 }
@@ -1024,6 +1035,7 @@ class TodoRepository(private val context: Context) {
                 try {
                     client.uploadFile(collabFilePath, localStr)
                 } catch (e: Exception) {
+                    if (e is CancellationException) throw e
                     Log.e(TAG, "Failed to upload collaborations.json to cloud", e)
                 }
                 _collaborations.value = localData.collaborations.filter { !it.deleted }

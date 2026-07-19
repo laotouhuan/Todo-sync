@@ -58,11 +58,9 @@ object MergeUtils {
         // 去重复 ID（保留 updatedAt 最新的）
         val uniqueTodos = migratedTodos.groupBy { it.id }
             .map { (_, list) ->
-                if (list.size > 1) {
-                    list.maxByOrNull { try { OffsetDateTime.parse(it.updatedAt) } catch (_: Exception) { OffsetDateTime.MIN } } ?: list.first()
-                } else {
-                    list.first()
-                }
+                list.maxByOrNull {
+                    runCatching { OffsetDateTime.parse(it.updatedAt) }.getOrDefault(OffsetDateTime.MIN)
+                } ?: list.first()
             }
 
         // 去重复 completedDates
@@ -81,8 +79,7 @@ object MergeUtils {
     private fun deduplicateDates(dates: List<String>): List<String> {
         return dates.groupBy { it.substringBefore('T') }
             .map { (_, group) ->
-                group.sortedWith(compareByDescending<String> { it.length }.thenByDescending { it })
-                    .first()
+                group.maxWithOrNull(compareBy<String> { it.length }.thenBy { it })!!
             }
             .sorted()
     }

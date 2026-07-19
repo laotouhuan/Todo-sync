@@ -23,9 +23,9 @@ const LOCK_RETRY_COUNT: usize = 20;
 const LOCK_RETRY_INTERVAL_MS: u64 = 50;
 
 /// 密码存储说明：
-/// 当前 webdav_password 以明文存储在 config.json 中。
-/// 建议使用 keyring crate 进行安全的系统密钥链存储。
-/// 作为过渡方案，后续可对密码字段进行 base64 混淆。
+/// webdav_password 在磁盘上以 AES-256-GCM 加密存储（ENC: 前缀）。
+/// 密钥由 app_data_dir + 本机用户名 + 硬编码盐值通过 SHA-256 派生，与本机绑定。
+/// 旧版明文密码会在 load_config 时自动迁移为加密格式。
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct CollaborationSource {
     pub id: String,
@@ -63,6 +63,78 @@ pub fn get_config_path(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
     fs::create_dir_all(&path).map_err(|e| format!("Failed to create app data dir: {e}"))?;
     Ok(path.join("config.json"))
+}
+
+// ====== 本地密码加密工具 ======
+
+/// 硬编码盐值，用于密钥派生（防止简单彩虹表攻击）
+const LOCAL_CRYPTO_SALT: &[u8] = b"todo-sync-local-credential-protection-v1";
+
+/// 基于本机特征派生 AES-256 密钥。
+/// 输入材料：app_data_dir 路径 + 当前系统用户名 + 硬编码盐值。
+/// 结果：密钥与本机绑定，config.json 复制到其他机器后无法解密。
+fn derive_local_key(app: &AppHandle) -> [u8; 32] {
+    let app_dir = app.path().app_data_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let username = whoami::username();
+    let mut hasher = Sha256::new();
+    hasher.update(LOCAL_CRYPTO_SALT);
+    hasher.update(app_dir.as_bytes());
+    hasher.update(username.as_bytes());
+    hasher.finalize().into()
+}
+
+/// 加密密码字符串，返回 "ENC:<base64(iv + ciphertext_with_tag)>" 格式。
+/// 空字符串不加密，直接返回空字符串。
+fn encrypt_password(app: &AppHandle, plaintext: &str) -> String {
+    if plaintext.is_empty() {
+        return String::new();
+    }
+    let key_bytes = derive_local_key(app);
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes).expect("Invalid key length");
+    let mut rng = rand::thread_rng();
+    let mut iv = [0u8; 12];
+    rng.fill(&mut iv);
+    let nonce = Nonce::from_slice(&iv);
+    let ciphertext = cipher.encrypt(nonce, plaintext.as_bytes())
+        .expect("Encryption failed");
+    let mut packed = Vec::with_capacity(12 + ciphertext.len());
+    packed.extend_from_slice(&iv);
+    packed.extend_from_slice(&ciphertext);
+    format!("ENC:{}", base64::engine::general_purpose::STANDARD.encode(&packed))
+}
+
+/// 解密密码字符串。若以 "ENC:" 开头则解密；否则视为明文旧数据直接返回。
+/// 解密失败时返回空字符串（防止 panic）。
+fn decrypt_password(app: &AppHandle, stored: &str) -> String {
+    if stored.is_empty() {
+        return String::new();
+    }
+    if let Some(b64) = stored.strip_prefix("ENC:") {
+        let packed = match base64::engine::general_purpose::STANDARD.decode(b64) {
+            Ok(v) => v,
+            Err(_) => { log::warn!("密码解密失败：Base64 解码错误"); return String::new(); }
+        };
+        if packed.len() < 12 + 16 {
+            log::warn!("密码解密失败：数据长度不足");
+            return String::new();
+        }
+        let (iv, ciphertext) = packed.split_at(12);
+        let key_bytes = derive_local_key(app);
+        let cipher = Aes256Gcm::new_from_slice(&key_bytes).expect("Invalid key length");
+        let nonce = Nonce::from_slice(iv);
+        match cipher.decrypt(nonce, ciphertext) {
+            Ok(plaintext) => String::from_utf8(plaintext).unwrap_or_default(),
+            Err(_) => {
+                log::warn!("密码解密失败：密钥不匹配或数据损坏（可能是跨机器迁移导致）");
+                String::new()
+            }
+        }
+    } else {
+        // 明文旧数据，直接返回
+        stored.to_string()
+    }
 }
 
 fn get_iso_timestamp() -> String {
@@ -120,13 +192,13 @@ pub fn read_collaborations_file(app: &AppHandle) -> Result<String, String> {
     if !path.exists() {
         return Ok("{\"version\":1,\"last_updated\":\"\",\"collaborations\":[]}".to_string());
     }
-    let _guard = acquire_lock(&path, false);
+    let _guard = acquire_lock(&path, false)?;
     fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
 pub fn write_collaborations_file(app: &AppHandle, data: &str) -> Result<(), String> {
     let path = get_collaborations_path(app)?;
-    let _guard = acquire_lock(&path, true);
+    let _guard = acquire_lock(&path, true)?;
     atomic_write(&path, data)
 }
 
@@ -201,13 +273,47 @@ pub fn load_config(app: &AppHandle) -> AppConfig {
         }
     }
 
-    serde_json::from_str(&data).unwrap_or_default()
+    let mut config: AppConfig = serde_json::from_str(&data).unwrap_or_default();
+
+    // 自动迁移：解密磁盘上的加密密码，并将明文旧密码加密后回写
+    if let Some(ref stored_pass) = config.webdav_password {
+        if !stored_pass.is_empty() {
+            if stored_pass.starts_with("ENC:") {
+                // 已加密，解密为内存中的明文
+                config.webdav_password = Some(decrypt_password(app, stored_pass));
+            } else {
+                // 明文旧数据，加密后回写磁盘（迁移）
+                let encrypted = encrypt_password(app, stored_pass);
+                let mut disk_config = config.clone();
+                disk_config.webdav_password = Some(encrypted);
+                let _ = save_config_raw(app, &disk_config);
+                // config 中保持明文供调用方使用
+            }
+        }
+    }
+
+    config
 }
 
-pub fn save_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+/// 原始保存：直接将 AppConfig 序列化后写入磁盘，不做加密处理。
+/// 仅在内部迁移逻辑中使用（调用方已自行处理加密）。
+fn save_config_raw(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
     let path = get_config_path(app)?;
     let data = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
     fs::write(&path, data).map_err(|e| e.to_string())
+}
+
+/// 保存配置：密码字段会在写入前自动加密。
+/// 调用方传入的 config.webdav_password 应为明文。
+pub fn save_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    let mut disk_config = config.clone();
+    // 加密密码后写入磁盘
+    if let Some(ref pass) = disk_config.webdav_password {
+        if !pass.is_empty() && !pass.starts_with("ENC:") {
+            disk_config.webdav_password = Some(encrypt_password(app, pass));
+        }
+    }
+    save_config_raw(app, &disk_config)
 }
 
 #[tauri::command]
@@ -233,14 +339,19 @@ struct WebDavConn {
     target: String,
 }
 
-/// 从配置中构建 WebDAV 连接信息
-fn build_webdav_conn(config: &AppConfig) -> Result<WebDavConn, String> {
+fn get_webdav_credentials(config: &AppConfig) -> Result<(String, String, String), String> {
     if config.sync_mode.as_deref() != Some("webdav") {
         return Err("Not in WebDAV mode".to_string());
     }
-    let url = config.webdav_url.as_deref().unwrap_or("https://dav.jianguoyun.com/dav/");
+    let url = config.webdav_url.as_deref().unwrap_or("https://dav.jianguoyun.com/dav/").to_string();
     let user = config.webdav_username.as_deref().unwrap_or("").to_string();
     let pass = config.webdav_password.as_deref().unwrap_or("").to_string();
+    Ok((url, user, pass))
+}
+
+/// 从配置中构建 WebDAV 连接信息
+fn build_webdav_conn(config: &AppConfig) -> Result<WebDavConn, String> {
+    let (url, user, pass) = get_webdav_credentials(config)?;
     let file_path = config.webdav_filepath.as_deref()
         .filter(|s| !s.is_empty())
         .unwrap_or("我的坚果云/to-do/todo_data.json");
@@ -249,7 +360,7 @@ fn build_webdav_conn(config: &AppConfig) -> Result<WebDavConn, String> {
         if s.is_empty() { String::new() } else { urlencoding::encode(s).into_owned() }
     }).collect::<Vec<_>>().join("/");
 
-    let target = if url.ends_with('/') { format!("{}{}", url, encoded_path) } else { format!("{}/{}", url, encoded_path) };
+    let target = format!("{}/{}", url.trim_end_matches('/'), encoded_path);
 
     Ok(WebDavConn { user, pass, target })
 }
@@ -322,12 +433,7 @@ pub async fn fetch_from_cloud(app: AppHandle) -> Result<String, String> {
 }
 
 fn build_collaborations_webdav_conn(config: &AppConfig) -> Result<WebDavConn, String> {
-    if config.sync_mode.as_deref() != Some("webdav") {
-        return Err("Not in WebDAV mode".to_string());
-    }
-    let url = config.webdav_url.as_deref().unwrap_or("https://dav.jianguoyun.com/dav/");
-    let user = config.webdav_username.as_deref().unwrap_or("").to_string();
-    let pass = config.webdav_password.as_deref().unwrap_or("").to_string();
+    let (url, user, pass) = get_webdav_credentials(config)?;
     let file_path = config.webdav_filepath.as_deref()
         .filter(|s| !s.is_empty())
         .unwrap_or("我的坚果云/to-do/todo_data.json");
@@ -350,7 +456,7 @@ fn build_collaborations_webdav_conn(config: &AppConfig) -> Result<WebDavConn, St
         if s.is_empty() { String::new() } else { urlencoding::encode(s).into_owned() }
     }).collect::<Vec<_>>().join("/");
 
-    let target = if url.ends_with('/') { format!("{}{}", url, encoded_path) } else { format!("{}/{}", url, encoded_path) };
+    let target = format!("{}/{}", url.trim_end_matches('/'), encoded_path);
 
     Ok(WebDavConn { user, pass, target })
 }
@@ -501,10 +607,15 @@ fn scan_backups(backup_dir: &Path) -> Vec<PathBuf> {
     }
 }
 
-/// 原子写入：写入临时文件后 rename 到目标路径
+/// 原子写入：写入临时文件，确保 sync_all 刷入物理磁盘后 rename 到目标路径
 fn atomic_write(path: &Path, data: &str) -> Result<(), String> {
+    use std::io::Write;
     let temp_path = path.with_extension("tmp");
-    fs::write(&temp_path, data).map_err(|e| e.to_string())?;
+    {
+        let mut file = File::create(&temp_path).map_err(|e| e.to_string())?;
+        file.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+    }
     fs::rename(&temp_path, path).map_err(|e| e.to_string())
 }
 
@@ -515,7 +626,7 @@ pub fn read_todo_data(app: AppHandle) -> Result<String, String> {
         return Ok("{}".to_string());
     }
 
-    let _guard = acquire_lock(&path, false);
+    let _guard = acquire_lock(&path, false)?;
     fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
@@ -636,11 +747,13 @@ fn find_collaboration_source(app: &AppHandle, collab_id: &str) -> Result<Collabo
         .ok_or("数据损坏")?;
     
     for v in list {
-        let c: CollaborationSource = serde_json::from_value(v.clone()).map_err(|e| e.to_string())?;
+        let mut c: CollaborationSource = serde_json::from_value(v.clone()).map_err(|e| e.to_string())?;
         if c.id == collab_id {
             if c.deleted {
                 return Err("该协作清单已被删除".into());
             }
+            // 解密磁盘上的加密密码
+            c.webdav_password = decrypt_password(app, &c.webdav_password);
             return Ok(c);
         }
     }
@@ -812,7 +925,7 @@ pub fn import_share_code(
             && c["webdav_username"].as_str() == Some(&user)
             && c["webdav_filepath"].as_str() == Some(&path)
     }) {
-        existing["webdav_password"] = serde_json::json!(pass);
+        existing["webdav_password"] = serde_json::json!(encrypt_password(&app, &pass));
         existing["expire_at"] = if exp == 0 { serde_json::Value::Null } else { serde_json::json!(exp) };
         existing["updated_at"] = serde_json::json!(now_iso);
         existing["deleted"] = serde_json::json!(false);
@@ -826,7 +939,7 @@ pub fn import_share_code(
             name,
             webdav_url: url,
             webdav_username: user,
-            webdav_password: pass,
+            webdav_password: encrypt_password(&app, &pass),
             webdav_filepath: path,
             expire_at: if exp == 0 { None } else { Some(exp) },
             updated_at: now_iso.clone(),

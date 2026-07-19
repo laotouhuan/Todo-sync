@@ -1145,98 +1145,14 @@ fun HealthContent(viewModel: TodoViewModel) {
         activeTodos.filter { !it.completed }
     }
 
+    val healthMetrics by viewModel.healthMetrics.collectAsState()
+    val currentAvgCompletedLife = healthMetrics.currentAvgCompletedLife
+    val currentAvgBacklogLife = healthMetrics.currentAvgBacklogLife
+    val baselineAvgCompletedLife = healthMetrics.baselineAvgCompletedLife
+    val baselineAvgBacklogLife = healthMetrics.baselineAvgBacklogLife
+    val baselineSleepingCountVal = healthMetrics.baselineSleepingCountVal
+
     val nowTime = OffsetDateTime.now()
-    val localTodayStart = LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault()).toOffsetDateTime()
-
-    // Helpers to parse dates robustly
-    fun parseOffsetDateTime(dtStr: String?, defaultVal: OffsetDateTime): OffsetDateTime {
-        if (dtStr.isNullOrEmpty()) return defaultVal
-        return try {
-            OffsetDateTime.parse(dtStr)
-        } catch (_: Exception) {
-            try {
-                OffsetDateTime.ofInstant(java.time.Instant.parse(dtStr), java.time.ZoneId.systemDefault())
-            } catch (_: Exception) {
-                try {
-                    LocalDate.parse(dtStr.take(10)).atStartOfDay(java.time.ZoneId.systemDefault()).toOffsetDateTime()
-                } catch (_: Exception) {
-                    defaultVal
-                }
-            }
-        }
-    }
-
-    // 1. Calculate current metrics
-    // 1.1 平均任务寿命 (all completed tasks from creation to completion)
-    val completedTodos = remember(activeTodos) {
-        activeTodos.filter { it.completed && !it.completedAt.isNullOrEmpty() }
-    }
-    val currentAvgCompletedLife = remember(completedTodos) {
-        if (completedTodos.isEmpty()) 0.0 else {
-            val total = completedTodos.sumOf { t ->
-                val compTime = parseOffsetDateTime(t.completedAt, nowTime)
-                calcTaskAgeDays(t.createdAt, compTime).toDouble()
-            }
-            total / completedTodos.size
-        }
-    }
-
-    // 1.2 积压任务平均时长 (incomplete tasks from creation to now)
-    val currentAvgBacklogLife = remember(incompleteTodos, nowTime) {
-        if (incompleteTodos.isEmpty()) 0.0 else {
-            val total = incompleteTodos.sumOf { calcTaskAgeDays(it.createdAt, nowTime).toDouble() }
-            total / incompleteTodos.size
-        }
-    }
-
-    // 1.3 沉睡任务已在下面定义为 sleepingTodos.size
-
-    // 2. Calculate baseline values (start of today)
-    val baselineData = remember(activeTodos) {
-        var baselineCompletedSum = 0.0
-        var baselineCompletedCount = 0
-        var baselineIncompleteSum = 0.0
-        var baselineIncompleteCount = 0
-        var baselineSleepingCount = 0
-
-        activeTodos.forEach { t ->
-            val createdTime = parseOffsetDateTime(t.createdAt, nowTime)
-            if (createdTime.isBefore(localTodayStart)) {
-                val completedTime = if (t.completed && !t.completedAt.isNullOrEmpty()) {
-                    parseOffsetDateTime(t.completedAt, nowTime)
-                } else null
-
-                val wasCompletedBeforeToday = t.completed && (completedTime == null || completedTime.isBefore(localTodayStart))
-
-                if (wasCompletedBeforeToday) {
-                    if (completedTime != null) {
-                        val age = calcTaskAgeDays(t.createdAt, completedTime).toDouble()
-                        if (age >= 0) {
-                            baselineCompletedSum += age
-                            baselineCompletedCount++
-                        }
-                    }
-                } else {
-                    val age = calcTaskAgeDays(t.createdAt, localTodayStart).toDouble()
-                    if (age >= 0) {
-                        baselineIncompleteSum += age
-                        baselineIncompleteCount++
-                        if (age >= 7) {
-                            baselineSleepingCount++
-                        }
-                    }
-                }
-            }
-        }
-
-        val baseAvgCompleted = if (baselineCompletedCount == 0) currentAvgCompletedLife else baselineCompletedSum / baselineCompletedCount
-        val baseAvgBacklog = if (baselineIncompleteCount == 0) currentAvgBacklogLife else baselineIncompleteSum / baselineIncompleteCount
-        Triple(baseAvgCompleted, baseAvgBacklog, baselineSleepingCount)
-    }
-
-    val baselineAvgCompletedLife = baselineData.first
-    val baselineAvgBacklogLife = baselineData.second
-    val baselineSleepingCountVal = baselineData.third
 
     // 3. Health Grade (based on backlog average age)
     val healthGrade = getHealthGrade(currentAvgBacklogLife)

@@ -182,19 +182,14 @@ fun monthStringOf(date: LocalDate): String =
     "${date.year}-${date.monthValue.toString().padStart(2, '0')}"
 
 fun Todo.getWeeklyCompletedCount(): Int {
-    val dateStr = this.date ?: return 0
-    if (!isWeekDate(dateStr)) return 0
+    val dateStr = this.date?.takeIf { isWeekDate(it) } ?: return 0
     return this.completedDates.count { dStr ->
-        try {
-            val checkDate = LocalDate.parse(dStr)
-            weekStringOf(checkDate) == dateStr
-        } catch (e: Exception) { false }
+        runCatching { weekStringOf(LocalDate.parse(dStr)) == dateStr }.getOrDefault(false)
     }
 }
 
 fun Todo.getMonthlyCompletedCount(): Int {
-    val dateStr = this.date ?: return 0
-    if (!isMonthDate(dateStr)) return 0
+    val dateStr = this.date?.takeIf { isMonthDate(it) } ?: return 0
     return this.completedDates.count { it.startsWith(dateStr) }
 }
 

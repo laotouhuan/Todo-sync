@@ -20,6 +20,21 @@ import kotlinx.coroutines.launch
 
 import java.util.UUID
 import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.temporal.IsoFields
+import com.todo.app.data.model.calcTaskAgeDays
+import com.todo.app.data.model.TaskType
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
+
+data class HealthMetrics(
+    val currentAvgCompletedLife: Double = 0.0,
+    val currentAvgBacklogLife: Double = 0.0,
+    val baselineAvgCompletedLife: Double = 0.0,
+    val baselineAvgBacklogLife: Double = 0.0,
+    val baselineSleepingCountVal: Int = 0
+)
 
 class TodoViewModel(private val repository: TodoRepository, val configManager: ConfigManager) : ViewModel() {
 
@@ -145,6 +160,100 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         initialValue = emptyList()
     )
 
+    val healthMetrics: StateFlow<HealthMetrics> = activeTodos.map { todosList ->
+        val activeList = todosList.filter { 
+            !it.deleted && 
+            it.taskType != TaskType.WEEKLY_CHECKIN && 
+            it.taskType != TaskType.MONTHLY_CHECKIN &&
+            it.recurring != "daily_repeat"
+        }
+        val incompleteTodos = activeList.filter { !it.completed }
+        val completedTodos = activeList.filter { it.completed && !it.completedAt.isNullOrEmpty() }
+        
+        val nowTime = OffsetDateTime.now()
+        val localTodayStart = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toOffsetDateTime()
+
+        fun parseOffsetDateTimeSafe(dtStr: String?, defaultVal: OffsetDateTime): OffsetDateTime {
+            if (dtStr.isNullOrEmpty()) return defaultVal
+            return try {
+                OffsetDateTime.parse(dtStr)
+            } catch (_: Exception) {
+                try {
+                    OffsetDateTime.ofInstant(java.time.Instant.parse(dtStr), ZoneId.systemDefault())
+                } catch (_: Exception) {
+                    try {
+                        LocalDate.parse(dtStr.take(10)).atStartOfDay(ZoneId.systemDefault()).toOffsetDateTime()
+                    } catch (_: Exception) {
+                        defaultVal
+                    }
+                }
+            }
+        }
+
+        val currentAvgCompletedLife = if (completedTodos.isEmpty()) 0.0 else {
+            completedTodos.map { t ->
+                calcTaskAgeDays(t.createdAt, parseOffsetDateTimeSafe(t.completedAt, nowTime))
+            }.average()
+        }
+
+        val currentAvgBacklogLife = if (incompleteTodos.isEmpty()) 0.0 else {
+            val total = incompleteTodos.sumOf { calcTaskAgeDays(it.createdAt, nowTime).toDouble() }
+            total / incompleteTodos.size
+        }
+
+        var baselineCompletedSum = 0.0
+        var baselineCompletedCount = 0
+        var baselineIncompleteSum = 0.0
+        var baselineIncompleteCount = 0
+        var baselineSleepingCount = 0
+
+        activeList.forEach { t ->
+            val createdTime = parseOffsetDateTimeSafe(t.createdAt, nowTime)
+            if (createdTime.isBefore(localTodayStart)) {
+                val completedTime = if (t.completed && !t.completedAt.isNullOrEmpty()) {
+                    parseOffsetDateTimeSafe(t.completedAt, nowTime)
+                } else null
+
+                val wasCompletedBeforeToday = t.completed && (completedTime == null || completedTime.isBefore(localTodayStart))
+
+                if (wasCompletedBeforeToday) {
+                    if (completedTime != null) {
+                        val age = calcTaskAgeDays(t.createdAt, completedTime).toDouble()
+                        if (age >= 0) {
+                            baselineCompletedSum += age
+                            baselineCompletedCount++
+                        }
+                    }
+                } else {
+                    val age = calcTaskAgeDays(t.createdAt, localTodayStart).toDouble()
+                    if (age >= 0) {
+                        baselineIncompleteSum += age
+                        baselineIncompleteCount++
+                        if (age >= 7) {
+                            baselineSleepingCount++
+                        }
+                    }
+                }
+            }
+        }
+
+        val baseAvgCompleted = if (baselineCompletedCount == 0) currentAvgCompletedLife else baselineCompletedSum / baselineCompletedCount
+        val baseAvgBacklog = if (baselineIncompleteCount == 0) currentAvgBacklogLife else baselineIncompleteSum / baselineIncompleteCount
+
+        HealthMetrics(
+            currentAvgCompletedLife = currentAvgCompletedLife,
+            currentAvgBacklogLife = currentAvgBacklogLife,
+            baselineAvgCompletedLife = baseAvgCompleted,
+            baselineAvgBacklogLife = baseAvgBacklog,
+            baselineSleepingCountVal = baselineSleepingCount
+        )
+    }.flowOn(Dispatchers.Default)
+    .stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = HealthMetrics()
+    )
+
     val isSyncing = repository.isSyncing
 
     private val _showSearchBar = MutableStateFlow(false)
@@ -209,54 +318,60 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         }
     }
 
+    private fun buildBaseTodo(
+        parsed: com.todo.app.data.model.ParsedSyntax,
+        content: String,
+        currentList: List<Todo>,
+        defaultDueDatePref: String,
+        defaultInsertion: String
+    ): Todo {
+        val finalDate = when {
+            parsed.hasExplicitDateSyntax -> parsed.date
+            parsed.taskType == com.todo.app.data.model.TaskType.NORMAL -> when (defaultDueDatePref) {
+                "today" -> LocalDate.now().toString()
+                "tomorrow" -> LocalDate.now().plusDays(1).toString()
+                else -> null
+            }
+            else -> parsed.date
+        }
+
+        val activeTasks = currentList.filter { !it.completed }
+        val orderVal = if (defaultInsertion == "bottom") {
+            (activeTasks.maxOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) + 1.0
+        } else {
+            (activeTasks.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) - 1.0
+        }
+
+        val subtaskList = parsed.subtasks.map {
+            com.todo.app.data.model.Subtask(
+                id = UUID.randomUUID().toString(),
+                content = it,
+                completed = false,
+                completedAt = null
+            )
+        }
+
+        return Todo.create(content, finalDate).copy(
+            taskType = parsed.taskType,
+            targetCount = parsed.targetCount,
+            recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
+            order = orderVal,
+            subtasks = subtaskList
+        )
+    }
+
     fun addTodoSmart(rawContent: String) {
         if (rawContent.isBlank()) return
 
         val parsed = parseDateSyntax(rawContent)
         if (parsed.content.isBlank()) return
 
-        var finalDate: String? = null
-        if (parsed.hasExplicitDateSyntax) {
-            finalDate = parsed.date
-        } else if (parsed.taskType == com.todo.app.data.model.TaskType.NORMAL) {
-            val defaultPref = configManager.defaultDueDate
-            finalDate = when (defaultPref) {
-                "today" -> LocalDate.now().toString()
-                "tomorrow" -> LocalDate.now().plusDays(1).toString()
-                else -> null
-            }
-        } else {
-            finalDate = parsed.date
-        }
-
+        val defaultPref = configManager.defaultDueDate
         val defaultInsertion = configManager.defaultInsertion
 
         viewModelScope.launch {
             try {
-                val currentList = todos.value
-                val activeLocal = currentList.filter { !it.completed }
-                val orderVal = if (defaultInsertion == "bottom") {
-                    (activeLocal.maxOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) + 1.0
-                } else {
-                    (activeLocal.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) - 1.0
-                }
-                
-                val subtaskList = parsed.subtasks.map {
-                    com.todo.app.data.model.Subtask(
-                        id = UUID.randomUUID().toString(),
-                        content = it,
-                        completed = false,
-                        completedAt = null
-                    )
-                }
-
-                val todo = Todo.create(parsed.content, finalDate).copy(
-                    taskType = parsed.taskType,
-                    targetCount = parsed.targetCount,
-                    recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
-                    order = orderVal,
-                    subtasks = subtaskList
-                )
+                val todo = buildBaseTodo(parsed, parsed.content, todos.value, defaultPref, defaultInsertion)
                 repository.addTodo(todo)
             } catch (e: Exception) {
                 _uiEvent.emit("添加失败: ${e.message}")
@@ -272,48 +387,13 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         val nickname = configManager.nickname.ifBlank { "匿名" }
         val signedContent = "${parsed.content} (由 [$nickname] 添加)"
         
-        var finalDate: String? = null
-        if (parsed.hasExplicitDateSyntax) {
-            finalDate = parsed.date
-        } else if (parsed.taskType == com.todo.app.data.model.TaskType.NORMAL) {
-            val defaultPref = configManager.defaultDueDate
-            finalDate = when (defaultPref) {
-                "today" -> LocalDate.now().toString()
-                "tomorrow" -> LocalDate.now().plusDays(1).toString()
-                else -> null
-            }
-        } else {
-            finalDate = parsed.date
-        }
-
+        val defaultPref = configManager.defaultDueDate
         val defaultInsertion = configManager.defaultInsertion
 
         viewModelScope.launch {
             try {
-                val subtaskList = parsed.subtasks.map {
-                    com.todo.app.data.model.Subtask(
-                        id = UUID.randomUUID().toString(),
-                        content = it,
-                        completed = false,
-                        completedAt = null
-                    )
-                }
-                
                 val currentList = _collabData.value ?: emptyList()
-                val activeCollab = currentList.filter { !it.completed }
-                val orderVal = if (defaultInsertion == "bottom") {
-                    (activeCollab.maxOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) + 1.0
-                } else {
-                    (activeCollab.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) - 1.0
-                }
-                
-                val todo = Todo.create(signedContent, finalDate).copy(
-                    taskType = parsed.taskType,
-                    targetCount = parsed.targetCount,
-                    recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
-                    order = orderVal,
-                    subtasks = subtaskList
-                )
+                val todo = buildBaseTodo(parsed, signedContent, currentList, defaultPref, defaultInsertion)
                 
                 val res = repository.writeCollaborationTodo(collab, todo)
                 if (res.isSuccess) {
