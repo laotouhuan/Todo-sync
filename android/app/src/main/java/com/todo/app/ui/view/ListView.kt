@@ -2,6 +2,9 @@ package com.todo.app.ui.view
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
@@ -44,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.animation.core.animateDpAsState
 import org.burnoutcrew.reorderable.rememberReorderableLazyListState
 import org.burnoutcrew.reorderable.reorderable
@@ -236,9 +240,8 @@ fun ClassicListView(viewModel: TodoViewModel) {
     val thisWeekStr = dates.thisWeek
     val thisMonthStr = dates.thisMonth
 
-    // Search and All Todos states
-    var searchQuery by remember { mutableStateOf("") }
-    var showSearchBar by remember { mutableStateOf(false) }
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val showSearchBar by viewModel.showSearchBar.collectAsState()
     var allTabMode by remember { mutableStateOf("uncompleted") } // "uncompleted", "completed"
     var showAllHistory by remember { mutableStateOf(false) }
     var hoveredHeaderKey by remember { mutableStateOf<String?>(null) }
@@ -405,112 +408,6 @@ fun ClassicListView(viewModel: TodoViewModel) {
     val isReadOnly = activeSource is TodoViewModel.ActiveSource.Collaboration
 
     Column(modifier = Modifier.fillMaxSize()) {
-        var showSourceMenu by remember { mutableStateOf(false) }
-        val collabs = viewModel.collaborations.collectAsState().value
-
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Box {
-                Row(
-                    modifier = Modifier.clickable { showSourceMenu = true },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val title = when (val src = activeSource) {
-                        is TodoViewModel.ActiveSource.Personal -> "我的待办"
-                        is TodoViewModel.ActiveSource.Collaboration -> src.collab.name
-                    }
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Icon(
-                        imageVector = Icons.Filled.ArrowDropDown,
-                        contentDescription = "切换清单",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-
-                    if (isReadOnly) {
-                        Spacer(Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = MaterialTheme.colorScheme.errorContainer
-                        ) {
-                            Text(
-                                text = "只读清单",
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
-
-                DropdownMenu(
-                    expanded = showSourceMenu,
-                    onDismissRequest = { showSourceMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("我的待办") },
-                        onClick = {
-                            viewModel.switchToPersonal()
-                            showSourceMenu = false
-                        }
-                    )
-                    collabs.forEach { collab ->
-                        DropdownMenuItem(
-                            text = { Text(collab.name) },
-                            onClick = {
-                                viewModel.switchToCollaboration(collab)
-                                showSourceMenu = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Search toggle button
-                IconButton(onClick = {
-                    showSearchBar = !showSearchBar
-                    if (!showSearchBar) searchQuery = ""
-                }) {
-                    Icon(
-                        imageVector = if (showSearchBar) Icons.Filled.Close else Icons.Filled.Search,
-                        contentDescription = "搜索",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-                IconButton(
-                    onClick = {
-                        val source = activeSource
-                        if (source is TodoViewModel.ActiveSource.Collaboration) {
-                            viewModel.loadCollabData(source.collab)
-                        } else {
-                            viewModel.syncWithCloud()
-                        }
-                    },
-                    enabled = true
-                ) {
-                    val isLoading = if (activeSource is TodoViewModel.ActiveSource.Personal) isSyncing else collabLoading
-                    if (isLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(
-                            imageVector = Icons.Filled.Refresh,
-                            contentDescription = "同步",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            }
-        }
-
         TabRow(selectedTabIndex = selectedTab, modifier = Modifier.fillMaxWidth()) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("今天聚焦") })
             Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("全部待办") })
@@ -520,14 +417,14 @@ fun ClassicListView(viewModel: TodoViewModel) {
         if (showSearchBar) {
             OutlinedTextField(
                 value = searchQuery,
-                onValueChange = { searchQuery = it },
+                onValueChange = { viewModel.setSearchQuery(it) },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 placeholder = { Text("搜索待办...") },
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
+                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
                             Icon(Icons.Filled.Clear, contentDescription = "清除")
                         }
                     }
@@ -1039,8 +936,18 @@ fun TodoItemRow(
             }
         }
 
+        val isVisualCompleted = if (checkinDate != null) {
+            true
+        } else {
+            todo.completed || ((todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) && todo.completedDates.any { it.startsWith(todayStr) })
+        }
+        val cardAlpha by animateFloatAsState(
+            targetValue = if (isVisualCompleted) 0.6f else 1f,
+            animationSpec = tween(durationMillis = 300)
+        )
+
         Card(
-            modifier = if (isReadOnly) {
+            modifier = (if (isReadOnly) {
                 Modifier.fillMaxWidth()
             } else {
                 Modifier
@@ -1065,18 +972,13 @@ fun TodoItemRow(
                             }
                         }
                     }
-            },
+            }).alpha(cardAlpha),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column {
                 val highlightDate = if (!checkinDate.isNullOrEmpty()) checkinDate.take(10) else todayStr
-                val isVisualCompleted = if (checkinDate != null) {
-                    true
-                } else {
-                    todo.completed || ((todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) && todo.completedDates.any { it.startsWith(todayStr) })
-                }
                 Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(
                         checked = isVisualCompleted,
@@ -1099,12 +1001,33 @@ fun TodoItemRow(
                         }
                     }) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            val textColor by animateColorAsState(
+                                targetValue = if (isVisualCompleted) Color.Gray else MaterialTheme.colorScheme.onSurface,
+                                animationSpec = tween(durationMillis = 300)
+                            )
+                            val strikethroughProgress by animateFloatAsState(
+                                targetValue = if (isVisualCompleted) 1f else 0f,
+                                animationSpec = tween(durationMillis = 300)
+                            )
+
                             Text(
                                 text = todo.content,
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = if (isVisualCompleted) Color.Gray else MaterialTheme.colorScheme.onSurface,
-                                textDecoration = if (isVisualCompleted) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
-                                modifier = Modifier.weight(1f, fill = false)
+                                color = textColor,
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    .drawWithContent {
+                                        drawContent()
+                                        if (strikethroughProgress > 0f) {
+                                            val y = size.height / 2f
+                                            drawLine(
+                                                color = Color.Gray,
+                                                start = androidx.compose.ui.geometry.Offset(0f, y),
+                                                end = androidx.compose.ui.geometry.Offset(size.width * strikethroughProgress, y),
+                                                strokeWidth = 2f
+                                            )
+                                        }
+                                    }
                             )
                             if (todo.recurring == RecurringType.DAILY_REPEAT) {
                                 Spacer(Modifier.width(6.dp))

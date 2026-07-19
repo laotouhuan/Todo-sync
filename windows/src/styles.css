@@ -193,7 +193,7 @@ main::-webkit-scrollbar-thumb {
   border: 1px solid var(--glass-border);
   border-radius: 12px;
   padding: 12px 16px;
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s, max-height 0.35s ease, opacity 0.35s ease, padding 0.35s ease, margin 0.35s ease;
   cursor: pointer;
   gap: 14px;
   user-select: none;
@@ -212,7 +212,6 @@ main::-webkit-scrollbar-thumb {
 }
 
 .todo-item.completed .todo-content {
-  text-decoration: line-through;
   color: var(--text-secondary);
 }
 
@@ -2588,4 +2587,95 @@ input:checked + .slider:before {
   margin-left: 8px;
   height: 1px;
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* ====== UI/UX Micro-animations & Feedback ====== */
+
+.todo-item.completing {
+  opacity: 0 !important;
+  max-height: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  border-top-width: 0 !important;
+  border-bottom-width: 0 !important;
+  overflow: hidden !important;
+  transform: scale(0.9) !important;
+}
+
+.todo-content {
+  position: relative;
+  display: inline-block;
+}
+
+.todo-content::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 0;
+  height: 1.5px;
+  background-color: var(--text-secondary);
+  transition: width 0.3s ease;
+}
+
+.todo-item.completed .todo-content::after,
+.todo-item.completing .todo-content::after {
+  width: 100%;
+}
+
+/* ====== Sync Success Status Feedback ====== */
+.icon-btn.sync-success svg {
+  color: #22c55e !important;
+  transition: color 0.2s ease;
+}
+
+/* ====== Chart Clock Sweep Entry Animations ====== */
+@keyframes chart-grow-rotate {
+  from {
+    transform: scale(0.2) rotate(-180deg);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+#efficiency-clock-group {
+  transform-origin: 170px 130px;
+  transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.6s;
+}
+
+.clock-quadrant {
+  stroke-dasharray: 126;
+  stroke-dashoffset: 126;
+  transition: stroke-dashoffset 0.25s linear;
+}
+
+#efficiency-clock-group.play-animation .clock-quadrant.q1 {
+  stroke-dashoffset: 0;
+  transition-delay: 0s;
+}
+#efficiency-clock-group.play-animation .clock-quadrant.q2 {
+  stroke-dashoffset: 0;
+  transition-delay: 0.25s;
+}
+#efficiency-clock-group.play-animation .clock-quadrant.q3 {
+  stroke-dashoffset: 0;
+  transition-delay: 0.5s;
+}
+#efficiency-clock-group.play-animation .clock-quadrant.q4 {
+  stroke-dashoffset: 0;
+  transition-delay: 0.75s;
+}
+
+.efficiency-dot {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+#efficiency-clock-group.play-animation .efficiency-dot {
+  opacity: 1;
 }

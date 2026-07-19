@@ -10,6 +10,8 @@ import {
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
+let pendingAnimations = 0;
+
 // ====== State ======
 const appState = {
     todoData: { version: 1, last_updated: new Date().toISOString(), todos: [] },
@@ -933,67 +935,58 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
 
     li.querySelector('.checkbox').addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (checkinDate !== null) {
-            const index = appState.todoData.todos.findIndex(t => t.id === todo.id);
-            if (index !== -1) {
-                const t = appState.todoData.todos[index];
-                const dateIdx = t.completed_dates.findIndex(d => d.startsWith(checkinDate));
-                if (dateIdx > -1) {
-                    t.completed_dates.splice(dateIdx, 1);
-                }
-                if (t.target_count) {
-                    t.completed = t.completed_dates.length >= t.target_count;
-                    t.completed_at = t.completed ? (t.completed_at || new Date().toISOString()) : null;
-                } else {
-                    t.completed = false;
-                    t.completed_at = null;
-                }
-                t.updated_at = new Date().toISOString();
-                render();
-                await saveData();
-            }
-            return;
-        }
+        if (li.classList.contains('completing')) return;
+
         const index = appState.todoData.todos.findIndex(t => t.id === todo.id);
-        if (index !== -1) {
-            const t = appState.todoData.todos[index];
+        if (index === -1) return;
+        const t = appState.todoData.todos[index];
 
-            // 周/月打卡任务处理分支
-            if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
-                const todayISO = getTodayString();
-                t.completed_dates = t.completed_dates || [];
+        const todayISO = getTodayString();
+        const isCheckinCompletedTodayBefore = (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin')
+            && t.completed_dates && t.completed_dates.some(dStr => dStr.startsWith(todayStr));
+        const isVisualCompletedBefore = checkinDate !== null ? true : (t.completed || isCheckinCompletedTodayBefore);
 
-                // 1. 已达标时的交互限制：不执行取消打卡操作
-                if (t.completed) {
-                    showToast('已达到目标次数！如需消卡，请点击文本进入编辑弹窗。');
-                    return;
-                }
+        if (checkinDate !== null) {
+            const dateIdx = t.completed_dates.findIndex(d => d.startsWith(checkinDate));
+            if (dateIdx > -1) {
+                t.completed_dates.splice(dateIdx, 1);
+            }
+            if (t.target_count) {
+                t.completed = t.completed_dates.length >= t.target_count;
+                t.completed_at = t.completed ? (t.completed_at || new Date().toISOString()) : null;
+            } else {
+                t.completed = false;
+                t.completed_at = null;
+            }
+            t.updated_at = new Date().toISOString();
+        }
+        else if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
+            t.completed_dates = t.completed_dates || [];
 
-                // 2. 今天已打过卡
-                if (t.completed_dates.some(d => d.startsWith(todayISO))) {
-                    showToast('今天已打卡！如需消卡，请点击文本进入编辑弹窗。');
-                    return;
-                }
-
-                // 3. 执行打卡 (正常打卡保存完整 ISO 时间戳)
-                t.completed_dates.push(new Date().toISOString());
-                t.completed_dates.sort();
-
-                // 检查是否达标
-                const currentPeriodCount = t.task_type === 'weekly_checkin' 
-                    ? getWeeklyCompletedCount(t) 
-                    : getMonthlyCompletedCount(t);
-                if (t.target_count && currentPeriodCount >= t.target_count) {
-                    t.completed = true;
-                    t.completed_at = new Date().toISOString();
-                }
-
-                t.updated_at = new Date().toISOString();
-                render();
-                await saveData();
+            if (t.completed) {
+                showToast('已达到目标次数！如需消卡，请点击文本进入编辑弹窗。');
                 return;
             }
 
+            if (t.completed_dates.some(d => d.startsWith(todayISO))) {
+                showToast('今天已打卡！如需消卡，请点击文本进入编辑弹窗。');
+                return;
+            }
+
+            t.completed_dates.push(new Date().toISOString());
+            t.completed_dates.sort();
+
+            const currentPeriodCount = t.task_type === 'weekly_checkin' 
+                ? getWeeklyCompletedCount(t) 
+                : getMonthlyCompletedCount(t);
+            if (t.target_count && currentPeriodCount >= t.target_count) {
+                t.completed = true;
+                t.completed_at = new Date().toISOString();
+            }
+
+            t.updated_at = new Date().toISOString();
+        }
+        else {
             if (!t.completed && t.recurring === 'daily_repeat') {
                 const tomorrowStr = getTomorrowString();
                 const existsClone = appState.todoData.todos.some(
@@ -1003,7 +996,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
                 if (!existsClone) {
                     const clone = createTodo(t.content, tomorrowStr);
                     clone.recurring = 'daily_repeat';
-                    clone.order = -Date.now(); // 负数确保排在最前面
+                    clone.order = -Date.now();
                     clone.subtasks = t.subtasks
                         ? deepClone(t.subtasks).map(s => {
                             s.id = crypto.randomUUID();
@@ -1029,9 +1022,43 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
                 // 不联动取消子代办
             }
             t.updated_at = new Date().toISOString();
-            render();
-            await saveData();
         }
+
+        const isCheckinCompletedTodayAfter = (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin')
+            && t.completed_dates && t.completed_dates.some(dStr => dStr.startsWith(todayStr));
+        const isVisualCompletedAfter = checkinDate !== null ? true : (t.completed || isCheckinCompletedTodayAfter);
+
+        const checkbox = li.querySelector('.checkbox');
+        const checkboxSvg = checkbox.querySelector('svg');
+        if (isVisualCompletedAfter) {
+            li.classList.add('completed');
+            if (checkboxSvg) checkboxSvg.style.opacity = '1';
+        } else {
+            li.classList.remove('completed');
+            if (checkboxSvg) checkboxSvg.style.opacity = '0';
+        }
+
+        if (isVisualCompletedBefore === isVisualCompletedAfter) {
+            await saveData();
+            render();
+            return;
+        }
+
+        li.style.maxHeight = li.scrollHeight + 'px';
+        li.offsetHeight;
+        li.classList.add('completing');
+        li.style.maxHeight = '0px';
+
+        pendingAnimations++;
+        setTimeout(async () => {
+            pendingAnimations--;
+            if (pendingAnimations === 0) {
+                await saveData();
+                render();
+            } else {
+                await saveData();
+            }
+        }, 350);
     });
 
     li.querySelector('.todo-info').addEventListener('click', (e) => {
@@ -2205,6 +2232,9 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     if (svgEl) {
         svgEl.innerHTML = ''; // clear previous elements
         
+        const clockGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        clockGroup.id = 'efficiency-clock-group';
+        
         const cx = 170;
         const cy = 130;
         const r = 80;
@@ -2218,7 +2248,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         bgTrack.setAttribute('fill', 'none');
         bgTrack.setAttribute('stroke', 'rgba(255, 255, 255, 0.05)');
         bgTrack.setAttribute('stroke-width', strokeW);
-        svgEl.appendChild(bgTrack);
+        clockGroup.appendChild(bgTrack);
         
         // Draw the 4 quadrant arcs representing our time slots
         // Quadrant 1 (Top-Right): 0-6 (Night)
@@ -2228,7 +2258,8 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         q1Path.setAttribute('stroke', '#3b82f6');
         q1Path.setAttribute('stroke-width', strokeW);
         q1Path.setAttribute('opacity', totalSlots > 0 ? (nightCount > 0 ? 0.95 : 0.2) : 0.2);
-        svgEl.appendChild(q1Path);
+        q1Path.setAttribute('class', 'clock-quadrant q1');
+        clockGroup.appendChild(q1Path);
         
         // Quadrant 2 (Bottom-Right): 6-12 (Morning)
         const q2Path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -2237,7 +2268,8 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         q2Path.setAttribute('stroke', '#f59e0b');
         q2Path.setAttribute('stroke-width', strokeW);
         q2Path.setAttribute('opacity', totalSlots > 0 ? (morningCount > 0 ? 0.95 : 0.2) : 0.2);
-        svgEl.appendChild(q2Path);
+        q2Path.setAttribute('class', 'clock-quadrant q2');
+        clockGroup.appendChild(q2Path);
         
         // Quadrant 3 (Bottom-Left): 12-18 (Afternoon)
         const q3Path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -2246,7 +2278,8 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         q3Path.setAttribute('stroke', '#7b61ff');
         q3Path.setAttribute('stroke-width', strokeW);
         q3Path.setAttribute('opacity', totalSlots > 0 ? (afternoonCount > 0 ? 0.95 : 0.2) : 0.2);
-        svgEl.appendChild(q3Path);
+        q3Path.setAttribute('class', 'clock-quadrant q3');
+        clockGroup.appendChild(q3Path);
         
         // Quadrant 4 (Top-Left): 18-24 (Evening)
         const q4Path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -2255,7 +2288,8 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         q4Path.setAttribute('stroke', '#6366f1');
         q4Path.setAttribute('stroke-width', strokeW);
         q4Path.setAttribute('opacity', totalSlots > 0 ? (eveningCount > 0 ? 0.95 : 0.2) : 0.2);
-        svgEl.appendChild(q4Path);
+        q4Path.setAttribute('class', 'clock-quadrant q4');
+        clockGroup.appendChild(q4Path);
 
         // Draw dotted division lines
         const lineH = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -2265,7 +2299,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         lineH.setAttribute('y2', cy);
         lineH.setAttribute('stroke', 'rgba(255, 255, 255, 0.15)');
         lineH.setAttribute('stroke-dasharray', '2,4');
-        svgEl.appendChild(lineH);
+        clockGroup.appendChild(lineH);
 
         const lineV = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         lineV.setAttribute('x1', cx);
@@ -2274,7 +2308,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         lineV.setAttribute('y2', cy + r + 15);
         lineV.setAttribute('stroke', 'rgba(255, 255, 255, 0.15)');
         lineV.setAttribute('stroke-dasharray', '2,4');
-        svgEl.appendChild(lineV);
+        clockGroup.appendChild(lineV);
         
         // Center clock icon
         const centerGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -2286,7 +2320,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
             <polyline points="12 6 12 12 16 14"></polyline>
           </svg>
         `;
-        svgEl.appendChild(centerGroup);
+        clockGroup.appendChild(centerGroup);
 
         // Text Labels
         const drawLabel = (textStr, x, y, anchor, color) => {
@@ -2298,7 +2332,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
             txt.setAttribute('font-size', '11.5px');
             txt.setAttribute('font-weight', '600');
             txt.textContent = textStr;
-            svgEl.appendChild(txt);
+            clockGroup.appendChild(txt);
         };
         
         drawLabel(`深夜 (0-6): ${nightPct}%`, 325, 25, 'end', '#3b82f6');
@@ -2432,7 +2466,8 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
             shapeEl.setAttribute('stroke', '#ffffff');
             shapeEl.setAttribute('stroke-width', strokeWidth);
             shapeEl.setAttribute('opacity', opacityVal);
-            shapeEl.setAttribute('class', 'task-dot');
+            shapeEl.setAttribute('class', 'task-dot efficiency-dot');
+            shapeEl.style.transitionDelay = `${(fracHour / 24) * 1.0}s`;
             
             const pad = (n) => String(n).padStart(2, '0');
             const displayTime = `${pad(hour)}:${pad(minute)}`;
@@ -2464,8 +2499,13 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
                 openEditModal(t);
             });
             
-            svgEl.appendChild(shapeEl);
+            clockGroup.appendChild(shapeEl);
         });
+
+        svgEl.appendChild(clockGroup);
+        // Force reflow and play entry animation
+        svgEl.offsetHeight;
+        clockGroup.classList.add('play-animation');
     }
 
     let displayTodos = periodTodos;
@@ -3333,15 +3373,28 @@ window.addEventListener("DOMContentLoaded", () => {
     }
 
     // 手动同步按钮
+    const REFRESH_SVG_PATH = 'M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z';
+    const CHECKMARK_SVG_PATH = 'M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z';
     const manualSyncBtn = document.getElementById('manual-sync-btn');
     if (manualSyncBtn) {
         manualSyncBtn.addEventListener('click', async () => {
+            if (manualSyncBtn.classList.contains('sync-success')) return;
+
             const svg = manualSyncBtn.querySelector('svg');
+            const svgPath = svg ? svg.querySelector('path') : null;
             if (svg) svg.classList.add('sync-spin');
             
             await loadData();
             
             if (svg) svg.classList.remove('sync-spin');
+            if (svgPath) {
+                svgPath.setAttribute('d', CHECKMARK_SVG_PATH);
+                manualSyncBtn.classList.add('sync-success');
+                setTimeout(() => {
+                    svgPath.setAttribute('d', REFRESH_SVG_PATH);
+                    manualSyncBtn.classList.remove('sync-success');
+                }, 1500);
+            }
         });
     }
 
