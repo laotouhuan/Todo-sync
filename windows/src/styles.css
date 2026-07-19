@@ -2651,7 +2651,7 @@ input:checked + .slider:before {
 .clock-quadrant {
   stroke-dasharray: 126;
   stroke-dashoffset: 126;
-  transition: stroke-dashoffset 0.25s linear;
+  transition: stroke-dashoffset 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 #efficiency-clock-group.play-animation .clock-quadrant.q1 {
@@ -2660,22 +2660,26 @@ input:checked + .slider:before {
 }
 #efficiency-clock-group.play-animation .clock-quadrant.q2 {
   stroke-dashoffset: 0;
-  transition-delay: 0.25s;
+  transition-delay: 0.2s;
 }
 #efficiency-clock-group.play-animation .clock-quadrant.q3 {
   stroke-dashoffset: 0;
-  transition-delay: 0.5s;
+  transition-delay: 0.4s;
 }
 #efficiency-clock-group.play-animation .clock-quadrant.q4 {
   stroke-dashoffset: 0;
-  transition-delay: 0.75s;
+  transition-delay: 0.6s;
 }
 
 .efficiency-dot {
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transform: scale(0);
+  transform-origin: center;
+  transform-box: fill-box;
+  transition: opacity 0.35s ease-out, transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 #efficiency-clock-group.play-animation .efficiency-dot {
   opacity: 1;
+  transform: scale(1);
 }
