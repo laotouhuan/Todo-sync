@@ -161,6 +161,7 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?) {
 
     Row(
         modifier = Modifier
+            .statusBarsPadding()
             .fillMaxWidth()
             .height(56.dp)
             .padding(horizontal = 16.dp),

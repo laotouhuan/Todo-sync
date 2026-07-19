@@ -315,6 +315,13 @@ main::-webkit-scrollbar-thumb {
   font-weight: 600;
 }
 
+.meta-item.collaborator {
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.15);
+  font-weight: 500;
+}
+
 /* ====== Edit Button & Subtask Actions ====== */
 .edit-btn {
   background: none;

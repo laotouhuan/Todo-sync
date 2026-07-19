@@ -91,6 +91,17 @@ function escapeHtml(str) {
     return String(str).replace(/[&<>"']/g, c => map[c]);
 }
 
+/** 提取协作待办中的署名信息 */
+function extractCollaborator(content) {
+    if (!content) return { nickname: null, cleanContent: '' };
+    const regex = /\s+\(由\s+\[(.+?)\]\s+添加\)$/;
+    const match = content.match(regex);
+    if (match) {
+        return { nickname: match[1], cleanContent: content.replace(regex, '') };
+    }
+    return { nickname: null, cleanContent: content };
+}
+
 /** 深拷贝工具（替代 JSON.parse(JSON.stringify(...))） */
 function deepClone(obj) {
     return structuredClone(obj);
@@ -781,6 +792,10 @@ function getMetaHtml(todo, todayStr, tomorrowStr) {
         const completedCount = todo.subtasks.filter(s => s.completed).length;
         html += `<span class="meta-item subtask-progress">📋 ${completedCount}/${todo.subtasks.length}</span>`;
     }
+    const { nickname } = extractCollaborator(todo.content);
+    if (nickname) {
+        html += `<span class="meta-item collaborator">👤 ${escapeHtml(nickname)}</span>`;
+    }
     if (todo.completed) {
         const dateSource = todo.completed_at || todo.checkinDate;
         if (dateSource) {
@@ -819,8 +834,9 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
             </svg>
         </button>
     `;
-    // 用 textContent 设置待办内容，防止 HTML 注入
-    li.querySelector('.todo-content').textContent = todo.content;
+    // 用 textContent 设置待办内容，防止 HTML 注入（去除协作署名后缀显示）
+    const { cleanContent } = extractCollaborator(todo.content);
+    li.querySelector('.todo-content').textContent = cleanContent;
 
     const checkinContainer = li.querySelector('.read-only-checkin-container');
     if (todo.task_type === 'weekly_checkin') {
@@ -1638,7 +1654,10 @@ async function _doAutoSave() {
 
     const index = appState.todoData.todos.findIndex(t => t.id === appState.currentEditingTodo.id);
     if (index !== -1) {
-        if (hasContent) appState.todoData.todos[index].content = newContent;
+        if (hasContent) {
+            const { nickname } = extractCollaborator(appState.currentEditingTodo.content);
+            appState.todoData.todos[index].content = nickname ? `${newContent} (由 [${nickname}] 添加)` : newContent;
+        }
 
         const taskTypeSelect = document.getElementById('edit-task-type');
         if (taskTypeSelect) {
@@ -1778,9 +1797,8 @@ function updateEditModalFields(taskTypeVal) {
 function openEditModal(todo) {
     appState.currentEditingTodo = todo;
 
-    const modal = document.getElementById('edit-modal');
-    const input = document.getElementById('edit-content');
-    input.value = todo.content;
+    const { cleanContent } = extractCollaborator(todo.content);
+    input.value = cleanContent;
 
     const taskTypeSelect = document.getElementById('edit-task-type');
     let taskTypeVal = todo.task_type || 'normal';
