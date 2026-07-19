@@ -73,6 +73,7 @@ import com.todo.app.data.model.withToggledCheckinDate
 import com.todo.app.data.model.classifyForTodayFocus
 import com.todo.app.data.model.TaskType
 import com.todo.app.data.model.RecurringType
+import com.todo.app.data.model.extractCollaboratorContent
 import com.todo.app.data.model.weekStringOf
 import com.todo.app.data.model.monthStringOf
 import com.todo.app.ui.viewmodel.TodoViewModel
@@ -1010,8 +1011,9 @@ fun TodoItemRow(
                                 animationSpec = tween(durationMillis = 300)
                             )
 
+                            val parsedContent = remember(todo.content) { todo.extractCollaboratorContent() }
                             Text(
-                                text = todo.content,
+                                text = parsedContent.cleanContent,
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = textColor,
                                 modifier = Modifier
@@ -1052,12 +1054,16 @@ fun TodoItemRow(
                                 }
                             }
                         }
+                        val parsedMeta = remember(todo.content) { todo.extractCollaboratorContent() }
                         val meta = mutableListOf<String>()
                         todo.date?.let {
                             val dateLabel = todo.getDateLabel(todayStr, tomorrowStr)
                             val statusLabel = todo.getCompletionStatusLabel()
                             val label = if (statusLabel != null) "📅 $dateLabel ($statusLabel)" else "📅 $dateLabel"
                             meta.add(label)
+                        }
+                        parsedMeta.nickname?.let {
+                            meta.add("👤 $it")
                         }
                         if (todo.completed && todo.completedAt != null) {
                             val completedAt = todo.completedAt!!

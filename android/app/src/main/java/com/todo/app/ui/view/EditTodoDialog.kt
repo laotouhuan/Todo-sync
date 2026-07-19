@@ -72,6 +72,7 @@ import com.todo.app.data.model.getThisWeekDates
 import com.todo.app.data.model.getThisMonthDates
 import com.todo.app.data.model.TaskType
 import com.todo.app.data.model.RecurringType
+import com.todo.app.data.model.extractCollaboratorContent
 import java.time.LocalDate
 import java.util.UUID
 import kotlinx.coroutines.Job
@@ -154,8 +155,14 @@ private fun buildUpdatedTodo(
     } else {
         parentCompleted
     }
+    val parsedContent = todo.extractCollaboratorContent()
+    val finalContent = if (parsedContent.nickname != null && content.isNotBlank()) {
+        "$content (由 [${parsedContent.nickname}] 添加)"
+    } else {
+        content
+    }
     return todo.copy(
-        content = content.takeIf { it.isNotBlank() } ?: todo.content,
+        content = finalContent.takeIf { it.isNotBlank() } ?: todo.content,
         date = finalDate,
         time = finalTime,
         recurring = mappedRecurring,
@@ -194,7 +201,8 @@ fun EditTodoDialog(
     onAutoSave: (Todo) -> Unit,
     onDelete: () -> Unit
 ) {
-    var content by remember(todo.content) { mutableStateOf(todo.content) }
+    val parsedContent = remember(todo.content) { todo.extractCollaboratorContent() }
+    var content by remember(todo.content) { mutableStateOf(parsedContent.cleanContent) }
     var date by remember(todo.id, todo.date) { mutableStateOf(todo.date ?: "") }
     var time by remember(todo.time) { mutableStateOf(todo.time ?: "") }
     var hasDateEnabled by remember(todo.id, todo.date) { mutableStateOf(!todo.date.isNullOrEmpty() && !isWeekDate(todo.date!!) && !isMonthDate(todo.date!!)) }

@@ -282,3 +282,17 @@ fun getMonthCalendarDates(todoDate: String?): List<LocalDate> {
 
     return list
 }
+
+data class ParsedCollaboratorContent(val cleanContent: String, val nickname: String?)
+
+fun Todo.extractCollaboratorContent(): ParsedCollaboratorContent {
+    val regex = Regex("""\s+\(由\s+\[(.+?)\]\s+添加\)$""")
+    val match = regex.find(this.content)
+    return if (match != null) {
+        val nickname = match.groupValues[1]
+        val cleanContent = this.content.substring(0, match.range.first)
+        ParsedCollaboratorContent(cleanContent, nickname)
+    } else {
+        ParsedCollaboratorContent(this.content, null)
+    }
+}
