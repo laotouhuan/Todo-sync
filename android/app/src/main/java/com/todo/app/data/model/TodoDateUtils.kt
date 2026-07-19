@@ -98,24 +98,13 @@ private fun hourToSlot(hour: Int): String = when (hour) {
     else -> "night"
 }
 
-/**
- * Categorize an ISO timestamp by local time into a time slot.
- * @param isoTimestamp ISO 8601 timestamp string
- * @returns 'morning' | 'afternoon' | 'evening' | 'night' | 'unknown'
- */
 fun categorizeTimeSlot(isoTimestamp: String?): String {
     if (isoTimestamp.isNullOrEmpty()) return "unknown"
     return try {
-        val odt = OffsetDateTime.parse(isoTimestamp)
-        hourToSlot(odt.toLocalTime().hour)
+        val ldt = parseIsoToLocalDateTime(isoTimestamp)
+        hourToSlot(ldt.hour)
     } catch (e: Exception) {
-        try {
-            val instant = Instant.parse(isoTimestamp)
-            val odt = OffsetDateTime.ofInstant(instant, ZoneId.systemDefault())
-            hourToSlot(odt.toLocalTime().hour)
-        } catch (_: Exception) {
-            "unknown"
-        }
+        "unknown"
     }
 }
 

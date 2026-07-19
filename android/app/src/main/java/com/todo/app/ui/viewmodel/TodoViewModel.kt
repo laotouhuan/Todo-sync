@@ -147,6 +147,23 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
 
     val isSyncing = repository.isSyncing
 
+    private val _showSearchBar = MutableStateFlow(false)
+    val showSearchBar: StateFlow<Boolean> = _showSearchBar.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
+    fun setShowSearchBar(show: Boolean) {
+        _showSearchBar.value = show
+        if (!show) {
+            _searchQuery.value = ""
+        }
+    }
+
     init {
         // 启动时自动同步云端
         syncWithCloud()

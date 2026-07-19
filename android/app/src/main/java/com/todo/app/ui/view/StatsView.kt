@@ -1,6 +1,11 @@
 package com.todo.app.ui.view
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -133,105 +138,8 @@ private fun MakeupIcon(shape: String, color: Color, dotRadius: androidx.compose.
 fun StatsView(viewModel: TodoViewModel) {
     var subTab by remember { mutableIntStateOf(0) } // 0 = Insights, 1 = Health
     var showEditDialogFor by remember { mutableStateOf<Todo?>(null) }
-    val activeSource by viewModel.activeSource.collectAsState()
-    val collabs = viewModel.collaborations.collectAsState().value
-    val collabLoading by viewModel.collabLoading.collectAsState()
-    val isSyncing by viewModel.isSyncing.collectAsState()
-    var showSourceMenu by remember { mutableStateOf(false) }
-    
-    val isReadOnly = activeSource is TodoViewModel.ActiveSource.Collaboration
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Box {
-                Row(
-                    modifier = Modifier.clickable { showSourceMenu = true },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val title = when (val src = activeSource) {
-                        is TodoViewModel.ActiveSource.Personal -> "我的待办"
-                        is TodoViewModel.ActiveSource.Collaboration -> src.collab.name
-                    }
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Icon(
-                        imageVector = Icons.Filled.ArrowDropDown,
-                        contentDescription = "切换清单",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-
-                    if (isReadOnly) {
-                        Spacer(Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = MaterialTheme.colorScheme.errorContainer
-                        ) {
-                            Text(
-                                text = "只读清单",
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
-
-                DropdownMenu(
-                    expanded = showSourceMenu,
-                    onDismissRequest = { showSourceMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("我的待办") },
-                        onClick = {
-                            viewModel.switchToPersonal()
-                            showSourceMenu = false
-                        }
-                    )
-                    collabs.forEach { collab ->
-                        DropdownMenuItem(
-                            text = { Text(collab.name) },
-                            onClick = {
-                                viewModel.switchToCollaboration(collab)
-                                showSourceMenu = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            IconButton(
-                onClick = {
-                    val source = activeSource
-                    if (source is TodoViewModel.ActiveSource.Collaboration) {
-                        viewModel.loadCollabData(source.collab)
-                    } else {
-                        viewModel.syncWithCloud()
-                    }
-                },
-                enabled = true
-            ) {
-                val isLoading = if (activeSource is TodoViewModel.ActiveSource.Personal) isSyncing else collabLoading
-                if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(
-                        imageVector = Icons.Filled.Refresh,
-                        contentDescription = "同步",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-        }
-
         // 二级 Tab
         TabRow(selectedTabIndex = subTab) {
             Tab(selected = subTab == 0, onClick = { subTab = 0 }, text = { Text("效率洞察") })
@@ -267,6 +175,7 @@ fun StatsView(viewModel: TodoViewModel) {
 @Composable
 fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     val todos by viewModel.activeTodos.collectAsState()
+    val activeSource by viewModel.activeSource.collectAsState()
     var period by remember { mutableStateOf("day") }
     var targetDate by remember { mutableStateOf(LocalDate.now()) }
 
@@ -754,8 +663,12 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Text(insightText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(8.dp))
-                    
+                    val sweepProgress = remember { Animatable(0f) }
+                    LaunchedEffect(period, targetDate, activeSource) {
+                        sweepProgress.snapTo(0f)
+                        sweepProgress.animateTo(1f, animationSpec = tween(durationMillis = 1000, easing = LinearEasing))
+                    }
+
                     // Clock drawing container
                     Box(
                         modifier = Modifier
@@ -822,11 +735,13 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                 style = Stroke(width = strokeWidthPx)
                             )
                             
+                            val currentSweep = sweepProgress.value * 360f
+
                             // Q1 (Top-Right): 0-6 (Night)
                             drawArc(
                                 color = Color(0xFF3B82F6),
                                 startAngle = 270f,
-                                sweepAngle = 90f,
+                                sweepAngle = minOf(90f, currentSweep),
                                 useCenter = false,
                                 topLeft = Offset(cx - rPx, cy - rPx),
                                 size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
@@ -838,7 +753,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                             drawArc(
                                 color = Color(0xFFF59E0B),
                                 startAngle = 0f,
-                                sweepAngle = 90f,
+                                sweepAngle = maxOf(0f, minOf(90f, currentSweep - 90f)),
                                 useCenter = false,
                                 topLeft = Offset(cx - rPx, cy - rPx),
                                 size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
@@ -850,7 +765,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                             drawArc(
                                 color = Color(0xFF10B981),
                                 startAngle = 90f,
-                                sweepAngle = 90f,
+                                sweepAngle = maxOf(0f, minOf(90f, currentSweep - 180f)),
                                 useCenter = false,
                                 topLeft = Offset(cx - rPx, cy - rPx),
                                 size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
@@ -862,7 +777,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                             drawArc(
                                 color = Color(0xFF6366F1),
                                 startAngle = 180f,
-                                sweepAngle = 90f,
+                                sweepAngle = maxOf(0f, minOf(90f, currentSweep - 270f)),
                                 useCenter = false,
                                 topLeft = Offset(cx - rPx, cy - rPx),
                                 size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
@@ -919,66 +834,77 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                             }
 
                             plottedDots.forEach { dot ->
-                                val px = dot.x
-                                val py = dot.y
-                                
-                                when (dot.shape) {
-                                    "circle" -> {
-                                        drawCircle(
-                                            color = dot.color,
-                                            radius = dotRadius,
-                                            center = Offset(px, py)
-                                        )
-                                        drawCircle(
-                                            color = Color.White,
-                                            radius = dotRadius,
-                                            center = Offset(px, py),
-                                            style = Stroke(width = strokeW)
-                                        )
-                                    }
-                                    "triangle" -> {
-                                        val path = Path().apply {
-                                            moveTo(px, py - dotRadius * 1.1f)
-                                            lineTo(px - dotRadius, py + dotRadius * 0.9f)
-                                            lineTo(px + dotRadius, py + dotRadius * 0.9f)
-                                            close()
+                                val parts = dot.timeLabel.split(":")
+                                val hour = parts.getOrNull(0)?.toIntOrNull() ?: 0
+                                val minute = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                                val dotAngle = (hour + minute / 60f) * 15f
+
+                                val diff = currentSweep - dotAngle
+                                if (diff >= 0f) {
+                                    val dotAlpha = minOf(1f, diff / 15f)
+                                    val px = dot.x
+                                    val py = dot.y
+                                    
+                                    when (dot.shape) {
+                                        "circle" -> {
+                                            drawCircle(
+                                                color = dot.color,
+                                                radius = dotRadius,
+                                                center = Offset(px, py),
+                                                alpha = dotAlpha
+                                            )
+                                            drawCircle(
+                                                color = Color.White,
+                                                radius = dotRadius,
+                                                center = Offset(px, py),
+                                                style = Stroke(width = strokeW),
+                                                alpha = dotAlpha
+                                            )
                                         }
-                                        drawPath(path = path, color = dot.color)
-                                        drawPath(path = path, color = Color.White, style = Stroke(width = strokeW))
-                                    }
-                                    "diamond" -> {
-                                        val path = Path().apply {
-                                            moveTo(px, py - dotRadius * 1.1f)
-                                            lineTo(px + dotRadius * 1.1f, py)
-                                            lineTo(px, py + dotRadius * 1.1f)
-                                            lineTo(px - dotRadius * 1.1f, py)
-                                            close()
-                                        }
-                                        drawPath(path = path, color = dot.color)
-                                        drawPath(path = path, color = Color.White, style = Stroke(width = strokeW))
-                                    }
-                                    "star" -> {
-                                        val path = Path().apply {
-                                            val spikes = 5
-                                            val outerRadius = dotRadius * 1.25f
-                                            val innerRadius = dotRadius * 0.6f
-                                            var rot = Math.PI / 2 * 3
-                                            val step = Math.PI / spikes
-                                            for (i in 0 until spikes) {
-                                                val px1 = px + Math.cos(rot).toFloat() * outerRadius
-                                                val py1 = py + Math.sin(rot).toFloat() * outerRadius
-                                                if (i == 0) moveTo(px1, py1) else lineTo(px1, py1)
-                                                rot += step
-                                                
-                                                val px2 = px + Math.cos(rot).toFloat() * innerRadius
-                                                val py2 = py + Math.sin(rot).toFloat() * innerRadius
-                                                lineTo(px2, py2)
-                                                rot += step
+                                        "triangle" -> {
+                                            val path = Path().apply {
+                                                moveTo(px, py - dotRadius * 1.1f)
+                                                lineTo(px - dotRadius, py + dotRadius * 0.9f)
+                                                lineTo(px + dotRadius, py + dotRadius * 0.9f)
+                                                close()
                                             }
-                                            close()
+                                            drawPath(path = path, color = dot.color, alpha = dotAlpha)
+                                            drawPath(path = path, color = Color.White, style = Stroke(width = strokeW), alpha = dotAlpha)
                                         }
-                                        drawPath(path = path, color = dot.color)
-                                        drawPath(path = path, color = Color.White, style = Stroke(width = strokeW))
+                                        "diamond" -> {
+                                            val path = Path().apply {
+                                                moveTo(px, py - dotRadius * 1.1f)
+                                                lineTo(px + dotRadius * 1.1f, py)
+                                                lineTo(px, py + dotRadius * 1.1f)
+                                                lineTo(px - dotRadius * 1.1f, py)
+                                                close()
+                                            }
+                                            drawPath(path = path, color = dot.color, alpha = dotAlpha)
+                                            drawPath(path = path, color = Color.White, style = Stroke(width = strokeW), alpha = dotAlpha)
+                                        }
+                                        "star" -> {
+                                            val path = Path().apply {
+                                                val spikes = 5
+                                                val outerRadius = dotRadius * 1.25f
+                                                val innerRadius = dotRadius * 0.6f
+                                                var rot = Math.PI / 2 * 3
+                                                val step = Math.PI / spikes
+                                                for (i in 0 until spikes) {
+                                                    val px1 = px + Math.cos(rot).toFloat() * outerRadius
+                                                    val py1 = py + Math.sin(rot).toFloat() * outerRadius
+                                                    if (i == 0) moveTo(px1, py1) else lineTo(px1, py1)
+                                                    rot += step
+                                                    
+                                                    val px2 = px + Math.cos(rot).toFloat() * innerRadius
+                                                    val py2 = py + Math.sin(rot).toFloat() * innerRadius
+                                                    lineTo(px2, py2)
+                                                    rot += step
+                                                }
+                                                close()
+                                            }
+                                            drawPath(path = path, color = dot.color, alpha = dotAlpha)
+                                            drawPath(path = path, color = Color.White, style = Stroke(width = strokeW), alpha = dotAlpha)
+                                        }
                                     }
                                 }
                             }
@@ -1441,8 +1367,20 @@ fun HealthContent(viewModel: TodoViewModel) {
                         modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp))
                     ) {
                         val totalThroughput = addedCount + completedCount
-                        val addedWeight = if (totalThroughput == 0) 1f else addedCount.toFloat()
-                        val completedWeight = if (totalThroughput == 0) 1f else completedCount.toFloat()
+                        val targetAddedWeight = if (totalThroughput == 0) 1f else addedCount.toFloat()
+                        val targetCompletedWeight = if (totalThroughput == 0) 1f else completedCount.toFloat()
+
+                        val animatedAddedWeight by animateFloatAsState(
+                            targetValue = targetAddedWeight,
+                            animationSpec = tween(durationMillis = 500)
+                        )
+                        val animatedCompletedWeight by animateFloatAsState(
+                            targetValue = targetCompletedWeight,
+                            animationSpec = tween(durationMillis = 500)
+                        )
+
+                        val addedWeight = maxOf(0.001f, animatedAddedWeight)
+                        val completedWeight = maxOf(0.001f, animatedCompletedWeight)
 
                         if (addedWeight > 0f) Box(modifier = Modifier.weight(addedWeight).fillMaxHeight().background(Color(0xFF3B82F6)))
                         if (completedWeight > 0f) Box(modifier = Modifier.weight(completedWeight).fillMaxHeight().background(Color(0xFF10B981)))
