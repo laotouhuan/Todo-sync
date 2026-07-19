@@ -273,16 +273,12 @@ export function categorizeByTimeSlot(isoTimestamp) {
  */
 export function calcTaskAgeDays(createdAt, now = new Date()) {
     if (!createdAt) return -1;
-    try {
-        const createdMs = new Date(createdAt).getTime();
-        const nowMs = new Date(now).getTime();
-        if (isNaN(createdMs) || isNaN(nowMs)) return -1;
-        const diff = nowMs - createdMs;
-        if (diff < 0) return 0;
-        return Math.floor(diff / 86400000);
-    } catch (e) {
-        return -1;
-    }
+    const createdMs = new Date(createdAt).getTime();
+    const nowMs = new Date(now).getTime();
+    if (isNaN(createdMs) || isNaN(nowMs)) return -1;
+    const diff = nowMs - createdMs;
+    if (diff < 0) return 0;
+    return Math.floor(diff / 86400000);
 }
 
 /**

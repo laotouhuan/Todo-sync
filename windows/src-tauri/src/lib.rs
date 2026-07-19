@@ -113,10 +113,17 @@ fn watch_file(app: AppHandle) {
 
         loop {
             // 短超时接收文件事件，配合外部计时器实现 5 秒轮询
-            if let Ok(Ok(Event { paths, .. })) = rx.recv_timeout(Duration::from_millis(500)) {
-                if paths.contains(&current_path) {
-                    let _ = app_clone.emit("todo_data_changed", ());
+            match rx.recv_timeout(Duration::from_millis(500)) {
+                Ok(Ok(Event { paths, .. })) => {
+                    if paths.contains(&current_path) {
+                        let _ = app_clone.emit("todo_data_changed", ());
+                    }
                 }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    log::error!("File watcher channel disconnected. Exiting watch loop.");
+                    break;
+                }
+                _ => {}
             }
 
             // 检查路径是否变化（每 5 秒轮询）
