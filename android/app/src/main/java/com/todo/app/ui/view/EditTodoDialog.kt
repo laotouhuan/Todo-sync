@@ -61,6 +61,7 @@ import com.todo.app.data.model.Todo
 import com.todo.app.data.model.nowIso
 import com.todo.app.data.model.nowInstant
 import com.todo.app.data.model.parseIsoToLocalDateTime
+import com.todo.app.data.model.formatCheckinDateTime
 import com.todo.app.data.model.getWeeklyCompletedCount
 import com.todo.app.data.model.getMonthlyCompletedCount
 import com.todo.app.data.model.isWeekDate
@@ -500,7 +501,7 @@ private fun EditTodoSubtasksSection(
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            var dateText by remember(parentCompletedAt) {
+            var dateText by remember(todo.id, parentCompleted, parentCompletedAt != null) {
                 if (parentCompletedAt != null) {
                     if (parentCompletedAt.contains('T')) {
                         try {
@@ -522,7 +523,7 @@ private fun EditTodoSubtasksSection(
                 }
             }
 
-            var timeText by remember(parentCompletedAt) {
+            var timeText by remember(todo.id, parentCompleted, parentCompletedAt != null) {
                 if (parentCompletedAt != null && parentCompletedAt.contains('T')) {
                     try {
                         val ldt = parseIsoToLocalDateTime(parentCompletedAt)
@@ -544,18 +545,8 @@ private fun EditTodoSubtasksSection(
 
             val updateCompletedAt = { d: String, t: String ->
                 val dateVal = d.trim()
-                val timeVal = t.trim()
                 if (dateVal.isNotEmpty()) {
-                    val checkinStr = if (timeVal.isNotEmpty() && timeVal != "--:--" && timeVal.contains(':')) {
-                        try {
-                            val ldt = java.time.LocalDateTime.parse("${dateVal}T${timeVal}:00")
-                            ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
-                        } catch (_: Exception) {
-                            "${dateVal}T${timeVal}:00Z"
-                        }
-                    } else {
-                        dateVal
-                    }
+                    val checkinStr = formatCheckinDateTime(d, t)
                     onParentCompletedAtChange(checkinStr)
                     performAutoSave()
                 }
@@ -962,18 +953,7 @@ fun EditWeekCheckinGrid(
                                     if (isChecked) {
                                         Button(
                                             onClick = {
-                                                val dateVal = inputDate.trim()
-                                                val timeVal = inputTime.trim()
-                                                val checkinStr = if (timeVal.isNotEmpty() && timeVal != "--:--" && timeVal.contains(':')) {
-                                                    try {
-                                                        val ldt = java.time.LocalDateTime.parse("${dateVal}T${timeVal}:00")
-                                                        ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
-                                                    } catch (_: Exception) {
-                                                        "${dateVal}T${timeVal}:00Z"
-                                                    }
-                                                } else {
-                                                    dateVal
-                                                }
+                                                val checkinStr = formatCheckinDateTime(inputDate, inputTime)
                                                 onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) } + checkinStr)
                                                 showPopup = false
                                             },
@@ -996,18 +976,7 @@ fun EditWeekCheckinGrid(
                                     } else {
                                         Button(
                                             onClick = {
-                                                val dateVal = inputDate.trim()
-                                                val timeVal = inputTime.trim()
-                                                val checkinStr = if (timeVal.isNotEmpty() && timeVal != "--:--" && timeVal.contains(':')) {
-                                                    try {
-                                                        val ldt = java.time.LocalDateTime.parse("${dateVal}T${timeVal}:00")
-                                                        ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
-                                                    } catch (_: Exception) {
-                                                        "${dateVal}T${timeVal}:00Z"
-                                                    }
-                                                } else {
-                                                    dateVal
-                                                }
+                                                val checkinStr = formatCheckinDateTime(inputDate, inputTime)
                                                 onUpdateCompletedDates(completedDates + checkinStr)
                                                 showPopup = false
                                             },
@@ -1211,18 +1180,7 @@ fun EditMonthCheckinGrid(
                                             if (isChecked) {
                                                 Button(
                                                     onClick = {
-                                                        val dateVal = inputDate.trim()
-                                                        val timeVal = inputTime.trim()
-                                                        val checkinStr = if (timeVal.isNotEmpty() && timeVal != "--:--" && timeVal.contains(':')) {
-                                                            try {
-                                                                val ldt = java.time.LocalDateTime.parse("${dateVal}T${timeVal}:00")
-                                                                ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
-                                                            } catch (_: Exception) {
-                                                                "${dateVal}T${timeVal}:00Z"
-                                                            }
-                                                        } else {
-                                                            dateVal
-                                                        }
+                                                        val checkinStr = formatCheckinDateTime(inputDate, inputTime)
                                                         onUpdateCompletedDates(completedDates.filter { !it.startsWith(dateStr) } + checkinStr)
                                                         showPopup = false
                                                     },
@@ -1245,18 +1203,7 @@ fun EditMonthCheckinGrid(
                                             } else {
                                                 Button(
                                                     onClick = {
-                                                        val dateVal = inputDate.trim()
-                                                        val timeVal = inputTime.trim()
-                                                        val checkinStr = if (timeVal.isNotEmpty() && timeVal != "--:--" && timeVal.contains(':')) {
-                                                            try {
-                                                                val ldt = java.time.LocalDateTime.parse("${dateVal}T${timeVal}:00")
-                                                                ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toString()
-                                                            } catch (_: Exception) {
-                                                                "${dateVal}T${timeVal}:00Z"
-                                                            }
-                                                        } else {
-                                                            dateVal
-                                                        }
+                                                        val checkinStr = formatCheckinDateTime(inputDate, inputTime)
                                                         onUpdateCompletedDates(completedDates + checkinStr)
                                                         showPopup = false
                                                     },

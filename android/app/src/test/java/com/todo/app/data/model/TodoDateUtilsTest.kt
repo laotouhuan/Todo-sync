@@ -101,4 +101,18 @@ class TodoDateUtilsTest {
         val instant2 = ldt2.atZone(java.time.ZoneId.systemDefault()).toInstant()
         assertEquals(java.time.Instant.parse("2026-06-15T03:00:00Z"), instant2)
     }
+
+    @Test
+    fun testFormatCheckinDateTime() {
+        val iso1 = formatCheckinDateTime("2026-08-02", "14:30")
+        assertTrue(iso1.contains("2026-08-02T"))
+
+        val iso2 = formatCheckinDateTime("2026-08-02", "9:5")
+        assertTrue(iso2.contains("2026-08-02T"))
+
+        assertEquals("2026-08-02", formatCheckinDateTime("2026-08-02", "--:--"))
+        assertEquals("2026-08-02", formatCheckinDateTime("2026-08-02", ""))
+        assertEquals("2026-08-02", formatCheckinDateTime("2026-08-02", "14:"))
+        assertEquals("2026-08-02", formatCheckinDateTime("2026-08-02", "14:60"))
+    }
 }

@@ -63,6 +63,31 @@ fun parseIsoToLocalDateTime(isoStr: String): java.time.LocalDateTime {
     }
 }
 
+/** Format date string and time string (e.g., "2026-08-02", "14:30" or "9:5") into an ISO-8601 timestamp string, or return dateVal if time is empty/invalid. */
+fun formatCheckinDateTime(dateVal: String, timeVal: String): String {
+    val d = dateVal.trim()
+    val t = timeVal.trim()
+    if (d.isEmpty()) return ""
+    if (t.isNotEmpty() && t != "--:--" && t.contains(':')) {
+        val parts = t.split(":")
+        if (parts.size == 2) {
+            val h = parts[0].toIntOrNull()
+            val m = parts[1].toIntOrNull()
+            if (h != null && m != null && h in 0..23 && m in 0..59) {
+                val hh = String.format("%02d", h)
+                val mm = String.format("%02d", m)
+                return try {
+                    val ldt = java.time.LocalDateTime.parse("${d}T${hh}:${mm}:00")
+                    ldt.atZone(ZoneId.systemDefault()).toInstant().toString()
+                } catch (_: Exception) {
+                    "${d}T${hh}:${mm}:00Z"
+                }
+            }
+        }
+    }
+    return d
+}
+
 // ====== Sorting ======
 
 /** Standard comparator for Todo lists: incomplete first, then by order, then by createdAt desc. */
