@@ -62,6 +62,7 @@ import com.todo.app.data.model.nowIso
 import com.todo.app.data.model.nowInstant
 import com.todo.app.data.model.parseIsoToLocalDateTime
 import com.todo.app.data.model.formatCheckinDateTime
+import com.todo.app.data.model.validateAndNormalizeTime
 import com.todo.app.data.model.getWeeklyCompletedCount
 import com.todo.app.data.model.getMonthlyCompletedCount
 import com.todo.app.data.model.isWeekDate
@@ -533,13 +534,8 @@ private fun EditTodoSubtasksSection(
                     } catch (_: Exception) {
                         mutableStateOf("--:--")
                     }
-                } else if (parentCompletedAt != null) {
-                    mutableStateOf("--:--")
                 } else {
-                    val now = java.time.LocalDateTime.now()
-                    val hh = String.format("%02d", now.hour)
-                    val min = String.format("%02d", now.minute)
-                    mutableStateOf("$hh:$min")
+                    mutableStateOf("--:--")
                 }
             }
 
@@ -551,6 +547,9 @@ private fun EditTodoSubtasksSection(
                     performAutoSave()
                 }
             }
+
+            var lastValidTime by remember(todo.id) { mutableStateOf(timeText) }
+            val context = LocalContext.current
 
             OutlinedTextField(
                 value = dateText,
@@ -565,12 +564,47 @@ private fun EditTodoSubtasksSection(
 
             OutlinedTextField(
                 value = timeText,
-                onValueChange = {
-                    timeText = it
-                    updateCompletedAt(dateText, it)
+                onValueChange = { input ->
+                    var formatted = input
+                    val parts = formatted.split(":")
+                    if (parts.size >= 2) {
+                        val hPart = parts[0]
+                        val mPart = parts.subList(1, parts.size).joinToString("")
+                        if (hPart.length > 2) {
+                            val extra = hPart.substring(2)
+                            val hClean = hPart.substring(0, 2)
+                            val mClean = extra + mPart
+                            formatted = "$hClean:$mClean"
+                        }
+                    } else if (timeText.contains(':') && !formatted.contains(':') && formatted.length >= 3) {
+                        formatted = formatted.substring(0, 1) + ":" + formatted.substring(2)
+                    } else if (!formatted.contains(':') && formatted.length >= 2) {
+                        formatted = formatted.substring(0, 2) + ":" + formatted.substring(2)
+                    }
+                    if (formatted.length > 5) {
+                        formatted = formatted.substring(0, 5)
+                    }
+                    timeText = formatted
+                    val (isValid, _) = validateAndNormalizeTime(formatted, lastValidTime)
+                    if (isValid) {
+                        updateCompletedAt(dateText, formatted)
+                    }
                 },
                 label = { Text("完成时间") },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).onFocusChanged { focusState ->
+                    if (!focusState.isFocused) {
+                        val (isValid, normalized) = validateAndNormalizeTime(timeText, lastValidTime)
+                        if (!isValid) {
+                            Toast.makeText(context, "时间格式有误，已还原", Toast.LENGTH_SHORT).show()
+                            timeText = normalized
+                            updateCompletedAt(dateText, normalized)
+                        } else {
+                            timeText = normalized
+                            lastValidTime = normalized
+                            updateCompletedAt(dateText, normalized)
+                        }
+                    }
+                },
                 singleLine = true
             )
         }

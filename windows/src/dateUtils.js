@@ -69,12 +69,53 @@ export function getDateLabel(dateStr, todayStr, tomorrowStr) {
 }
 
 /**
+ * Convert ISO date-time string (e.g. UTC '2026-07-29T18:00:00Z') to local date string (e.g. '2026-07-30').
+ */
+export function getLocalDateStringFromISO(isoStr) {
+    if (!isoStr) return '';
+    if (isoStr.length === 10) return isoStr;
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return isoStr.substring(0, 10);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+/**
+ * Validate and normalize a time input string (e.g. '14:30' or '--:--').
+ * Returns { valid: true, value: 'HH:mm'|'--:--' } if valid,
+ * or { valid: false, value: prevTime } if invalid.
+ */
+export function validateAndNormalizeTime(input, prevTime = '--:--') {
+    if (!input) return { valid: true, value: '--:--' };
+    const str = String(input).trim();
+    if (str === '--:--' || str === '') return { valid: true, value: '--:--' };
+
+    const parts = str.split(':');
+    if (parts.length === 2) {
+        const [hStr, mStr] = parts;
+        if (hStr === '--' && mStr === '--') return { valid: true, value: '--:--' };
+        if (/^\d{1,2}$/.test(hStr) && /^\d{1,2}$/.test(mStr)) {
+            const h = parseInt(hStr, 10);
+            const m = parseInt(mStr, 10);
+            if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+                const hh = String(h).padStart(2, '0');
+                const mm = String(m).padStart(2, '0');
+                return { valid: true, value: `${hh}:${mm}` };
+            }
+        }
+    }
+    return { valid: false, value: prevTime || '--:--' };
+}
+
+/**
  * Get completion status label relative to due date.
  * Returns null if not applicable, or one of: '逾期完成', '提前完成', '按时完成'
  */
 export function getCompletionStatusLabel(todo) {
     if (!todo.completed || !todo.completed_at || !todo.date || todo.date.length !== 10) return null;
-    const completedDateStr = todo.completed_at.substring(0, 10);
+    const completedDateStr = getLocalDateStringFromISO(todo.completed_at);
     if (completedDateStr > todo.date) return '逾期完成';
     if (completedDateStr < todo.date) return '提前完成';
     return '按时完成';

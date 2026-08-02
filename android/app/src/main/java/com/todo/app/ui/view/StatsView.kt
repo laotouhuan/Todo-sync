@@ -52,6 +52,7 @@ import com.todo.app.data.model.TaskType
 import com.todo.app.data.model.calcTaskAgeDays
 import com.todo.app.data.model.categorizeByTimeSlot
 import com.todo.app.data.model.getHealthGrade
+import com.todo.app.data.model.getLocalDateStringFromISO
 import com.todo.app.data.model.isOverdue
 import com.todo.app.data.model.monthStringOf
 import com.todo.app.data.model.nowIso
@@ -197,7 +198,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     t.completedDates.any { it.startsWith(targetDate.toString()) }
                 } else {
                     if (t.completed && !t.completedAt.isNullOrEmpty()) {
-                        t.completedAt?.take(10) == targetDate.toString()
+                        getLocalDateStringFromISO(t.completedAt) == targetDate.toString()
                     } else {
                         t.date == targetDate.toString()
                     }
@@ -221,7 +222,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     }
                 } else {
                     if (t.completed && !t.completedAt.isNullOrEmpty()) {
-                        t.completedAt?.take(10)?.let { completedDateStr ->
+                        getLocalDateStringFromISO(t.completedAt)?.let { completedDateStr ->
                             try {
                                 val checkDate = LocalDate.parse(completedDateStr)
                                 checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
@@ -256,7 +257,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     }
                 } else {
                     if (t.completed && !t.completedAt.isNullOrEmpty()) {
-                        t.completedAt?.take(7) == targetMonthStr
+                        getLocalDateStringFromISO(t.completedAt)?.take(7) == targetMonthStr
                     } else {
                         val dateStr = t.date
                         if (!dateStr.isNullOrEmpty()) {
@@ -425,6 +426,13 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                         list.add(Pair(t, dStr))
                     }
                 }
+            } else {
+                if (t.completed && !t.completedAt.isNullOrEmpty()) {
+                    val ca = t.completedAt!!
+                    if (ca.length <= 10 || !ca.contains("T")) {
+                        list.add(Pair(t, ca.take(10)))
+                    }
+                }
             }
         }
         list
@@ -463,11 +471,14 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
             }
         } else {
             if (t.completed && !t.completedAt.isNullOrEmpty()) {
-                val slot = categorizeByTimeSlot(t.completedAt)
-                if (slot == "morning") morningCount++
-                else if (slot == "afternoon") afternoonCount++
-                else if (slot == "evening") eveningCount++
-                else if (slot == "night") nightCount++
+                val ca = t.completedAt!!
+                if (ca.length > 10 && ca.contains("T")) {
+                    val slot = categorizeByTimeSlot(ca)
+                    if (slot == "morning") morningCount++
+                    else if (slot == "afternoon") afternoonCount++
+                    else if (slot == "evening") eveningCount++
+                    else if (slot == "night") nightCount++
+                }
             }
         }
     }

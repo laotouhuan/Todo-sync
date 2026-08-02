@@ -161,6 +161,43 @@ fun Todo.getDateLabel(todayStr: String, tomorrowStr: String): String {
     }
 }
 
+/** Convert ISO timestamp (e.g. UTC '2026-07-29T18:00:00Z') to local date string (e.g. '2026-07-30'). */
+fun getLocalDateStringFromISO(isoStr: String?): String? {
+    if (isoStr.isNullOrEmpty()) return null
+    if (isoStr.length == 10) return isoStr
+    return try {
+        val instant = java.time.Instant.parse(isoStr)
+        val ldt = instant.atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        ldt.toString()
+    } catch (_: Exception) {
+        isoStr.take(10)
+    }
+}
+
+/**
+ * Validate and normalize a time input string (e.g. '14:30' or '--:--').
+ * Returns Pair(isValid, normalizedValueOrPrevTime).
+ */
+fun validateAndNormalizeTime(input: String?, prevTime: String = "--:--"): Pair<Boolean, String> {
+    if (input.isNullOrBlank()) return Pair(true, "--:--")
+    val str = input.trim()
+    if (str == "--:--" || str.isEmpty()) return Pair(true, "--:--")
+
+    val parts = str.split(":")
+    if (parts.size == 2) {
+        val (hStr, mStr) = parts
+        if (hStr == "--" && mStr == "--") return Pair(true, "--:--")
+        val h = hStr.toIntOrNull()
+        val m = mStr.toIntOrNull()
+        if (h != null && m != null && h in 0..23 && m in 0..59) {
+            val hh = String.format("%02d", h)
+            val mm = String.format("%02d", m)
+            return Pair(true, "$hh:$mm")
+        }
+    }
+    return Pair(false, prevTime.ifEmpty { "--:--" })
+}
+
 /**
  * Get completion status label relative to due date.
  * Returns null if not applicable, or one of: '逾期完成', '提前完成', '按时完成'
@@ -170,8 +207,7 @@ fun Todo.getCompletionStatusLabel(): String? {
     val ca = completedAt ?: return null
     val d = date ?: return null
     if (isWeekDate(d) || isMonthDate(d)) return null
-    if (ca.length < 10) return null
-    val completedDateStr = ca.take(10)
+    val completedDateStr = getLocalDateStringFromISO(ca) ?: return null
     return when {
         completedDateStr > d -> "逾期完成"
         completedDateStr < d -> "提前完成"
