@@ -2153,36 +2153,53 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
                 }
 
                 const dot = document.createElement('div');
-                dot.style.cssText = `
-                    width: 22px; height: 22px; 
-                    background: transparent; 
-                    display: flex; justify-content: center; align-items: center; 
-                    cursor: pointer;
-                `;
+                dot.className = 'makeup-dot-item';
                 dot.innerHTML = `<svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">${innerSvg}</svg>`;
                 
                 const tooltipEl = document.getElementById('clock-tooltip');
                 dot.addEventListener('mouseover', (e) => {
+                    const childShape = dot.querySelector('circle, polygon');
+                    if (childShape) {
+                        childShape.style.stroke = color;
+                        childShape.style.strokeWidth = `${(strokeWidth + 2.5).toFixed(1)}px`;
+                        childShape.style.filter = `drop-shadow(0 0 3px rgba(0,0,0,0.9)) drop-shadow(0 0 6px ${color})`;
+                        childShape.style.opacity = '1';
+                    }
                     if (tooltipEl) {
                         tooltipEl.style.display = 'block';
                         tooltipEl.innerHTML = `<strong>${item.content}</strong><br/>完成日期: ${item.date}`;
-                    }
-                });
-                
-                dot.addEventListener('mousemove', (e) => {
-                    if (tooltipEl) {
                         const cardRect = document.getElementById('time-distribution').getBoundingClientRect();
                         let tooltipX = e.clientX - cardRect.left + 12;
                         if (index % 2 === 1) {
                             tooltipX = e.clientX - cardRect.left - tooltipEl.offsetWidth - 12;
                         }
                         const tooltipY = e.clientY - cardRect.top + 12;
-                        tooltipEl.style.left = `${tooltipX}px`;
-                        tooltipEl.style.top = `${tooltipY}px`;
+                        tooltipEl.style.left = `${Math.max(8, tooltipX)}px`;
+                        tooltipEl.style.top = `${Math.max(8, tooltipY)}px`;
+                    }
+                });
+                
+                dot.addEventListener('mousemove', (e) => {
+                    if (tooltipEl && tooltipEl.style.display === 'block') {
+                        const cardRect = document.getElementById('time-distribution').getBoundingClientRect();
+                        let tooltipX = e.clientX - cardRect.left + 12;
+                        if (index % 2 === 1) {
+                            tooltipX = e.clientX - cardRect.left - tooltipEl.offsetWidth - 12;
+                        }
+                        const tooltipY = e.clientY - cardRect.top + 12;
+                        tooltipEl.style.left = `${Math.max(8, tooltipX)}px`;
+                        tooltipEl.style.top = `${Math.max(8, tooltipY)}px`;
                     }
                 });
                 
                 dot.addEventListener('mouseout', () => {
+                    const childShape = dot.querySelector('circle, polygon');
+                    if (childShape) {
+                        childShape.style.stroke = '#ffffff';
+                        childShape.style.strokeWidth = `${strokeWidth}px`;
+                        childShape.style.filter = 'none';
+                        childShape.style.opacity = opacityVal;
+                    }
                     if (tooltipEl) tooltipEl.style.display = 'none';
                 });
                 
@@ -2471,29 +2488,48 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
             shapeEl.setAttribute('stroke-width', strokeWidth);
             shapeEl.setAttribute('opacity', opacityVal);
             shapeEl.setAttribute('class', 'task-dot efficiency-dot');
-            shapeEl.style.transitionDelay = `${(fracHour / 24) * 0.8}s`;
+            shapeEl.style.setProperty('--dot-delay', `${(fracHour / 24) * 0.8}s`);
             
             const pad = (n) => String(n).padStart(2, '0');
             const displayTime = `${pad(hour)}:${pad(minute)}`;
             
             shapeEl.addEventListener('mouseover', (e) => {
+                shapeEl.style.stroke = color;
+                shapeEl.style.strokeWidth = `${(strokeWidth + 2.5).toFixed(1)}px`;
+                shapeEl.style.filter = `drop-shadow(0 0 3px rgba(0,0,0,0.9)) drop-shadow(0 0 6px ${color})`;
+                shapeEl.style.opacity = '1';
                 if (tooltipEl) {
                     tooltipEl.style.display = 'block';
                     tooltipEl.innerHTML = `<strong>${t.content}</strong><br/>完成日期: ${timeStr.substring(0, 10)}<br/>打卡时间: ${displayTime}`;
+                    const cardRect = document.getElementById('time-distribution').getBoundingClientRect();
+                    let tooltipX = e.clientX - cardRect.left + 12;
+                    if (tooltipX + tooltipEl.offsetWidth > cardRect.width - 10) {
+                        tooltipX = e.clientX - cardRect.left - tooltipEl.offsetWidth - 12;
+                    }
+                    const tooltipY = e.clientY - cardRect.top + 12;
+                    tooltipEl.style.left = `${Math.max(8, tooltipX)}px`;
+                    tooltipEl.style.top = `${Math.max(8, tooltipY)}px`;
                 }
             });
             
             shapeEl.addEventListener('mousemove', (e) => {
-                if (tooltipEl) {
+                if (tooltipEl && tooltipEl.style.display === 'block') {
                     const cardRect = document.getElementById('time-distribution').getBoundingClientRect();
-                    const tooltipX = e.clientX - cardRect.left + 12;
+                    let tooltipX = e.clientX - cardRect.left + 12;
+                    if (tooltipX + tooltipEl.offsetWidth > cardRect.width - 10) {
+                        tooltipX = e.clientX - cardRect.left - tooltipEl.offsetWidth - 12;
+                    }
                     const tooltipY = e.clientY - cardRect.top + 12;
-                    tooltipEl.style.left = `${tooltipX}px`;
-                    tooltipEl.style.top = `${tooltipY}px`;
+                    tooltipEl.style.left = `${Math.max(8, tooltipX)}px`;
+                    tooltipEl.style.top = `${Math.max(8, tooltipY)}px`;
                 }
             });
             
             shapeEl.addEventListener('mouseout', () => {
+                shapeEl.style.stroke = '#ffffff';
+                shapeEl.style.strokeWidth = `${strokeWidth}px`;
+                shapeEl.style.filter = 'none';
+                shapeEl.style.opacity = opacityVal;
                 if (tooltipEl) tooltipEl.style.display = 'none';
             });
             
@@ -2511,6 +2547,13 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 clockGroup.classList.add('play-animation');
+                setTimeout(() => {
+                    if (clockGroup) {
+                        clockGroup.querySelectorAll('.efficiency-dot').forEach(el => {
+                            el.style.removeProperty('--dot-delay');
+                        });
+                    }
+                }, 1200);
             });
         });
     }

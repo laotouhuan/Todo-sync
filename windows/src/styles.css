@@ -2683,10 +2683,43 @@ input:checked + .slider:before {
   transform: scale(0);
   transform-origin: center;
   transform-box: fill-box;
-  transition: opacity 0.35s ease-out, transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity 0.35s ease-out var(--dot-delay, 0s),
+              transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) var(--dot-delay, 0s),
+              stroke 0.08s ease 0s,
+              stroke-width 0.08s ease 0s,
+              filter 0.08s ease 0s;
+  cursor: pointer;
 }
 
 #efficiency-clock-group.play-animation .efficiency-dot {
   opacity: 1;
   transform: scale(1);
+}
+
+.makeup-dot-item {
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  position: relative;
+}
+
+.makeup-dot-item svg circle,
+.makeup-dot-item svg polygon {
+  transition: stroke 0.08s ease, stroke-width 0.08s ease, filter 0.08s ease;
+}
+
+.stats-filter-item {
+  transition: background-color 0.1s ease;
+}
+
+.stats-filter-item .dot {
+  transition: box-shadow 0.1s ease;
+}
+
+.stats-filter-item:hover .dot {
+  box-shadow: 0 0 0 2px currentColor, 0 0 6px currentColor;
 }
