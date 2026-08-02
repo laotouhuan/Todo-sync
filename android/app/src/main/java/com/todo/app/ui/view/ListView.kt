@@ -1308,7 +1308,7 @@ fun ImportLastPeriodCard(
             (it.taskType == TaskType.WEEKLY_CHECKIN || it.taskType == TaskType.MONTHLY_CHECKIN) &&
             it.date == sourcePeriodStr &&
             !existingTitles.contains(it.content)
-        }
+        }.sortedWith(com.todo.app.data.model.TodoComparator)
     }
 
     val selectedIds = remember(candidates) {

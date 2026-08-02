@@ -624,10 +624,18 @@ class TodoRepository(private val context: Context) {
         val current = _todoData.value.todos.toMutableList()
         val existingTitles = current.filter { !it.deleted && it.date == targetPeriodStr }.map { it.content }.toSet()
 
+        val nowEpochMs = System.currentTimeMillis()
         var importCount = 0
+        var orderOffset = 0L
+
         candidates.forEach { src ->
             if (existingTitles.contains(src.content)) return@forEach
-            current.add(cloneTodoForNewPeriod(src, targetPeriodStr))
+            val cloned = cloneTodoForNewPeriod(src, targetPeriodStr).copy(
+                order = (nowEpochMs + orderOffset * 1000).toDouble(),
+                createdAt = java.time.Instant.ofEpochMilli(nowEpochMs + orderOffset * 10).toString()
+            )
+            current.add(cloned)
+            orderOffset++
             importCount++
         }
 
@@ -646,7 +654,7 @@ class TodoRepository(private val context: Context) {
         }
 
         val current = _todoData.value.todos.toMutableList()
-        val candidates = current.filter { it.id in selectedIds }
+        val candidates = current.filter { it.id in selectedIds }.sortedWith(com.todo.app.data.model.TodoComparator)
 
         val importCount = doImport(candidates, targetPeriodStr)
         if (importCount > 0) {
