@@ -3360,12 +3360,14 @@ window.openImportModal = function(type) {
             .filter(t => !t.deleted && t.date === currentPeriodStr)
             .map(t => t.content)
     );
-    appState.currentImportCandidates = appState.todoData.todos.filter(t => 
+    const candidates = appState.todoData.todos.filter(t => 
         !t.deleted &&
         (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') &&
         t.date === targetDateStr &&
         !existingTitles.has(t.content)
     );
+    candidates.sort(sortFunc);
+    appState.currentImportCandidates = candidates;
     if (appState.currentImportCandidates.length === 0) {
         importListEl.innerHTML = '<li style="text-align:center;color:var(--text-secondary);padding:24px 10px;">上个周期没有可导入的任务</li>';
     } else {
@@ -4142,6 +4144,8 @@ window.addEventListener("DOMContentLoaded", () => {
         const listItems = document.querySelectorAll('#import-tasks-list .subtask-item');
         const targetDateStr = appState.currentImportType === 'weekly' ? getThisWeekString() : getThisMonthString();
         let imported = false;
+        const nowMs = Date.now();
+        let orderOffset = 0;
         listItems.forEach((li, idx) => {
             if (li.getAttribute('data-selected') === 'true') {
                 const orig = appState.currentImportCandidates[idx];
@@ -4150,6 +4154,9 @@ window.addEventListener("DOMContentLoaded", () => {
                 newTodo.target_count = orig.target_count || null;
                 newTodo.time = orig.time || null;
                 newTodo.recurring = orig.recurring || 'none';
+                newTodo.order = nowMs + orderOffset * 1000;
+                newTodo.created_at = new Date(nowMs + orderOffset * 10).toISOString();
+                orderOffset++;
                 newTodo.subtasks = orig.subtasks ? deepClone(orig.subtasks).map(s => {
                     s.id = crypto.randomUUID();
                     s.completed = false;
