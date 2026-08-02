@@ -9,6 +9,18 @@ import java.time.LocalDate
 class TodoDateUtilsTest {
 
     @Test
+    fun testValidateAndNormalizeTime() {
+        assertEquals(Pair(true, "14:30"), validateAndNormalizeTime("14:30", "12:00"))
+        assertEquals(Pair(true, "09:05"), validateAndNormalizeTime("9:5", "12:00"))
+        assertEquals(Pair(true, "--:--"), validateAndNormalizeTime("--:--", "12:00"))
+        assertEquals(Pair(true, "--:--"), validateAndNormalizeTime("", "12:00"))
+
+        assertEquals(Pair(false, "14:30"), validateAndNormalizeTime("-1:00", "14:30"))
+        assertEquals(Pair(false, "14:30"), validateAndNormalizeTime("25:00", "14:30"))
+        assertEquals(Pair(false, "14:30"), validateAndNormalizeTime("12:60", "14:30"))
+    }
+
+    @Test
     fun testIsWeekDate() {
         assertTrue(isWeekDate("2026-W03"))
         assertFalse(isWeekDate("2026-03-01"))

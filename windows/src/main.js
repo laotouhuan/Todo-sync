@@ -3,6 +3,7 @@ import {
     getTodayString, getTomorrowString, getThisWeekString, getLastWeekString,
     getThisMonthString, getLastMonthString,
     isWeekDate, isMonthDate, isOverdue, getDateLabel, getCompletionStatusLabel,
+    getLocalDateStringFromISO, validateAndNormalizeTime,
     sortFunc, parseInputSyntax, createTodo, groupTodosByDate,
     categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade
 } from './dateUtils.js';
@@ -1715,15 +1716,15 @@ async function _doAutoSave() {
         if (completedAtRow && completedAtRow.style.display !== 'none' && appState.todoData.todos[index].completed) {
             const compDateVal = document.getElementById('edit-completed-date').value;
             const compTimeVal = document.getElementById('edit-completed-time').value;
-            if (compDateVal && compTimeVal) {
+            const normalizedTimeRes = validateAndNormalizeTime(compTimeVal, '--:--');
+            const validTimeStr = normalizedTimeRes.value;
+            if (compDateVal && validTimeStr !== '--:--') {
                 const [yyyy, mm, dd] = compDateVal.split('-').map(Number);
-                const [hh, min] = compTimeVal.split(':').map(Number);
+                const [hh, min] = validTimeStr.split(':').map(Number);
                 const d = new Date(yyyy, mm - 1, dd, hh, min, 0, 0);
                 appState.todoData.todos[index].completed_at = d.toISOString();
             } else if (compDateVal) {
-                const [yyyy, mm, dd] = compDateVal.split('-').map(Number);
-                const d = new Date(yyyy, mm - 1, dd, 0, 0, 0, 0);
-                appState.todoData.todos[index].completed_at = d.toISOString();
+                appState.todoData.todos[index].completed_at = compDateVal;
             }
         }
 
@@ -1830,7 +1831,7 @@ function openEditModal(todo) {
             completedAtRow.style.display = 'flex';
             const compDateInput = document.getElementById('edit-completed-date');
             const compTimeInput = document.getElementById('edit-completed-time');
-            if (todo.completed_at) {
+            if (todo.completed_at && todo.completed_at.includes('T')) {
                 const d = new Date(todo.completed_at);
                 if (!isNaN(d.getTime())) {
                     const yyyy = d.getFullYear();
@@ -1841,13 +1842,17 @@ function openEditModal(todo) {
                     const min = String(d.getMinutes()).padStart(2, '0');
                     compTimeInput.value = `${hh}:${min}`;
                 } else {
-                    compDateInput.value = '';
-                    compTimeInput.value = '';
+                    compDateInput.value = todo.completed_at.substring(0, 10);
+                    compTimeInput.value = '--:--';
                 }
+            } else if (todo.completed_at) {
+                compDateInput.value = todo.completed_at.substring(0, 10);
+                compTimeInput.value = '--:--';
             } else {
                 compDateInput.value = '';
-                compTimeInput.value = '';
+                compTimeInput.value = '--:--';
             }
+            compTimeInput.dataset.lastValue = compTimeInput.value;
         } else {
             completedAtRow.style.display = 'none';
         }
@@ -1911,7 +1916,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
                 return (t.completed_dates || []).some(dStr => dStr.startsWith(targetDayStr));
             } else {
                 if (t.completed && t.completed_at) {
-                    return t.completed_at.substring(0, 10) === targetDayStr;
+                    return getLocalDateStringFromISO(t.completed_at) === targetDayStr;
                 } else {
                     return t.date === targetDayStr;
                 }
@@ -1961,7 +1966,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
                 return hasCheckin;
             } else {
                 if (t.completed && t.completed_at) {
-                    return t.completed_at.substring(0, 7) === targetMonthStr;
+                    return getLocalDateStringFromISO(t.completed_at).substring(0, 7) === targetMonthStr;
                 } else {
                     if (!t.date) return false;
                     if (t.date === targetMonthStr) return true;
@@ -2054,11 +2059,15 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
             });
         } else {
             if (t.completed && t.completed_at) {
-                const slot = categorizeByTimeSlot(t.completed_at);
-                if (slot === 'morning') morningCount++;
-                else if (slot === 'afternoon') afternoonCount++;
-                else if (slot === 'evening') eveningCount++;
-                else if (slot === 'night') nightCount++;
+                if (t.completed_at.length > 10 && t.completed_at.includes('T')) {
+                    const slot = categorizeByTimeSlot(t.completed_at);
+                    if (slot === 'morning') morningCount++;
+                    else if (slot === 'afternoon') afternoonCount++;
+                    else if (slot === 'evening') eveningCount++;
+                    else if (slot === 'night') nightCount++;
+                } else {
+                    makeupCheckins.push({ date: t.completed_at.substring(0, 10), content: t.content, todo: t });
+                }
             }
         }
     });
@@ -2385,7 +2394,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
                     }
                 });
             } else {
-                if (t.completed && t.completed_at) {
+                if (t.completed && t.completed_at && t.completed_at.length > 10 && t.completed_at.includes('T')) {
                     completionEvents.push({
                         todo: t,
                         completed_at: t.completed_at
@@ -2999,7 +3008,7 @@ function render() {
 
     if (appState.dateFilter === 'today') {
         filteredTodos = filteredTodos.filter(t => {
-            const completedToday = t.completed && t.completed_at && t.completed_at.substring(0, 10) === todayStr;
+            const completedToday = t.completed && t.completed_at && getLocalDateStringFromISO(t.completed_at) === todayStr;
             const wasOverdue = t.date && t.date < todayStr && !isWeekDate(t.date) && !isMonthDate(t.date);
             const isOverdueCompletedToday = completedToday && wasOverdue;
 
@@ -3061,7 +3070,7 @@ function render() {
                         });
                     } else {
                         if (t.completed) {
-                            const dStr = (t.completed_at || t.updated_at || todayStr).substring(0, 10);
+                            const dStr = getLocalDateStringFromISO(t.completed_at || t.updated_at || todayStr);
                             if (!completedGroupsMap[dStr]) completedGroupsMap[dStr] = [];
                             completedGroupsMap[dStr].push(t);
                         }
@@ -4167,6 +4176,56 @@ window.addEventListener("DOMContentLoaded", () => {
             el.addEventListener('input', autoSaveEdit); // input 事件能在输入时实时进行 debounced 保存
         }
     });
+
+    const compTimeEl = document.getElementById('edit-completed-time');
+    if (compTimeEl) {
+        compTimeEl.addEventListener('focus', () => {
+            compTimeEl.dataset.lastValue = compTimeEl.value;
+        });
+        compTimeEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Backspace') {
+                const start = compTimeEl.selectionStart;
+                const end = compTimeEl.selectionEnd;
+                if (start === 3 && end === 3) {
+                    e.preventDefault();
+                    const val = compTimeEl.value;
+                    if (val.length >= 3) {
+                        const newVal = val.slice(0, 1) + val.slice(2);
+                        compTimeEl.value = newVal;
+                        compTimeEl.setSelectionRange(1, 1);
+                    }
+                }
+            }
+        });
+        compTimeEl.addEventListener('input', () => {
+            let val = compTimeEl.value;
+            const parts = val.split(':');
+            if (parts.length >= 2) {
+                let hPart = parts[0];
+                let mPart = parts.slice(1).join('');
+                if (hPart.length > 2) {
+                    const extra = hPart.slice(2);
+                    hPart = hPart.slice(0, 2);
+                    mPart = extra + mPart;
+                    compTimeEl.value = hPart + ':' + mPart;
+                    compTimeEl.setSelectionRange(4, 4);
+                    return;
+                }
+            } else if (!val.includes(':') && val.length >= 2) {
+                compTimeEl.value = val.slice(0, 2) + ':' + val.slice(2);
+            }
+        });
+        compTimeEl.addEventListener('blur', () => {
+            const lastVal = compTimeEl.dataset.lastValue || '--:--';
+            const res = validateAndNormalizeTime(compTimeEl.value, lastVal);
+            if (!res.valid) {
+                showToast('时间格式有误，已还原');
+                compTimeEl.value = res.value;
+            } else {
+                compTimeEl.value = res.value;
+            }
+        });
+    }
 
     const taskTypeSelect = document.getElementById('edit-task-type');
     if (taskTypeSelect) {

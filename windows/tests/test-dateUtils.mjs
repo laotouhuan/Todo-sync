@@ -15,9 +15,29 @@ import {
     getTodayString, getTomorrowString, getThisWeekString,
     getThisMonthString, getLastWeekString, getLastMonthString,
     isWeekDate, isMonthDate, isOverdue, getDateLabel, getCompletionStatusLabel,
+    validateAndNormalizeTime,
     sortFunc, parseInputSyntax, createTodo, groupTodosByDate,
     categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade
 } from '../src/dateUtils.js';
+
+describe('validateAndNormalizeTime', () => {
+    it('合法时间 14:30 返回 valid 且规范化', () => {
+        assert.deepStrictEqual(validateAndNormalizeTime('14:30', '12:00'), { valid: true, value: '14:30' });
+        assert.deepStrictEqual(validateAndNormalizeTime('9:5', '12:00'), { valid: true, value: '09:05' });
+    });
+
+    it('合法格式 --:-- 返回 valid', () => {
+        assert.deepStrictEqual(validateAndNormalizeTime('--:--', '12:00'), { valid: true, value: '--:--' });
+        assert.deepStrictEqual(validateAndNormalizeTime('', '12:00'), { valid: true, value: '--:--' });
+    });
+
+    it('不合法格式如 -1:00, 25:00, 12:60 返回 invalid 且还原上一次值', () => {
+        assert.deepStrictEqual(validateAndNormalizeTime('-1:00', '14:30'), { valid: false, value: '14:30' });
+        assert.deepStrictEqual(validateAndNormalizeTime('25:00', '14:30'), { valid: false, value: '14:30' });
+        assert.deepStrictEqual(validateAndNormalizeTime('12:60', '14:30'), { valid: false, value: '14:30' });
+        assert.deepStrictEqual(validateAndNormalizeTime('12:--', '14:30'), { valid: false, value: '14:30' });
+    });
+});
 
 // ====== formatDate ======
 describe('formatDate', () => {

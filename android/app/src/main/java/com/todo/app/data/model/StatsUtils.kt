@@ -75,7 +75,7 @@ fun calculateCompletionStats(todos: List<Todo>, todayStr: String): Pair<Int, Int
 fun calculateStreak(todos: List<Todo>, todayStr: String): Int {
     val completedDatesSet = todos
         .filter { !it.deleted && it.completed && it.completedAt != null }
-        .mapNotNull { it.completedAt?.take(10) }
+        .mapNotNull { getLocalDateStringFromISO(it.completedAt) }
         .toSet()
 
     if (completedDatesSet.isEmpty()) return 0
@@ -111,7 +111,7 @@ fun calculateStreak(todos: List<Todo>, todayStr: String): Int {
 fun calculateBestStreak(todos: List<Todo>): Int {
     val completedDates = todos
         .filter { !it.deleted && it.completed && it.completedAt != null }
-        .mapNotNull { it.completedAt?.take(10) }
+        .mapNotNull { getLocalDateStringFromISO(it.completedAt) }
         .distinct()
         .sorted()
 
