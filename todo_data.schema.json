@@ -77,6 +77,24 @@
             "type": ["integer", "null"],
             "default": null
           },
+          "reminder": {
+            "type": ["object", "null"],
+            "default": null,
+            "description": "Single task reminder configuration",
+            "properties": {
+              "reminder_date": {
+                "type": ["string", "null"]
+              },
+              "reminder_time": {
+                "type": "string"
+              },
+              "repeat_daily": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "required": ["reminder_time"]
+          },
           "subtasks": {
             "type": "array",
             "items": {
@@ -109,6 +127,54 @@
           "completed",
           "created_at"
         ]
+      }
+    },
+    "reminder_settings": {
+      "type": "object",
+      "properties": {
+        "privacy_mode": {
+          "type": "boolean",
+          "default": false
+        },
+        "global_rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "time": {
+                "type": "string"
+              },
+              "condition": {
+                "type": "string",
+                "enum": ["none_completed", "any_remaining", "unconditional"],
+                "default": "unconditional"
+              },
+              "task_scope": {
+                "type": "string",
+                "enum": ["all", "today_only", "recurring_only"],
+                "default": "all"
+              },
+              "title": {
+                "type": "string",
+                "default": ""
+              },
+              "body": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "required": ["id", "time", "condition", "task_scope", "body"]
+          },
+          "default": []
+        }
       }
     }
   },

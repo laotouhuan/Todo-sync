@@ -13,6 +13,13 @@ data class Subtask(
 )
 
 @Serializable
+data class Reminder(
+    @SerialName("reminder_date") val reminderDate: String? = null,
+    @SerialName("reminder_time") val reminderTime: String,
+    @SerialName("repeat_daily") val repeatDaily: Boolean = false
+)
+
+@Serializable
 data class Todo(
     val id: String,
     var content: String,
@@ -28,6 +35,7 @@ data class Todo(
     @SerialName("task_type") var taskType: String = "normal", // normal, weekly_checkin, monthly_checkin
     @SerialName("completed_dates") var completedDates: List<String> = emptyList(),
     @SerialName("target_count") var targetCount: Int? = null,
+    var reminder: Reminder? = null,
     var subtasks: List<Subtask> = emptyList()
 ) {
     companion object {

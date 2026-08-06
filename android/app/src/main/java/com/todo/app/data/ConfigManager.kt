@@ -6,7 +6,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
 import kotlinx.serialization.encodeToString
-class ConfigManager(context: Context) {
+class ConfigManager(val context: Context) {
 
     companion object {
         const val DEFAULT_WEBDAV_URL = "https://dav.jianguoyun.com/dav/"

@@ -10,6 +10,7 @@ class TodoApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        com.todo.app.notification.NotificationHelper.createChannels(this)
     }
 
     companion object {

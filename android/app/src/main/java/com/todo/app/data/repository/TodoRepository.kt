@@ -412,15 +412,17 @@ class TodoRepository(private val context: Context) {
         val updated = TodoData(
             version = previous.version,
             last_updated = nowIso(),
-            todos = todos
+            todos = todos,
+            reminderSettings = previous.reminderSettings
         )
         _todoData.value = updated
         try {
             val jsonString = jsonFormat.encodeToString(updated)
             atomicWriteJson(jsonString)
 
-            // 立即刷新小组件
+            // 立即刷新小组件和提醒调度
             com.todo.app.widget.refreshAllWidgets(context)
+            com.todo.app.notification.ReminderScheduler(context).rescheduleAll(updated)
 
             // 触发后台同步
             uploadChannel.trySend(Unit)
@@ -429,6 +431,26 @@ class TodoRepository(private val context: Context) {
             Log.e(TAG, "saveTodos failed", e)
             _todoData.value = previous // rollback on write failure
             _uiEvent.send(UiEvent.ShowError("保存失败: ${e.message}"))
+        }
+    }
+
+    suspend fun updateReminderSettings(settings: com.todo.app.data.model.ReminderSettings) = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val previous = _todoData.value
+            val updated = previous.copy(
+                last_updated = nowIso(),
+                reminderSettings = settings
+            )
+            _todoData.value = updated
+            try {
+                val jsonString = jsonFormat.encodeToString(updated)
+                atomicWriteJson(jsonString)
+                com.todo.app.notification.ReminderScheduler(context).rescheduleAll(updated)
+                uploadChannel.trySend(Unit)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                _todoData.value = previous
+            }
         }
     }
 

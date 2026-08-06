@@ -1,0 +1,590 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Todo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+  <script src="Sortable.min.js"></script>
+</head>
+<body>
+  <div class="glass-panel" id="app-panel">
+    <!-- Header -->
+    <header data-tauri-drag-region>
+      <div class="header-left" data-tauri-drag-region>
+        <span class="app-title" data-tauri-drag-region>Todo</span>
+        <div class="status-indicator" id="sync-status"></div>
+      </div>
+      <div class="header-right">
+        <!-- 1. 鍒锋柊 -->
+        <button id="manual-sync-btn" class="icon-btn" title="浜戝悓姝? aria-label="浜戝悓姝?>
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
+            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" fill="currentColor"/>
+          </svg>
+        </button>
+        <!-- 2. 鍒囨崲浠ｅ姙 -->
+        <div class="select-icon-wrapper" title="鍒囨崲娓呭崟">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
+            <path d="M4 14h6v-4H4v4zm0 5h6v-4H4v4zM4 9h6V5H4v4zm8 5h8v-4h-8v4zm0 5h8v-4h-8v4zM12 5v4h8V5h-8z" fill="currentColor"/>
+          </svg>
+          <select id="source-selector" class="source-selector-hidden" title="鍒囨崲娓呭崟">
+            <option value="personal">鎴戠殑寰呭姙</option>
+          </select>
+        </div>
+        <!-- 3. 鎼滅储 -->
+        <button id="search-btn" class="icon-btn" title="鎼滅储寰呭姙" aria-label="鎼滅储寰呭姙">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
+            <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" fill="currentColor"/>
+          </svg>
+        </button>
+        <!-- 4. 璁剧疆 -->
+        <button id="settings-btn" class="icon-btn" title="璁剧疆" aria-label="璁剧疆">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
+            <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22l-1.92 3.32c-.12.21-.07.47.12.61l2.03 1.58c-.05.3-.09.62-.09.94s.04.64.09.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.03-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" fill="currentColor"/>
+          </svg>
+        </button>
+        <!-- 5. 缃《 -->
+        <button id="pin-btn" class="icon-btn" title="鍥哄畾缃《" aria-label="鍥哄畾缃《">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
+            <path d="M16 12V4H17V2H7V4H8V12L6 14V16H11.2V22H12.8V16H18V14L16 12Z" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Date Filter tabs -->
+    <div class="tabs-container" role="tablist" aria-label="瑙嗗浘鍒囨崲">
+      <button class="tab-btn active" id="tab-today" role="tab" aria-selected="true" aria-controls="main-content">浠婂ぉ鑱氱劍</button>
+      <button class="tab-btn" id="tab-all" role="tab" aria-selected="false" aria-controls="main-content">鍏ㄩ儴寰呭姙</button>
+      <button class="tab-btn" id="stats-btn" role="tab" aria-selected="false" aria-controls="main-content">鏁堢巼缁熻</button>
+    </div>
+
+    <!-- Search Bar -->
+    <div class="search-bar-container" id="search-bar" style="display: none;">
+      <div class="search-input-wrapper">
+        <label for="search-input" class="sr-only">鎼滅储寰呭姙浠诲姟</label>
+        <input type="text" id="search-input" placeholder="馃攳 鎼滅储寰呭姙浠诲姟鍚嶇О..." aria-label="鎼滅储寰呭姙浠诲姟鍚嶇О" />
+        <span id="clear-search-btn" class="clear-search-btn hidden">&times;</span>
+      </div>
+    </div>
+
+    <!-- Sub Tabs for All Todos -->
+    <div class="sub-tabs-container hidden" id="all-sub-tabs" role="tablist" aria-label="浠诲姟鐘舵€佺瓫閫?>
+      <button class="sub-tab-btn active" id="sub-tab-uncompleted" role="tab" aria-selected="true">寰呭畬鎴?/button>
+      <button class="sub-tab-btn" id="sub-tab-completed" role="tab" aria-selected="false">宸插畬鎴?/button>
+    </div>
+
+
+
+    <!-- Todo List & Matrix -->
+    <main id="main-content" class="list-view">
+      <ul id="todo-list">
+        <!-- Rendered via JS -->
+      </ul>
+
+    <!-- Stats Container -->
+    <div id="stats-container" class="hidden">
+      <!-- 浜岀骇瀵艰埅 Tab -->
+      <div class="tabs-container stats-sub-tabs" style="margin-bottom: 12px; width: 100%;" role="tablist" aria-label="缁熻瀛愯鍥?>
+        <button class="tab-btn active" data-subtab="insights" style="flex: 1;" role="tab" aria-selected="true">鏁堢巼娲炲療</button>
+        <button class="tab-btn" data-subtab="health" style="flex: 1;" role="tab" aria-selected="false">娓呭崟鍋ュ悍</button>
+      </div>
+
+      <!-- 鏁堢巼娲炲療瀹瑰櫒 -->
+      <div id="stats-insights">
+        <div class="stats-header">
+          <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; position: relative;">
+            <div class="tabs-container stats-period-tabs" role="tablist" aria-label="缁熻鍛ㄦ湡">
+              <button class="tab-btn active" id="stats-period-day" data-period="day" role="tab" aria-selected="true">鏃?/button>
+              <button class="tab-btn" id="stats-period-week" data-period="week" role="tab" aria-selected="false">鍛?/button>
+              <button class="tab-btn" id="stats-period-month" data-period="month" role="tab" aria-selected="false">鏈?/button>
+            </div>
+            <button id="stats-filter-toggle-btn" class="icon-btn-small" aria-label="绛涢€変换鍔＄被鍒? style="margin-left: 8px;">
+              <svg viewBox="0 0 24 24" fill="none" width="16" height="16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
+            </button>
+            <!-- 涓嬫媺绛涢€夎彍鍗?-->
+            <div id="stats-filter-dropdown" class="stats-filter-dropdown hidden">
+              <label class="stats-filter-item">
+                <input type="checkbox" id="filter-normal" checked>
+                <span class="dot normal-dot"></span>鏅€氬緟鍔?              </label>
+              <label class="stats-filter-item">
+                <input type="checkbox" id="filter-daily" checked>
+                <span class="dot daily-dot"></span>姣忔棩閲嶅
+              </label>
+              <label class="stats-filter-item">
+                <input type="checkbox" id="filter-weekly" checked>
+                <span class="dot weekly-dot"></span>姣忓懆鎵撳崱
+              </label>
+              <label class="stats-filter-item">
+                <input type="checkbox" id="filter-monthly" checked>
+                <span class="dot monthly-dot"></span>姣忔湀鎵撳崱
+              </label>
+            </div>
+          </div>
+          <div class="stats-date-nav">
+            <button id="stats-prev-btn" class="icon-btn-small" aria-label="涓婁竴涓懆鏈?>
+              <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <span id="stats-date-label">2026骞?绗?2鍛?/span>
+            <button id="stats-next-btn" class="icon-btn-small" aria-label="涓嬩竴涓懆鏈?>
+              <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="stats-summary-bar">
+          <div class="stats-summary-text" id="stats-summary-text">鍏?0 椤逛换鍔★紝宸插畬鎴?0 椤癸紝杩涘害 0%</div>
+          <div class="stats-progress-track">
+            <div class="stats-progress-fill" id="stats-progress-fill" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <!-- 鏃舵鍒嗗竷鍗＄墖 -->
+        <div class="time-distribution-card" id="time-distribution" style="position: relative;">
+          <div class="time-insight-text" id="time-insight-text">鈽€锔?鏆傛棤宸插畬鎴愮殑浠诲姟鏁版嵁</div>
+          <!-- 鏇挎崲涓虹幆褰㈡椂閽?-->
+          <div class="efficiency-clock-container" style="display: flex; justify-content: center; align-items: center; margin: 12px 0; width: 100%;">
+            <svg id="efficiency-clock-svg" width="340" height="260" viewBox="0 0 340 260"></svg>
+          </div>
+          <!-- 宸︿晶鍜屽彸渚х殑琛ユ墦鍗″垪 -->
+          <div id="makeup-checkins-left" style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; z-index: 5;"></div>
+          <div id="makeup-checkins-right" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; z-index: 5;"></div>
+          
+          <div id="time-distribution-tip" class="time-distribution-tip hidden" style="font-size: 0.72rem; color: var(--text-secondary); opacity: 0.65; margin-top: 8px; text-align: center; width: 100%;"></div>
+          <!-- 鎮诞鎻愮ず妗?-->
+          <div id="clock-tooltip" class="clock-tooltip"></div>
+        </div>
+
+        <div class="stats-list-toggle-container" style="text-align: center; margin: 12px 0 6px 0;">
+          <button id="toggle-stats-list-btn" style="font-size: 0.8rem; padding: 6px 14px; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--glass-border); cursor: pointer; color: var(--text-primary); transition: all 0.2s;">
+            鏄剧ず璇︾粏浠诲姟鍒楄〃 (鍏?0 椤?
+          </button>
+        </div>
+
+        <ul id="stats-list" class="hidden"></ul>
+      </div>
+
+      <!-- 娓呭崟鍋ュ悍瀹瑰櫒 -->
+      <div id="stats-health" class="hidden">
+        <div style="font-size: 0.72rem; color: var(--text-secondary); opacity: 0.65; margin-bottom: 12px; text-align: center; width: 100%;">* 娓呭崟鍋ュ悍鍙婄浉鍏虫寚鏍囦粎缁熻鏅€氬崟娆′换鍔★紝涓嶅惈閲嶅浠诲姟涓庡懆/鏈堟墦鍗?/div>
+        <!-- 娓呭崟鍋ュ悍搴﹁瘎鍒?-->
+        <div class="health-grade-card">
+          <div class="health-grade-title">娓呭崟鍋ュ悍搴?/div>
+          <div class="health-grade-letter" id="health-grade-letter">A</div>
+          <div class="health-grade-text" id="health-grade-text">鈥滀綘鐨勬竻鍗曚唬璋㈤潪甯稿仴搴凤紒鈥?/div>
+        </div>
+
+        <!-- 鏂伴檲浠ｈ阿 (鍚炲悙閲忓崱鐗? -->
+        <div class="throughput-card">
+          <div class="throughput-header">
+            <span class="throughput-title">鏂伴檲浠ｈ阿</span>
+            <select id="throughput-period-select" class="throughput-select">
+              <option value="7">鏈€杩?7 澶?/option>
+              <option value="14">鏈€杩?14 澶?/option>
+              <option value="30" selected>鏈€杩?30 澶?/option>
+              <option value="60">鏈€杩?60 澶?/option>
+              <option value="90">鏈€杩?90 澶?/option>
+            </select>
+          </div>
+          <div class="throughput-numbers">
+            <span style="font-size: 0.75rem; color: var(--text-secondary);">鏂板 <strong id="throughput-added" style="color: var(--text-primary);">0</strong> 椤?/span>
+            <span style="font-size: 0.75rem; color: var(--text-secondary);">娑堢伃 <strong id="throughput-completed" style="color: var(--text-primary);">0</strong> 椤?/span>
+          </div>
+          <div class="throughput-bar">
+            <div id="throughput-bar-added" class="throughput-bar-added" style="flex: 1;"></div>
+            <div id="throughput-bar-completed" class="throughput-bar-completed" style="flex: 1;"></div>
+          </div>
+          <div id="throughput-verdict" class="throughput-verdict">娓呭崟姝ｅ湪鍙樿交鐩?鉁?/div>
+        </div>
+
+        <!-- 骞冲潎瀵垮懡 + 绉帇鏃堕暱 + 娌夌潯鏁伴噺 -->
+        <div class="metrics-row">
+          <div class="metric-card">
+            <div class="metric-icon">鈴憋笍</div>
+            <div class="metric-value" id="metric-avg-age">0.0 澶?/div>
+            <div class="metric-trend" id="metric-avg-age-trend"></div>
+            <div class="metric-label">骞冲潎浠诲姟瀵垮懡</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon">鈴?/div>
+            <div class="metric-value" id="metric-backlog-age">0.0 澶?/div>
+            <div class="metric-trend" id="metric-backlog-age-trend"></div>
+            <div class="metric-label">绉帇浠诲姟鏃堕暱</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon">馃挙</div>
+            <div class="metric-value" id="metric-sleeping-count">0 椤?/div>
+            <div class="metric-trend" id="metric-sleeping-count-trend"></div>
+            <div class="metric-label">娌夌潯浠诲姟</div>
+          </div>
+        </div>
+
+        <!-- 娌夌潯寰呭姙娓呯悊 -->
+        <div class="sleeping-section">
+          <div class="sleeping-title">馃挙 娌夌潯寰呭姙娓呯悊 (瓒呰繃7澶╂湭瀹屾垚)</div>
+          <div class="sleeping-empty" id="sleeping-empty" style="display: none;">
+            鎵€鏈変换鍔￠兘鍦ㄥ仴搴锋祦杞腑锛岀户缁繚鎸侊紒
+          </div>
+          <div id="sleeping-list"></div>
+        </div>
+      </div>
+    </div>
+    </main>
+
+    <!-- Add Input -->
+    <footer id="app-footer">
+      <form id="add-form">
+        <div class="autocomplete-wrapper" style="position: relative; flex: 1;">
+          <input type="text" id="todo-input" placeholder="娣诲姞鏂板緟鍔?.." autocomplete="off" style="width: 100%; box-sizing: border-box;" />
+          <ul id="todo-autocomplete-list" class="autocomplete-list" style="display: none;"></ul>
+        </div>
+        <button type="submit" class="add-btn" aria-label="娣诲姞寰呭姙">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </form>
+    </footer>
+  </div>
+
+  <!-- Edit Modal -->
+  <div id="edit-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title">
+    <div class="modal-content glass-panel">
+      <div style="position: relative; display: flex; justify-content: center; align-items: center; margin-bottom: 24px;">
+        <button type="button" id="modal-back-btn" class="modal-back-btn" style="position: absolute; left: 0;" aria-label="杩斿洖">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+          <span>杩斿洖</span>
+        </button>
+        <h3 id="edit-modal-title" style="margin: 0; font-size: 1.15rem; font-weight: 600;">缂栬緫寰呭姙</h3>
+      </div>
+      <div class="modal-body">
+        <label for="edit-content">寰呭姙鍐呭</label>
+        <input type="text" id="edit-content" placeholder="杈撳叆寰呭姙鍐呭..." autocomplete="off" />
+        
+        <!-- 浠诲姟绫诲瀷 (鍥涚) -->
+        <div class="input-group" style="margin-bottom: 12px; margin-top: 12px;">
+          <label for="edit-task-type">浠诲姟绫诲瀷</label>
+          <select id="edit-task-type" class="custom-select">
+            <option value="normal">鏅€氫换鍔?/option>
+            <option value="daily_repeat">姣忓ぉ閲嶅</option>
+            <option value="weekly_checkin">鍛ㄦ墦鍗?/option>
+            <option value="monthly_checkin">鏈堟墦鍗?/option>
+          </select>
+        </div>
+        
+        <!-- 鎴鏃ユ湡琛?(浠呮櫘閫氫换鍔℃樉绀? -->
+        <div class="date-time-row" id="edit-date-time-row" style="margin-bottom: 12px;">
+          <div class="input-group" style="flex: 1;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label for="edit-date">璁剧疆鎴鏃ユ湡</label>
+              <label class="switch">
+                <input type="checkbox" id="edit-has-date-switch">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div id="edit-date-container" style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
+              <input type="date" id="edit-date" style="flex: 1;" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 鐩爣娆℃暟 -->
+        <div class="input-group" id="target-count-group" style="display: none; margin-bottom: 12px;">
+          <label for="edit-target-count">鐩爣娆℃暟 (涓嶅～涓虹函鎵撳崱)</label>
+          <input type="number" id="edit-target-count" min="1" placeholder="鐣欑┖鍒欎笉璁剧洰鏍? style="width: 100%; box-sizing: border-box;" />
+        </div>
+
+        <!-- 缂栬緫寮圭獥鍐呯殑鎵撳崱琛ュ崱缃戞牸 -->
+        <div class="input-group" id="edit-checkin-grid-group" style="display: none; margin-bottom: 12px;">
+          <label id="edit-checkin-grid-label">鎵撳崱璁板綍 (鐐瑰嚮琛ュ崱/娑堝崱)</label>
+          <div id="edit-checkin-grid" style="margin-top: 4px;"></div>
+        </div>
+
+        <!-- 瀹屾垚鏃堕棿 (宸插畬鎴愮殑浠诲姟鏄剧ず) -->
+        <div class="date-time-row" id="edit-completed-at-row" style="display: none; margin-bottom: 12px;">
+          <div class="input-group" style="flex: 1;">
+            <label>瀹屾垚鏃堕棿</label>
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
+              <input type="date" id="edit-completed-date" style="flex: 1;" />
+              <input type="text" id="edit-completed-time" placeholder="HH:mm鎴?-:--" style="flex: 1;" maxlength="5" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 瀛愪换鍔″尯鍩?-->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; margin-bottom: 4px;">
+          <label style="margin: 0; font-weight: 600;">瀛愭楠?澶囨敞</label>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" id="sort-subtasks-btn" class="icon-btn-small copy-btn" aria-label="鏁寸悊鎺掑簭瀛愭楠?>鏁寸悊鎺掑簭</button>
+            <button type="button" id="copy-subtasks-btn" class="icon-btn-small copy-btn" aria-label="澶嶅埗瀛愭楠ゅ唴瀹?>澶嶅埗鍐呭</button>
+          </div>
+        </div>
+        <div class="subtasks-container" style="margin-top: 0; padding: 0; background: transparent;">
+          <ul id="edit-subtasks-list" class="subtasks-list"></ul>
+          <div class="add-subtask-row">
+            <input type="text" id="add-subtask-input" placeholder="娣诲姞鏂板瓙姝ラ..." autocomplete="off" />
+            <button type="button" id="add-subtask-btn" class="icon-btn-small" aria-label="娣诲姞瀛愭楠?>
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="modal-delete-btn" class="modal-btn delete">鍒犻櫎</button>
+        <div class="footer-right">
+          <button id="modal-tomorrow-btn" class="modal-btn secondary">鏀惧埌鏄庡ぉ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import Modal -->
+  <div id="import-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
+    <div class="modal-content glass-panel">
+      <h3 id="import-modal-title">瀵煎叆浠诲姟</h3>
+      <div class="modal-body">
+        <ul id="import-tasks-list" class="subtasks-list">
+          <!-- Rendered via JS -->
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <div class="footer-right" style="width: 100%; justify-content: flex-end;">
+          <button id="import-cancel-btn" class="modal-btn secondary">鍙栨秷</button>
+          <button id="import-confirm-btn" class="modal-btn primary">瀵煎叆閫変腑椤?/button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Backup Modal -->
+  <div id="backup-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="backup-modal-title">
+    <div class="modal-content glass-panel" style="max-width: 400px;">
+      <h3 id="backup-modal-title">閫夋嫨瑕佹仮澶嶇殑鏈湴澶囦唤</h3>
+      <div class="modal-body">
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 12px;">濡傛灉鐢变簬璇搷浣滃悓姝ュ鑷存暟鎹涪澶憋紝鍙互浠庢湰鍦板揩鐓ф仮澶嶃€?/p>
+        <ul id="backup-list" class="subtasks-list" style="max-height: 200px; overflow-y: auto;">
+          <!-- Rendered via JS -->
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <div class="footer-right" style="width: 100%; justify-content: flex-end;">
+          <button id="backup-close-btn" class="modal-btn secondary">鍏抽棴</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Delete Confirm Modal -->
+  <div id="delete-confirm-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-confirm-title" style="z-index: var(--z-modal-confirm);">
+    <div class="modal-content delete-confirm-content">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <div style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: rgba(255, 77, 79, 0.15); color: #ff4d4f; flex-shrink: 0;">
+          <svg viewBox="0 0 24 24" fill="none" width="18" height="18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <h3 id="delete-confirm-title" style="margin: 0; font-size: 1.05rem; font-weight: 600; color: #ffffff;">纭鍒犻櫎</h3>
+      </div>
+      <div class="modal-body" style="padding: 0; gap: 0;">
+        <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.7); line-height: 1.5; margin: 0;">纭畾瑕佸交搴曞垹闄よ寰呭姙浜嬮」鍚楋紵姝ゆ搷浣滄棤娉曟挙閿€銆?/p>
+      </div>
+      <div class="modal-footer">
+        <div class="footer-right" style="width: 100%; justify-content: flex-end; gap: 8px;">
+          <button id="delete-cancel-btn" class="modal-btn secondary" style="margin: 0; padding: 8px 16px; border-radius: 8px; font-size: 0.82rem;">鍙栨秷</button>
+          <button id="delete-confirm-btn" class="modal-btn btn-danger-filled" style="margin: 0; padding: 8px 16px; border-radius: 8px; font-size: 0.82rem; font-weight: 600;">纭鍒犻櫎</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <div class="modal-content glass-panel settings-large-modal" style="max-width: 580px;">
+      <h3 id="settings-modal-title" style="margin-top: 0; margin-bottom: 15px; user-select: none;">璁剧疆</h3>
+      <div class="settings-container" style="display: flex; gap: 20px; min-height: 320px;">
+        <!-- 宸︿晶瀵艰埅 -->
+        <div class="settings-sidebar" id="settings-tabs-menu" style="display: flex; flex-direction: column; gap: 6px; width: 110px; border-right: 1px solid var(--border-color); padding-right: 12px; user-select: none;">
+          <button class="settings-tab-btn active" data-target="panel-sync">鍚屾杩炴帴</button>
+          <button class="settings-tab-btn" data-target="panel-collab">鍗忎綔鍏变韩</button>
+          <button class="settings-tab-btn" data-target="panel-pref">鍋忓ソ涔犳儻</button>
+          <button class="settings-tab-btn" data-target="panel-maintenance">鏁版嵁缁存姢</button>
+          <button class="settings-tab-btn" data-target="panel-about">鍏充簬杞欢</button>
+        </div>
+        
+        <!-- 鍙充晶鍐呭 -->
+        <div class="settings-body-area" id="settings-tabs-content" style="flex: 1; display: flex; flex-direction: column; overflow-y: auto; max-height: 320px; padding-right: 4px;">
+          <!-- 1. 鍚屾閰嶇疆 -->
+          <div id="panel-sync" class="settings-panel active">
+            <div class="input-group">
+              <label>鍚屾妯″紡</label>
+              <select id="setting-sync-mode" class="custom-select">
+                <option value="local">鏈湴鍚屾鐩樼洰褰?/option>
+                <option value="webdav">鍧氭灉浜?WebDAV (鐩磋繛)</option>
+              </select>
+            </div>
+            <div id="setting-local-group" class="input-group">
+              <label>鏈湴鍚屾鐩綍</label>
+              <div style="display: flex; gap: 8px;">
+                <input type="text" id="setting-sync-path" readonly placeholder="鏈€夋嫨" style="flex: 1;" />
+                <button id="setting-choose-dir-btn" class="modal-btn secondary">閫夋嫨</button>
+              </div>
+            </div>
+            <div id="setting-webdav-group" style="display: none;">
+              <div class="input-group">
+                <label>WebDAV 鏈嶅姟鍣ㄥ湴鍧€</label>
+                <input type="text" id="setting-webdav-url" placeholder="https://dav.jianguoyun.com/dav/" />
+              </div>
+              <div class="input-group">
+                <label>鍧氭灉浜戣处鍙?(閭)</label>
+                <input type="text" id="setting-webdav-user" placeholder="鎮ㄧ殑閭" />
+              </div>
+              <div class="input-group">
+                <label>搴旂敤瀵嗙爜</label>
+                <input type="password" id="setting-webdav-pass" placeholder="鍧氭灉浜戠涓夋柟搴旂敤瀵嗙爜" />
+              </div>
+              <div class="input-group">
+                <label>浜戠鏂囦欢璺緞</label>
+                <input type="text" id="setting-webdav-filepath" placeholder="鎴戠殑鍧氭灉浜?to-do/todo_data.json" />
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. 鍗忎綔鍏变韩 -->
+          <div id="panel-collab" class="settings-panel">
+            <!-- 1. 鍗忎綔鏃舵垜鐨勬樀绉?-->
+            <div class="divider-with-text">鍗忎綔鏃舵垜鐨勬樀绉?/div>
+            <div class="input-group">
+              <input type="text" id="setting-nickname" placeholder="杈撳叆鏄电О (濡? 鏉庡洓)" style="width: 100%; box-sizing: border-box;" />
+            </div>
+
+            <!-- 2. 宸茬粦瀹氱殑鍏变韩鍗忎綔娓呭崟 -->
+            <div class="divider-with-text">宸茬粦瀹氱殑鍏变韩鍗忎綔娓呭崟</div>
+            <div class="input-group">
+              <div id="collab-list" class="collab-list" style="margin-top: 8px; max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
+                <!-- 鍔ㄦ€佹覆鏌?-->
+              </div>
+            </div>
+
+            <!-- 3. 瀵煎叆浠栦汉鎺堟潈鐮佸苟鍛藉悕 -->
+            <div class="divider-with-text">瀵煎叆浠栦汉鎺堟潈鐮佸苟鍛藉悕</div>
+            <div class="input-group">
+              <input type="text" id="import-code-input" placeholder="绮樿创 tdsync://..." style="width: 100%; box-sizing: border-box; margin-bottom: 8px;" />
+              <input type="text" id="import-key-input" placeholder="杈撳叆 12 浣嶆彁鍙栧瘑閽? style="width: 100%; box-sizing: border-box; margin-bottom: 8px; display: none;" />
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" id="import-name-input" placeholder="璁剧疆鍗忎綔娓呭崟鍚嶅瓧" style="flex: 1; height: 32px;" />
+                <button id="import-share-btn" class="modal-btn secondary" style="padding: 4px 12px; margin: 0; font-size: 0.8rem; width: auto; height: 32px; line-height: 1;">瀵煎叆</button>
+              </div>
+            </div>
+
+            <!-- 4. 鐢熸垚鎺堟潈鐮?-->
+            <div class="divider-with-text">鐢熸垚鎺堟潈鐮?/div>
+            <div class="input-group">
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <select id="share-expire" class="custom-select" style="flex: 1; padding: 4px 8px; font-size: 0.85rem; height: 32px; background: rgba(255,255,255,0.05); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 6px;">
+                  <option value="7">7 澶?/option>
+                  <option value="30">30 澶?/option>
+                  <option value="">姘镐箙</option>
+                </select>
+                <button id="generate-share-btn" class="modal-btn secondary" style="padding: 4px 12px; margin: 0; font-size: 0.8rem; width: auto; height: 32px; line-height: 1;">鐢熸垚</button>
+              </div>
+              <div id="share-output-container" style="display: none; margin-top: 8px; flex-direction: column; gap: 6px;">
+                <div style="font-size: 0.75rem; color: var(--text-secondary); text-align: left;">鍔犲瘑鎺堟潈鐮侊紙鍙屽嚮鍙鍒讹級锛?/div>
+                <div id="share-code-output" class="share-code-box" style="word-break: break-all; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; font-size: 11px; user-select: all; text-align: left; max-height: 60px; overflow-y: auto;"></div>
+                <div style="font-size: 0.75rem; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                  <span>12 浣嶆彁鍙栧瘑閽ワ細</span>
+                  <button id="copy-share-key-btn" class="modal-btn secondary" style="padding: 2px 8px; margin: 0; font-size: 0.7rem; width: auto; height: 20px; line-height: 1; display: inline-block;">澶嶅埗瀵嗛挜</button>
+                </div>
+                <div id="share-key-output" style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; font-size: 13px; font-family: monospace; font-weight: bold; text-align: center; color: var(--accent-color); user-select: all;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. 涓€у亸濂?-->
+          <div id="panel-pref" class="settings-panel">
+            <div class="input-group">
+              <label>榛樿浠诲姟鎴鏃ユ湡</label>
+              <select id="setting-default-due-date" class="custom-select">
+                <option value="none">鏃犳棩鏈?(闇€鎵嬪姩 @ 鎸囧畾)</option>
+                <option value="today">浠婂ぉ (@today)</option>
+                <option value="tomorrow">鏄庡ぉ (@tomorrow)</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label>鏂板緟鍔炴彃鍏ヤ綅缃?/label>
+              <select id="setting-default-insertion" class="custom-select">
+                <option value="top">鍒楄〃鏈€涓婃柟锛堢疆椤朵紭鍏堝叧娉級</option>
+                <option value="bottom">鍒楄〃鏈€涓嬫柟锛堥『搴忕疆搴曪級</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- 4. 鏁版嵁缁存姢 -->
+          <div id="panel-maintenance" class="settings-panel">
+            <div class="input-group">
+              <label>鏁版嵁鎭㈠</label>
+              <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 8px; line-height: 1.4;">绯荤粺浼氳嚜鍔ㄤ繚鐣欐渶杩戝嚑娆″啓鍏ョ殑鏁版嵁澶囦唤锛屾偍鍙互闅忔椂鎭㈠鍒板巻鍙茬増鏈€?/p>
+              <button type="button" id="backup-btn" class="modal-btn secondary" style="width: 100%;">浠庡巻鍙插浠芥仮澶?/button>
+            </div>
+          </div>
+
+          <!-- 5. 鍏充簬涓庢洿鏂?-->
+          <div id="panel-about" class="settings-panel">
+            <div class="input-group" style="display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label style="margin: 0;">杞欢淇℃伅</label>
+                <span id="current-version-text" style="font-size: 0.75rem; color: var(--text-secondary); font-weight: normal;">褰撳墠鐗堟湰: v...</span>
+              </div>
+              <button type="button" id="check-update-btn" class="modal-btn secondary" style="width: 100%;">鎵嬪姩妫€鏌ユ洿鏂?/button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding-top: 15px; border-top: 1px solid var(--border-color); margin-top: 15px; display: flex; justify-content: flex-end; width: 100%;">
+        <button id="settings-cancel-btn" class="modal-btn secondary">鍙栨秷</button>
+        <button id="settings-save-btn" class="modal-btn primary">淇濆瓨</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Copy Options Modal -->
+  <div id="copy-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="copy-modal-title" style="display: none; z-index: var(--z-modal-confirm);">
+    <div class="modal-content glass-panel" style="max-width: 300px; padding: 20px;">
+      <h3 id="copy-modal-title" style="margin-top: 0; margin-bottom: 16px; text-align: center; color: var(--accent-color); user-select: none; -webkit-user-select: none;">閫夋嫨澶嶅埗鏍煎紡</h3>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 0 4px;">
+        <label for="copy-only-uncompleted-switch" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">浠呭鍒舵湭瀹屾垚椤?/label>
+        <label class="switch">
+          <input type="checkbox" id="copy-only-uncompleted-switch" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <button id="copy-opt-1" class="modal-btn primary" style="width: 100%;">绾枃鏈?/button>
+        <button id="copy-opt-2" class="modal-btn primary" style="width: 100%;">鏃犲簭鍒楄〃 (-)</button>
+        <button id="copy-opt-3" class="modal-btn primary" style="width: 100%;">鏈夊簭鍒楄〃 (1.)</button>
+        <button id="copy-opt-cancel" class="modal-btn secondary" style="width: 100%; margin-top: 8px;">鍙栨秷</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 闂數褰曞叆锛堣仛鍏夌伅妯″紡锛夐伄缃╁眰 -->
+  <div class="modal-overlay" id="quick-add-modal" role="dialog" aria-modal="true" aria-label="闂數褰曞叆">
+    <div class="autocomplete-wrapper" style="position: relative; width: 80%; max-width: 600px;">
+      <input type="text" id="quick-add-input" placeholder="杈撳叆寰呭姙浜嬮」锛屾寜鍥炶溅闂數淇濆瓨..." 
+        style="width: 100%; padding: 20px 30px; font-size: 24px; border: none; border-radius: 16px; background: rgba(255,255,255,0.1); color: #fff; outline: none; box-shadow: 0 10px 30px rgba(0,0,0,0.3); backdrop-filter: blur(20px);" />
+      <ul id="quick-add-autocomplete-list" class="autocomplete-list" style="display: none;"></ul>
+    </div>
+  </div>
+
+  <script src="tauri-mock.js"></script>
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
