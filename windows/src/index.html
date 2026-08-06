@@ -409,20 +409,20 @@
   
   <!-- Settings Modal -->
   <div id="settings-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
-    <div class="modal-content glass-panel settings-large-modal" style="max-width: 580px;">
+    <div class="modal-content glass-panel settings-large-modal">
       <h3 id="settings-modal-title" style="margin-top: 0; margin-bottom: 15px; user-select: none;">设置</h3>
-      <div class="settings-container" style="display: flex; gap: 20px; min-height: 320px;">
+      <div class="settings-container">
         <!-- 左侧导航 -->
-        <div class="settings-sidebar" id="settings-tabs-menu" style="display: flex; flex-direction: column; gap: 6px; width: 110px; border-right: 1px solid var(--border-color); padding-right: 12px; user-select: none;">
+        <div class="settings-sidebar" id="settings-tabs-menu">
           <button class="settings-tab-btn active" data-target="panel-about">关于</button>
           <button class="settings-tab-btn" data-target="panel-reminder">提醒</button>
           <button class="settings-tab-btn" data-target="panel-pref">偏好</button>
           <button class="settings-tab-btn" data-target="panel-collab">协作</button>
-          <button class="settings-tab-btn" data-target="panel-sync">同步维护</button>
+          <button class="settings-tab-btn" data-target="panel-sync">同步</button>
         </div>
         
         <!-- 右侧内容 -->
-        <div class="settings-body-area" id="settings-tabs-content" style="flex: 1; display: flex; flex-direction: column; overflow-y: auto; max-height: 320px; padding-right: 4px;">
+        <div class="settings-body-area" id="settings-tabs-content">
           <!-- 1. 关于与更新 -->
           <div id="panel-about" class="settings-panel active">
             <div class="input-group" style="display: flex; flex-direction: column; gap: 8px;">
@@ -436,21 +436,33 @@
 
           <!-- 2. 提醒 -->
           <div id="panel-reminder" class="settings-panel">
-            <div class="input-group">
-              <label>提醒推送方式</label>
-              <select id="setting-privacy-mode" class="custom-select">
-                <option value="false">完整内容（显示任务名称和时间）</option>
-                <option value="true">隐私模式（"您有一条待办任务提醒"）</option>
-              </select>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0 10px 0; border-bottom: 1px solid var(--border-color); margin-bottom: 12px;">
+              <span style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary);">开启提醒功能</span>
+              <button type="button" id="reminder-toggle-btn" style="background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0;" aria-label="切换提醒功能">
+                <span id="reminder-toggle-track" style="display: inline-block; width: 36px; height: 20px; border-radius: 20px; position: relative; transition: background 0.3s; background: var(--accent-color); border: 1px solid var(--accent-color);">
+                  <span id="reminder-toggle-knob" style="display: block; width: 14px; height: 14px; border-radius: 50%; background: white; position: absolute; top: 2px; left: 18px; transition: left 0.3s;"></span>
+                </span>
+              </button>
+              <input type="hidden" id="setting-reminder-enabled" value="true" />
             </div>
 
-            <div class="divider-with-text" style="margin-top: 12px;">全局定时提醒</div>
-            <div id="global-rules-list" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;">
-              <!-- 动态渲染全局规则卡片 -->
-            </div>
-            <div style="display: flex; gap: 8px;">
-              <button type="button" id="add-global-rule-btn" class="modal-btn secondary" style="flex: 1;">+ 新增规则</button>
-              <button type="button" id="import-preset-btn" class="modal-btn secondary" style="flex: 1;">导入预设</button>
+            <div id="reminder-detail-container">
+              <div class="input-group">
+                <label>提醒推送方式</label>
+                <select id="setting-privacy-mode" class="custom-select">
+                  <option value="false">完整内容（显示任务名称和时间）</option>
+                  <option value="true">隐私模式（"您有一条待办任务提醒"）</option>
+                </select>
+              </div>
+
+              <div class="divider-with-text" style="margin-top: 12px;">全局定时提醒</div>
+              <div id="global-rules-list" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;">
+                <!-- 动态渲染全局规则卡片 -->
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button type="button" id="add-global-rule-btn" class="modal-btn secondary" style="flex: 1;">+ 新增规则</button>
+                <button type="button" id="import-preset-btn" class="modal-btn secondary" style="flex: 1;">导入预设</button>
+              </div>
             </div>
           </div>
 
@@ -578,35 +590,43 @@
   <!-- Global Reminder Presets Modal -->
   <div id="preset-modal" class="modal-overlay" role="dialog" aria-modal="true" style="display: none; z-index: var(--z-modal-confirm);">
     <div class="modal-content glass-panel" style="max-width: 420px; padding: 20px;">
-      <h3 style="margin-top: 0; margin-bottom: 14px; text-align: center; user-select: none;">导入系统预设提醒</h3>
+      <h3 style="margin-top: 0; margin-bottom: 12px; text-align: center; user-select: none;">导入系统预设提醒</h3>
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 0 4px 10px 4px; border-bottom: 1px solid var(--border-color); margin-bottom: 10px;">
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-primary); cursor: pointer; user-select: none;">
+          <input type="checkbox" id="preset-select-all" checked style="width: 16px; height: 16px; cursor: pointer;" />
+          <span style="font-weight: 600;">全选</span>
+        </label>
+        <span style="font-size: 0.75rem; color: var(--text-secondary);">勾选需要的预设（可多选）</span>
+      </div>
       <div style="display: flex; flex-direction: column; gap: 10px; max-height: 280px; overflow-y: auto;">
-        <div class="global-rule-card" style="display: flex; justify-content: space-between; align-items: center;">
-          <div style="display: flex; flex-direction: column; gap: 2px;">
-            <span style="font-weight: 600; font-size: 0.9rem;">12:00 中午警醒</span>
+        <label class="global-rule-card preset-select-card" style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+          <input type="checkbox" class="preset-item-checkbox" data-preset="1" checked style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;" />
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
+            <span class="preset-time-header">12:00</span>
             <span style="font-size: 0.75rem; color: var(--text-secondary);">尚未完成 | 全部任务</span>
             <span style="font-size: 0.7rem; color: var(--accent-color); margin-top: 2px;">"每一个不曾起舞的日子..."</span>
           </div>
-          <button type="button" class="modal-btn secondary import-preset-item-btn" data-preset="1">导入</button>
-        </div>
-        <div class="global-rule-card" style="display: flex; justify-content: space-between; align-items: center;">
-          <div style="display: flex; flex-direction: column; gap: 2px;">
-            <span style="font-weight: 600; font-size: 0.9rem;">16:00 下午打气</span>
-            <span style="font-size: 0.75rem; color: var(--text-secondary);">无条件提醒 | 不要放弃下午四点</span>
-            <span style="font-size: 0.7rem; color: var(--accent-color); margin-top: 2px;">"不要温和地走进那个良夜"</span>
+        </label>
+        <label class="global-rule-card preset-select-card" style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+          <input type="checkbox" class="preset-item-checkbox" data-preset="2" checked style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;" />
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
+            <span class="preset-time-header">16:00</span>
+            <span style="font-size: 0.75rem; color: var(--text-secondary);">无条件提醒 | 全部任务</span>
+            <span style="font-size: 0.7rem; color: var(--accent-color); margin-top: 2px;">"Do not go gentle into that good night"</span>
           </div>
-          <button type="button" class="modal-btn secondary import-preset-item-btn" data-preset="2">导入</button>
-        </div>
-        <div class="global-rule-card" style="display: flex; justify-content: space-between; align-items: center;">
-          <div style="display: flex; flex-direction: column; gap: 2px;">
-            <span style="font-weight: 600; font-size: 0.9rem;">20:00 夜间盘点</span>
+        </label>
+        <label class="global-rule-card preset-select-card" style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+          <input type="checkbox" class="preset-item-checkbox" data-preset="3" checked style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;" />
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
+            <span class="preset-time-header">20:00</span>
             <span style="font-size: 0.75rem; color: var(--text-secondary);">存在未完成 | 仅今日任务</span>
             <span style="font-size: 0.7rem; color: var(--accent-color); margin-top: 2px;">"截至（20:00），仅今日任务还有..."</span>
           </div>
-          <button type="button" class="modal-btn secondary import-preset-item-btn" data-preset="3">导入</button>
-        </div>
+        </label>
       </div>
-      <div class="modal-footer" style="margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 10px; justify-content: flex-end;">
-        <button type="button" id="close-preset-modal-btn" class="modal-btn secondary">关闭</button>
+      <div class="modal-footer" style="margin-top: 14px; border-top: 1px solid var(--border-color); padding-top: 10px; display: flex; justify-content: flex-end; gap: 8px;">
+        <button type="button" id="close-preset-modal-btn" class="modal-btn secondary">取消</button>
+        <button type="button" id="confirm-import-presets-btn" class="modal-btn primary">导入选中项</button>
       </div>
     </div>
   </div>

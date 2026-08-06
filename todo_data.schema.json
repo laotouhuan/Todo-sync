@@ -132,6 +132,10 @@
     "reminder_settings": {
       "type": "object",
       "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
         "privacy_mode": {
           "type": "boolean",
           "default": false

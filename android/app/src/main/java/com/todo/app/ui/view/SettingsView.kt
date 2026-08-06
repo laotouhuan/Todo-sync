@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -503,11 +504,10 @@ fun SettingsView(viewModel: TodoViewModel) {
                             Text("保存连接设置")
                         }
 
-                        Spacer(modifier = Modifier.height(24.dp))
                         TextDivider("数据维护")
                         ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                Text("如果因为误操作同步导致数据丢失，可以从本地自动生成的快照中恢复。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("如果因为误操作同步导致数据丢失，可以从本地自动生成的快照中恢复，或从云端强制覆盖本地数据。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.height(16.dp))
                                 Button(
                                     onClick = {
@@ -524,30 +524,43 @@ fun SettingsView(viewModel: TodoViewModel) {
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("历史数据恢复")
                                 }
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = { showConfirmForcePull = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = buttonShape,
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
+                                ) {
+                                    Icon(Icons.Filled.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("强制从云端覆盖本地")
+                                }
                             }
                         }
                     }
                 }
-                AlertDialog(
-                    onDismissRequest = { showConfirmForcePull = false },
-                    title = { Text("强制覆盖本地数据") },
-                    text = { Text("此操作将下载云端数据并直接覆盖您手机上的本地待办列表！本地未同步的改动将会丢失。确认执行？") },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                showConfirmForcePull = false
-                                viewModel.forcePullCloud()
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("强制拉取已触发，请稍后回首页查看")
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                        ) { Text("确认覆盖") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showConfirmForcePull = false }) { Text("取消") }
-                    }
-                )
+                if (showConfirmForcePull) {
+                    AlertDialog(
+                        onDismissRequest = { showConfirmForcePull = false },
+                        title = { Text("强制覆盖本地数据") },
+                        text = { Text("此操作将下载云端数据并直接覆盖您手机上的本地待办列表！本地未同步的改动将会丢失。确认执行？") },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    showConfirmForcePull = false
+                                    viewModel.forcePullCloud()
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("强制拉取已触发，请稍后回首页查看")
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            ) { Text("确认覆盖") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showConfirmForcePull = false }) { Text("取消") }
+                        }
+                    )
+                }
             }
 
             if (showBackupDialog) {
@@ -652,6 +665,7 @@ private fun ReminderSettingsPanel(
     val todoData by viewModel.todoData.collectAsState()
     val reminderSettings = todoData.reminderSettings
 
+    var enabled by remember(reminderSettings.enabled) { mutableStateOf(reminderSettings.enabled) }
     var privacyMode by remember(reminderSettings.privacyMode) { mutableStateOf(reminderSettings.privacyMode) }
     var globalRules by remember(reminderSettings.globalRules) { mutableStateOf(reminderSettings.globalRules) }
     var showPresetDialog by remember { mutableStateOf(false) }
@@ -660,7 +674,26 @@ private fun ReminderSettingsPanel(
 
     ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("单项任务通知模式", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("开启提醒功能", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = { isChecked ->
+                        enabled = isChecked
+                        viewModel.updateReminderSettings(reminderSettings.copy(enabled = isChecked))
+                    }
+                )
+            }
+
+            if (enabled) {
+                Spacer(Modifier.height(12.dp))
+                TextDivider("提醒模式与规则")
+                Spacer(Modifier.height(8.dp))
+                Text("单项任务通知模式", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -742,80 +775,122 @@ private fun ReminderSettingsPanel(
             }
         }
     }
+}
 
     if (showPresetDialog) {
+        var sel1 by remember { mutableStateOf(true) }
+        var sel2 by remember { mutableStateOf(true) }
+        var sel3 by remember { mutableStateOf(true) }
+        val allSelected = sel1 && sel2 && sel3
+
         AlertDialog(
             onDismissRequest = { showPresetDialog = false },
             title = { Text("导入系统预设提醒") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = {
-                            val preset = com.todo.app.data.model.GlobalReminderRule(
-                                id = UUID.randomUUID().toString(),
-                                enabled = true,
-                                time = "12:00",
-                                condition = "none_completed",
-                                taskScope = "all",
-                                title = "",
-                                body = "每一个不曾起舞的日子，都是对生命的辜负"
-                            )
-                            val updatedList = globalRules + preset
-                            globalRules = updatedList
-                            viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
-                            showPresetDialog = false
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            val newVal = !allSelected
+                            sel1 = newVal
+                            sel2 = newVal
+                            sel3 = newVal
                         },
-                        modifier = Modifier.fillMaxWidth()
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("12:00 | 尚未完成任何 | 每一个不曾起舞...")
+                        Checkbox(
+                            checked = allSelected,
+                            onCheckedChange = { checked ->
+                                sel1 = checked
+                                sel2 = checked
+                                sel3 = checked
+                            }
+                        )
+                        Text("全选", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
                     }
 
-                    Button(
-                        onClick = {
-                            val preset = com.todo.app.data.model.GlobalReminderRule(
-                                id = UUID.randomUUID().toString(),
-                                enabled = true,
-                                time = "16:00",
-                                condition = "unconditional",
-                                taskScope = "all",
-                                title = "不要放弃下午四点",
-                                body = "不要温和地走进那个良夜"
-                            )
-                            val updatedList = globalRules + preset
-                            globalRules = updatedList
-                            viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
-                            showPresetDialog = false
-                        },
-                        modifier = Modifier.fillMaxWidth()
+                    Divider()
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { sel1 = !sel1 },
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("16:00 | 无条件 | 不要放弃下午四点")
+                        Checkbox(checked = sel1, onCheckedChange = { sel1 = it })
+                        Text("12:00 | 尚未完成任何 | 每一个不曾起舞...", style = MaterialTheme.typography.bodySmall)
                     }
 
-                    Button(
-                        onClick = {
-                            val preset = com.todo.app.data.model.GlobalReminderRule(
-                                id = UUID.randomUUID().toString(),
-                                enabled = true,
-                                time = "20:00",
-                                condition = "any_remaining",
-                                taskScope = "today_only",
-                                title = "",
-                                body = "截至（20:00），仅今日任务还有 {remaining_count} 项未完成"
-                            )
-                            val updatedList = globalRules + preset
-                            globalRules = updatedList
-                            viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
-                            showPresetDialog = false
-                        },
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { sel2 = !sel2 },
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("20:00 | 存在未完成(仅今日) | 截至（20:00）...")
+                        Checkbox(checked = sel2, onCheckedChange = { sel2 = it })
+                        Text("16:00 | 无条件 | Do not go gentle into...", style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { sel3 = !sel3 },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(checked = sel3, onCheckedChange = { sel3 = it })
+                        Text("20:00 | 存在未完成(仅今日) | 截至（20:00）...", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             },
-            confirmButton = {},
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val newPresets = mutableListOf<com.todo.app.data.model.GlobalReminderRule>()
+                        if (sel1) {
+                            newPresets.add(
+                                com.todo.app.data.model.GlobalReminderRule(
+                                    id = UUID.randomUUID().toString(),
+                                    enabled = true,
+                                    time = "12:00",
+                                    condition = "none_completed",
+                                    taskScope = "all",
+                                    title = "",
+                                    body = "每一个不曾起舞的日子，都是对生命的辜负"
+                                )
+                            )
+                        }
+                        if (sel2) {
+                            newPresets.add(
+                                com.todo.app.data.model.GlobalReminderRule(
+                                    id = UUID.randomUUID().toString(),
+                                    enabled = true,
+                                    time = "16:00",
+                                    condition = "unconditional",
+                                    taskScope = "all",
+                                    title = "",
+                                    body = "不要温和地走进那个良夜"
+                                )
+                            )
+                        }
+                        if (sel3) {
+                            newPresets.add(
+                                com.todo.app.data.model.GlobalReminderRule(
+                                    id = UUID.randomUUID().toString(),
+                                    enabled = true,
+                                    time = "20:00",
+                                    condition = "any_remaining",
+                                    taskScope = "today_only",
+                                    title = "",
+                                    body = "截至（20:00），仅今日任务还有 {remaining_count} 项未完成"
+                                )
+                            )
+                        }
+                        if (newPresets.isNotEmpty()) {
+                            val updatedList = globalRules + newPresets
+                            globalRules = updatedList
+                            viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
+                        }
+                        showPresetDialog = false
+                    }
+                ) {
+                    Text("导入选中项")
+                }
+            },
             dismissButton = {
-                TextButton(onClick = { showPresetDialog = false }) { Text("关闭") }
+                TextButton(onClick = { showPresetDialog = false }) { Text("取消") }
             }
         )
     }

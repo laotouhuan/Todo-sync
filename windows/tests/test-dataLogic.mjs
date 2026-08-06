@@ -69,7 +69,7 @@ function migrateAndNormalize(todo) {
 function mergeReminderSettings(localData, cloudData) {
     const ls = localData?.reminder_settings;
     const cs = cloudData?.reminder_settings;
-    if (!ls && !cs) return { privacy_mode: false, global_rules: [] };
+    if (!ls && !cs) return { enabled: true, privacy_mode: false, global_rules: [] };
     if (!ls) return cs;
     if (!cs) return ls;
     const lt = localData?.last_updated || '';
@@ -84,14 +84,14 @@ function mergeTodoData(localData, cloudData) {
         }
         const data = cloudData || { version: 1, last_updated: new Date().toISOString(), todos: [] };
         if (!data.reminder_settings) {
-            data.reminder_settings = { privacy_mode: false, global_rules: [] };
+            data.reminder_settings = { enabled: true, privacy_mode: false, global_rules: [] };
         }
         return { data, changed: true };
     }
     if (!cloudData || !cloudData.todos) {
         localData.todos.forEach(migrateAndNormalize);
         if (!localData.reminder_settings) {
-            localData.reminder_settings = { privacy_mode: false, global_rules: [] };
+            localData.reminder_settings = { enabled: true, privacy_mode: false, global_rules: [] };
         }
         return { data: localData, changed: false };
     }
