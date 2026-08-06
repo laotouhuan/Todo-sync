@@ -2807,3 +2807,97 @@ input:checked + .slider:before {
   letter-spacing: 0.5px;
 }
 
+/* ====== Dynamic Variable Helpers & Preview ====== */
+.rule-var-autocomplete {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10000;
+  background: var(--modal-bg-solid, rgba(22, 22, 30, 0.96));
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(20px);
+  max-height: 180px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 280px;
+  margin-top: 4px;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+/* 自定义精致滚动条 */
+.rule-var-autocomplete::-webkit-scrollbar {
+  width: 5px;
+}
+
+.rule-var-autocomplete::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 4px;
+}
+
+.rule-var-autocomplete::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.rule-var-autocomplete::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-color, #7b61ff);
+}
+
+.rule-var-item {
+  padding: 7px 10px;
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-radius: 6px;
+  margin-bottom: 2px;
+  transition: all 0.12s ease;
+}
+
+.rule-var-item:hover,
+.rule-var-item.active {
+  background: rgba(123, 97, 255, 0.25);
+  color: #fff;
+}
+
+.rule-var-item .var-code {
+  color: #fadb14;
+  font-family: monospace;
+  font-weight: 600;
+}
+
+.rule-var-item .var-label {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+.rule-live-preview {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(123, 97, 255, 0.12);
+  border: 1px solid rgba(123, 97, 255, 0.3);
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  line-height: 1.4;
+  word-break: break-all;
+  animation: fadeIn 0.15s ease;
+}
+
+.rule-live-preview-title {
+  font-size: 0.68rem;
+  color: var(--accent-color);
+  font-weight: 600;
+  margin-bottom: 3px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+

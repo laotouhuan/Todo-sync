@@ -64,9 +64,29 @@ class ReminderReceiver : BroadcastReceiver() {
         if (!shouldTrigger) return
 
         val remainingCount = scopedTodos.count { !it.completed }
+        val completedCount = scopedTodos.count { it.completed }
+        val totalCount = scopedTodos.size
+        val overdueCount = scopedTodos.count { !it.completed && (it.date?.let { d -> d < todayStr } == true) }
+        val rateVal = if (totalCount > 0) Math.round((completedCount.toDouble() / totalCount) * 100).toInt() else 0
+
+        val now = java.time.LocalTime.now()
+        val nowTimeStr = String.format("%02d:%02d", now.hour, now.minute)
+
+        val todayDate = java.time.LocalDate.now()
+        val todayDateStr = String.format("%02d月%02d日", todayDate.monthValue, todayDate.dayOfMonth)
+        val weekdays = arrayOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")
+        val weekdayStr = weekdays[todayDate.dayOfWeek.value % 7]
+
         val resolvedBody = rule.body
             .replace("{time}", rule.time)
+            .replace("{now_time}", nowTimeStr)
             .replace("{remaining_count}", remainingCount.toString())
+            .replace("{completed_count}", completedCount.toString())
+            .replace("{total_count}", totalCount.toString())
+            .replace("{overdue_count}", overdueCount.toString())
+            .replace("{completion_rate}", "$rateVal%")
+            .replace("{today_date}", todayDateStr)
+            .replace("{weekday}", weekdayStr)
 
         val notification = NotificationHelper.buildGlobalNotification(context, rule, resolvedBody)
         val requestCode = "global_$ruleId".hashCode()

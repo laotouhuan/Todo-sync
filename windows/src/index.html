@@ -296,6 +296,31 @@
           </div>
         </div>
 
+        <!-- 任务提醒 -->
+        <div class="date-time-row" id="edit-reminder-row" style="margin-bottom: 12px;">
+          <div class="input-group" style="flex: 1;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label for="edit-reminder-switch">设置任务提醒</label>
+              <label class="switch">
+                <input type="checkbox" id="edit-reminder-switch">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div id="edit-reminder-detail" style="display: none; margin-top: 6px;">
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="date" id="edit-reminder-date" style="flex: 1;" />
+                <input type="text" id="edit-reminder-time" placeholder="HH:mm" style="flex: 1;" maxlength="5" />
+              </div>
+              <div id="edit-reminder-repeat-row" style="display: none; margin-top: 6px;">
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--text-secondary); cursor: pointer; user-select: none;">
+                  <input type="checkbox" id="edit-reminder-repeat-daily" />
+                  <span>每日重复此提醒</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 目标次数 -->
         <div class="input-group" id="target-count-group" style="display: none; margin-bottom: 12px;">
           <label for="edit-target-count">目标次数 (不填为纯打卡)</label>
