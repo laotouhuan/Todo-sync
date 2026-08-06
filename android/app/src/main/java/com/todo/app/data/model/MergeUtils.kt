@@ -124,15 +124,27 @@ object MergeUtils {
                     }
                 }
                 merged[id] = updatedTodo
-            } else {
-                merged[id] = l ?: c!!
+            } else if (l != null) {
+                merged[id] = l
+            } else if (c != null) {
+                merged[id] = c
             }
         }
+        val mergedSettings = mergeReminderSettings(local, cloud)
         return TodoData(
             version = local.version,
             last_updated = nowIso(),
-            todos = merged.values.sortedByDescending { it.createdAt }
+            todos = merged.values.sortedByDescending { it.createdAt },
+            reminderSettings = mergedSettings
         )
+    }
+
+    private fun mergeReminderSettings(local: TodoData, cloud: TodoData): ReminderSettings {
+        val ls = local.reminderSettings
+        val cs = cloud.reminderSettings
+        val lTime = try { OffsetDateTime.parse(local.last_updated) } catch (_: Exception) { OffsetDateTime.MIN }
+        val cTime = try { OffsetDateTime.parse(cloud.last_updated) } catch (_: Exception) { OffsetDateTime.MIN }
+        return if (cTime.isAfter(lTime)) cs else ls
     }
 
     private fun mergeCompletedDates(

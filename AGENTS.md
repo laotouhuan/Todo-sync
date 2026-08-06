@@ -281,6 +281,7 @@ Windows 端使用以下机制保证文件安全：
 2. **禁止导入不存在的名称**：`import { foo } from './bar.js'` 中的 `foo` 必须在 `bar.js` 中有对应的 `export`。ES 模块在链接阶段会检查所有命名导出，缺失的导入将导致致命错误。
 3. **禁止重复声明 export**：同一个文件中不可出现两个同名的 `export function`（如重复的 `getLastWeekString`），否则触发 `SyntaxError`。
 4. **提取/移动函数时必须同步清理**：将函数从 `main.js` 提取到 `dateUtils.js` 时，必须同时更新 `main.js` 的 import 列表，删除已不存在的引用，添加新的引用。
+5. **保护 `index.html` 核心入口标签**：`index.html` 末尾必须保留 `<script type="module" src="/main.js"></script>`。编辑 HTML 时如意外清除了该标签，将导致前端代码完全不会加载且没有任何控制台报错（静默失效，表现为点击按钮无任何反应）。
 
 ---
 

@@ -185,6 +185,14 @@ for (const ref of scriptRefs) {
     }
 }
 
+// 显式断言核心入口文件 main.js 必须被 index.html 引用
+const hasMainScript = scriptRefs.some(ref => ref === 'main.js' || ref === '/main.js');
+if (hasMainScript) {
+    pass('index.html 已包含核心入口逻辑 main.js 的引用');
+} else {
+    fail('index.html 缺失核心入口代码引用 (<script type="module" src="/main.js"></script>)，会导致应用静默失效！');
+}
+
 // ====== 检查 5: JSON Schema 文件可用性 ======
 console.log('\n🔍 检查 5: 数据契约文件检查');
 

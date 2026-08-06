@@ -17,8 +17,17 @@ import {
     isWeekDate, isMonthDate, isOverdue, getDateLabel, getCompletionStatusLabel,
     validateAndNormalizeTime,
     sortFunc, parseInputSyntax, createTodo, groupTodosByDate,
-    categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade
+    categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade, generateUUID
 } from '../src/dateUtils.js';
+
+describe('generateUUID', () => {
+    it('生成标准 UUID v4 格式字符串', () => {
+        const uuid = generateUUID();
+        assert.equal(typeof uuid, 'string');
+        assert.equal(uuid.length, 36);
+        assert.match(uuid, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    });
+});
 
 describe('validateAndNormalizeTime', () => {
     it('合法时间 14:30 返回 valid 且规范化', () => {

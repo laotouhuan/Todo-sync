@@ -5,7 +5,7 @@ import {
     isWeekDate, isMonthDate, isOverdue, getDateLabel, getCompletionStatusLabel,
     getLocalDateStringFromISO, validateAndNormalizeTime,
     sortFunc, parseInputSyntax, createTodo, groupTodosByDate,
-    categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade
+    categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade, generateUUID
 } from './dateUtils.js';
 
 const { invoke } = window.__TAURI__.core;
@@ -268,6 +268,7 @@ function migrateAndNormalize(todo) {
     todo.task_type = todo.task_type || 'normal';
     todo.completed_dates = todo.completed_dates || [];
     todo.target_count = todo.target_count ?? null;
+    if (todo.reminder === undefined) todo.reminder = null;
     if (todo.completed === null) todo.completed = false;
     if (todo.subtasks) {
         todo.subtasks.forEach(s => {
@@ -294,15 +295,33 @@ function resolveCheckinConflict(checkinL, checkinC, lTime, cTime) {
     return null;
 }
 
+function mergeReminderSettings(localData, cloudData) {
+    const ls = localData?.reminder_settings;
+    const cs = cloudData?.reminder_settings;
+    if (!ls && !cs) return { privacy_mode: false, global_rules: [] };
+    if (!ls) return cs;
+    if (!cs) return ls;
+    const lt = localData?.last_updated || '';
+    const ct = cloudData?.last_updated || '';
+    return ct > lt ? cs : ls;
+}
+
 function mergeTodoData(localData, cloudData) {
     if (!localData || !localData.todos) {
         if (cloudData && cloudData.todos) {
             cloudData.todos.forEach(migrateAndNormalize);
         }
-        return { data: cloudData, changed: true };
+        const data = cloudData || { version: 1, last_updated: new Date().toISOString(), todos: [] };
+        if (!data.reminder_settings) {
+            data.reminder_settings = { privacy_mode: false, global_rules: [] };
+        }
+        return { data, changed: true };
     }
     if (!cloudData || !cloudData.todos) {
         localData.todos.forEach(migrateAndNormalize);
+        if (!localData.reminder_settings) {
+            localData.reminder_settings = { privacy_mode: false, global_rules: [] };
+        }
         return { data: localData, changed: false };
     }
 
@@ -376,11 +395,15 @@ function mergeTodoData(localData, cloudData) {
         }
     }
     mergedTodos.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    const mergedReminderSettings = mergeReminderSettings(localData, cloudData);
+
     return {
         data: {
             version: localData.version || 1,
             last_updated: new Date().toISOString(),
-            todos: mergedTodos
+            todos: mergedTodos,
+            reminder_settings: mergedReminderSettings
         },
         changed: changed || mergedTodos.length !== localData.todos.length
     };
@@ -724,6 +747,150 @@ function purgeOldDeletedTodos() {
     }
 }
 
+// ====== Global Reminder Rules Helpers ======
+const SMART_PRESET_MATRIX = {
+    'any_remaining_all': '截至（{time}），全部任务还有 {remaining_count} 项未完成',
+    'any_remaining_today_only': '截至（{time}），仅今日任务还有 {remaining_count} 项未完成',
+    'any_remaining_recurring_only': '截至（{time}），打卡任务还有 {remaining_count} 项未完成',
+    'none_completed_all': '截至（{time}），今日尚未完成任何任务哦',
+    'none_completed_today_only': '截至（{time}），今日待办任务尚未完成任何一项哦',
+    'none_completed_recurring_only': '截至（{time}），今日习惯打卡尚未完成任何一项哦',
+    'unconditional_all': '到了设定的提醒时间（{time}），记得按时处理工作与学习'
+};
+
+function getSmartPresetBody(condition, taskScope, time = '12:00') {
+    const key = condition === 'unconditional' ? 'unconditional_all' : `${condition}_${taskScope}`;
+    const tmpl = SMART_PRESET_MATRIX[key] || SMART_PRESET_MATRIX['unconditional_all'];
+    return tmpl.replace('{time}', time);
+}
+
+function renderGlobalRules(rules = []) {
+    const container = document.getElementById('global-rules-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    rules.forEach((rule) => {
+        const card = document.createElement('div');
+        card.className = 'global-rule-card';
+        card.dataset.ruleId = rule.id || generateUUID();
+
+        const summaryText = rule.condition === 'unconditional'
+            ? '无条件定时提醒'
+            : `${rule.condition === 'none_completed' ? '未完成任何' : '存在未完成'} · ${rule.task_scope === 'all' ? '全部任务' : (rule.task_scope === 'today_only' ? '仅今日' : '仅打卡')}`;
+
+        card.innerHTML = `
+            <div class="rule-header" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <label class="switch" style="flex-shrink: 0;" onclick="event.stopPropagation();">
+                    <input type="checkbox" class="rule-enabled-switch" ${rule.enabled !== false ? 'checked' : ''}>
+                    <span class="slider"></span>
+                </label>
+                <span class="rule-time-label" style="font-weight: 600; font-size: 0.9rem;">${escapeHtml(rule.time || '12:00')}</span>
+                <span class="rule-summary" style="font-size: 0.75rem; color: var(--text-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(summaryText)}</span>
+                <button type="button" class="rule-expand-btn icon-btn-small" style="background: none; border: none; color: var(--text-secondary); cursor: pointer;">▼</button>
+                <button type="button" class="rule-delete-btn icon-btn-small" style="background: none; border: none; color: var(--danger-color); cursor: pointer;" onclick="event.stopPropagation();">✕</button>
+            </div>
+            <div class="rule-detail" style="display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
+                <div class="input-group" style="margin-bottom: 8px;">
+                    <label>提醒时间</label>
+                    <input type="text" class="rule-time-input" value="${escapeHtml(rule.time || '12:00')}" placeholder="HH:mm" maxlength="5" />
+                </div>
+                <div class="input-group" style="margin-bottom: 8px;">
+                    <label>触发判定条件</label>
+                    <select class="rule-condition-select custom-select">
+                        <option value="none_completed" ${rule.condition === 'none_completed' ? 'selected' : ''}>今日尚未完成任何任务时</option>
+                        <option value="any_remaining" ${rule.condition === 'any_remaining' ? 'selected' : ''}>今日存在未完成任务时</option>
+                        <option value="unconditional" ${rule.condition === 'unconditional' ? 'selected' : ''}>无条件定时提醒</option>
+                    </select>
+                </div>
+                <div class="input-group rule-scope-group" style="margin-bottom: 8px; display: ${rule.condition === 'unconditional' ? 'none' : 'block'};">
+                    <label>任务类型筛选</label>
+                    <select class="rule-scope-select custom-select">
+                        <option value="all" ${rule.task_scope === 'all' ? 'selected' : ''}>全部任务</option>
+                        <option value="today_only" ${rule.task_scope === 'today_only' ? 'selected' : ''}>仅今日任务</option>
+                        <option value="recurring_only" ${rule.task_scope === 'recurring_only' ? 'selected' : ''}>仅打卡/重复任务</option>
+                    </select>
+                </div>
+                <div class="input-group" style="margin-bottom: 8px;">
+                    <label>通知标题（留空默认 Todo）</label>
+                    <input type="text" class="rule-title-input" value="${escapeHtml(rule.title || '')}" placeholder="Todo" />
+                </div>
+                <div class="input-group">
+                    <label>通知正文</label>
+                    <textarea class="rule-body-input" rows="2" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; resize: vertical;" placeholder="自定义或使用预设内容">${escapeHtml(rule.body || '')}</textarea>
+                </div>
+            </div>
+        `;
+
+        const header = card.querySelector('.rule-header');
+        const detail = card.querySelector('.rule-detail');
+        const expandBtn = card.querySelector('.rule-expand-btn');
+        header.addEventListener('click', () => {
+            const isHidden = detail.style.display === 'none';
+            detail.style.display = isHidden ? 'block' : 'none';
+            expandBtn.textContent = isHidden ? '▲' : '▼';
+        });
+
+        const deleteBtn = card.querySelector('.rule-delete-btn');
+        deleteBtn.addEventListener('click', () => {
+            card.remove();
+        });
+
+        const condSelect = card.querySelector('.rule-condition-select');
+        const scopeSelect = card.querySelector('.rule-scope-select');
+        const scopeGroup = card.querySelector('.rule-scope-group');
+        const timeInput = card.querySelector('.rule-time-input');
+        const bodyInput = card.querySelector('.rule-body-input');
+        const timeLabel = card.querySelector('.rule-time-label');
+
+        timeInput.addEventListener('input', () => {
+            timeLabel.textContent = timeInput.value || '12:00';
+        });
+
+        function updateSmartBody() {
+            const cVal = condSelect.value;
+            const sVal = scopeSelect.value;
+            const tVal = timeInput.value.trim() || '12:00';
+            scopeGroup.style.display = cVal === 'unconditional' ? 'none' : 'block';
+            const currentBody = bodyInput.value.trim();
+            const isDefaultTmpl = !currentBody || Object.values(SMART_PRESET_MATRIX).some(tmpl => {
+                const prefix = tmpl.split('{time}')[0];
+                return currentBody.startsWith(prefix);
+            });
+            if (isDefaultTmpl) {
+                bodyInput.value = getSmartPresetBody(cVal, sVal, tVal);
+            }
+        }
+
+        condSelect.addEventListener('change', updateSmartBody);
+        scopeSelect.addEventListener('change', updateSmartBody);
+
+        container.appendChild(card);
+    });
+}
+
+function collectGlobalRulesFromUI() {
+    const cards = Array.from(document.querySelectorAll('#global-rules-list .global-rule-card'));
+    return cards.map(card => {
+        const id = card.dataset.ruleId || generateUUID();
+        const enabled = card.querySelector('.rule-enabled-switch')?.checked !== false;
+        const timeRaw = card.querySelector('.rule-time-input')?.value.trim() || '12:00';
+        const validatedTime = validateAndNormalizeTime(timeRaw, '12:00').value;
+        const condition = card.querySelector('.rule-condition-select')?.value || 'unconditional';
+        const taskScope = card.querySelector('.rule-scope-select')?.value || 'all';
+        const title = card.querySelector('.rule-title-input')?.value.trim() || '';
+        const body = card.querySelector('.rule-body-input')?.value.trim() || getSmartPresetBody(condition, taskScope, validatedTime);
+        return {
+            id,
+            enabled,
+            time: validatedTime !== '--:--' ? validatedTime : '12:00',
+            condition,
+            task_scope: taskScope,
+            title,
+            body
+        };
+    });
+}
+
 function saveData() {
     _saveQueue = _saveQueue.then(() => _doSaveData()).catch(e => console.error('Save failed:', e));
     return _saveQueue;
@@ -758,6 +925,20 @@ async function _doSaveData() {
     }
 }
 
+function isReminderOverdue(todo) {
+    if (!todo.reminder || todo.completed || todo.deleted) return false;
+    const now = new Date();
+    const rDate = todo.reminder.reminder_date || todo.date || getTodayString();
+    const rTime = todo.reminder.reminder_time;
+    if (!rDate || !rTime) return false;
+    try {
+        const reminderDateTime = new Date(`${rDate}T${rTime}:00`);
+        return now > reminderDateTime;
+    } catch (_) {
+        return false;
+    }
+}
+
 // ====== Meta HTML for todo items ======
 function getMetaHtml(todo, todayStr, tomorrowStr) {
     let html = '';
@@ -768,6 +949,9 @@ function getMetaHtml(todo, todayStr, tomorrowStr) {
 
         // 已完成和未完成任务都显示截止日期，确保已完成历史中保留原始截止信息
         html += `<span class="meta-item date ${dateClass}">📅 ${escapeHtml(dateLabel)}</span>`;
+    }
+    if (isReminderOverdue(todo)) {
+        html += `<span class="reminder-overdue-badge">提醒已过期</span>`;
     }
     // Time rendering removed as per v1.0.2 design
     if (todo.recurring && todo.recurring !== 'none') {
@@ -1000,7 +1184,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
                     clone.order = -Date.now();
                     clone.subtasks = t.subtasks
                         ? deepClone(t.subtasks).map(s => {
-                            s.id = crypto.randomUUID();
+                            s.id = generateUUID();
                             s.completed = false;
                             s.completed_at = null;
                             return s;
@@ -1728,6 +1912,21 @@ async function _doAutoSave() {
             }
         }
 
+        const reminderSwitch = document.getElementById('edit-reminder-switch');
+        if (reminderSwitch && reminderSwitch.checked) {
+            const rDate = document.getElementById('edit-reminder-date').value || null;
+            const rTimeRaw = document.getElementById('edit-reminder-time').value.trim();
+            const rRepeat = document.getElementById('edit-reminder-repeat-daily').checked;
+            const normalizedTime = validateAndNormalizeTime(rTimeRaw, '09:00').value;
+            appState.todoData.todos[index].reminder = {
+                reminder_date: rDate,
+                reminder_time: normalizedTime !== '--:--' ? normalizedTime : '09:00',
+                repeat_daily: rRepeat
+            };
+        } else {
+            appState.todoData.todos[index].reminder = null;
+        }
+
         appState.todoData.todos[index].subtasks = deepClone(appState.currentEditingSubtasks);
         appState.todoData.todos[index].updated_at = new Date().toISOString();
 
@@ -1857,6 +2056,27 @@ function openEditModal(todo) {
             completedAtRow.style.display = 'none';
         }
     }
+
+    // 提醒控件回填
+    const reminderSwitch = document.getElementById('edit-reminder-switch');
+    const reminderDetail = document.getElementById('edit-reminder-detail');
+    const reminderRepeatRow = document.getElementById('edit-reminder-repeat-row');
+    const hasReminder = todo.reminder !== null && todo.reminder !== undefined;
+    if (reminderSwitch) reminderSwitch.checked = hasReminder;
+    if (reminderDetail) reminderDetail.style.display = hasReminder ? 'block' : 'none';
+
+    if (hasReminder && todo.reminder) {
+        document.getElementById('edit-reminder-date').value = todo.reminder.reminder_date || todo.date || getTodayString();
+        document.getElementById('edit-reminder-time').value = todo.reminder.reminder_time || '09:00';
+        document.getElementById('edit-reminder-repeat-daily').checked = todo.reminder.repeat_daily || false;
+    } else {
+        document.getElementById('edit-reminder-date').value = todo.date || getTodayString();
+        document.getElementById('edit-reminder-time').value = '09:00';
+        document.getElementById('edit-reminder-repeat-daily').checked = false;
+    }
+
+    const isRecurring = taskTypeVal === 'daily_repeat' || taskTypeVal === 'weekly_checkin' || taskTypeVal === 'monthly_checkin';
+    if (reminderRepeatRow) reminderRepeatRow.style.display = isRecurring ? 'block' : 'none';
 
     appState.currentEditingSubtasks = todo.subtasks ? deepClone(todo.subtasks) : [];
     renderEditSubtasks();
@@ -2629,7 +2849,11 @@ function renderHealth(todayStr, tomorrowStr) {
     // 1.1 平均任务寿命 (所有任务从设置到完成的平均时间)
     let totalCompletedAge = 0;
     completedTodos.forEach(t => {
-        const age = calcTaskAgeDays(t.created_at, new Date(t.completed_at));
+        let ct = new Date(t.completed_at);
+        if (t.completed_at.length === 10) {
+            ct = new Date(`${t.completed_at}T00:00:00`);
+        }
+        const age = calcTaskAgeDays(t.created_at, ct);
         if (age >= 0) totalCompletedAge += age;
     });
     const avgCompletedLife = completedTodos.length === 0 ? 0 : totalCompletedAge / completedTodos.length;
@@ -2665,7 +2889,15 @@ function renderHealth(todayStr, tomorrowStr) {
             return; // 今天创建的任务不参与昨天的基准计算
         }
         
-        const completedTime = t.completed_at ? new Date(t.completed_at) : null;
+        let completedTime = null;
+        if (t.completed_at) {
+            // Avoid new Date("YYYY-MM-DD") yielding 08:00 local time
+            if (t.completed_at.length === 10) {
+                completedTime = new Date(`${t.completed_at}T00:00:00`);
+            } else {
+                completedTime = new Date(t.completed_at);
+            }
+        }
         const wasCompletedBeforeToday = t.completed && (!completedTime || isNaN(completedTime.getTime()) || completedTime < localTodayStart);
         
         if (wasCompletedBeforeToday) {
@@ -3405,8 +3637,7 @@ function closeImportModal() {
     document.getElementById('import-modal').classList.remove('active');
 }
 
-// ====== DOMContentLoaded: Init Event Listeners ======
-window.addEventListener("DOMContentLoaded", () => {
+function initApp() {
     // 初始化 DOM 元素
     listEl = document.getElementById('todo-list');
     formEl = document.getElementById('add-form');
@@ -3492,21 +3723,45 @@ window.addEventListener("DOMContentLoaded", () => {
 
     if (settingsBtn) {
         settingsBtn.addEventListener('click', async () => {
-            appState.appConfig = await invoke("get_app_config");
-            settingSyncMode.value = appState.appConfig.sync_mode || 'local';
-            settingSyncPath.value = appState.appConfig.sync_path || '';
-            settingWebdavUrl.value = appState.appConfig.webdav_url || 'https://dav.jianguoyun.com/dav/';
-            settingWebdavUser.value = appState.appConfig.webdav_username || '';
-            settingWebdavPass.value = appState.appConfig.webdav_password || '';
-            settingWebdavFilepath.value = appState.appConfig.webdav_filepath || '我的坚果云/to-do/todo_data.json';
+            if (settingsModal) {
+                settingsModal.classList.add('active');
+            }
+
+            try {
+                const fetchedConfig = await invoke("get_app_config");
+                if (fetchedConfig) {
+                    appState.appConfig = fetchedConfig;
+                }
+            } catch (e) {
+                console.error("Failed to fetch app config:", e);
+            }
+
+            const config = appState.appConfig || {};
+
+            if (settingSyncMode) settingSyncMode.value = config.sync_mode || 'local';
+            if (settingSyncPath) settingSyncPath.value = config.sync_path || '';
+            if (settingWebdavUrl) settingWebdavUrl.value = config.webdav_url || 'https://dav.jianguoyun.com/dav/';
+            if (settingWebdavUser) settingWebdavUser.value = config.webdav_username || '';
+            if (settingWebdavPass) settingWebdavPass.value = config.webdav_password || '';
+            if (settingWebdavFilepath) settingWebdavFilepath.value = config.webdav_filepath || '我的坚果云/to-do/todo_data.json';
             
-            // 重置侧边栏 Tab 为第一个 panel-sync
+            // 重置侧边栏 Tab 为第一个 panel-about
             tabBtns.forEach(b => b.classList.remove('active'));
             panels.forEach(p => p.classList.remove('active'));
-            const firstTab = document.querySelector('.settings-tab-btn[data-target="panel-sync"]');
+            const firstTab = document.querySelector('.settings-tab-btn[data-target="panel-about"]');
             if (firstTab) firstTab.classList.add('active');
-            const firstPanel = document.getElementById('panel-sync');
+            const firstPanel = document.getElementById('panel-about');
             if (firstPanel) firstPanel.classList.add('active');
+
+            // 填充提醒设置
+            const rs = appState.todoData?.reminder_settings || { privacy_mode: false, global_rules: [] };
+            const privacySelect = document.getElementById('setting-privacy-mode');
+            if (privacySelect) privacySelect.value = String(rs.privacy_mode || false);
+            try {
+                renderGlobalRules(rs.global_rules || []);
+            } catch (e) {
+                console.error("Failed to render global rules:", e);
+            }
 
             // 获取并显示当前版本号
             try {
@@ -3519,23 +3774,41 @@ window.addEventListener("DOMContentLoaded", () => {
                 console.error("Failed to fetch app version:", e);
             }
 
-            if (settingSyncMode.value === 'webdav') {
-                settingLocalGroup.style.display = 'none';
-                settingWebdavGroup.style.display = 'block';
+            const modeVal = settingSyncMode ? settingSyncMode.value : 'local';
+            if (modeVal === 'webdav') {
+                if (settingLocalGroup) settingLocalGroup.style.display = 'none';
+                if (settingWebdavGroup) settingWebdavGroup.style.display = 'block';
             } else {
-                settingLocalGroup.style.display = 'block';
-                settingWebdavGroup.style.display = 'none';
+                if (settingLocalGroup) settingLocalGroup.style.display = 'block';
+                if (settingWebdavGroup) settingWebdavGroup.style.display = 'none';
             }
-            document.getElementById('setting-nickname').value = appState.appConfig.nickname || '';
-            document.getElementById('setting-default-due-date').value = appState.appConfig.default_due_date || 'none';
-            document.getElementById('setting-default-insertion').value = appState.appConfig.default_insertion || 'top';
+
+            const nicknameEl = document.getElementById('setting-nickname');
+            if (nicknameEl) nicknameEl.value = config.nickname || '';
+
+            const dueDateEl = document.getElementById('setting-default-due-date');
+            if (dueDateEl) dueDateEl.value = config.default_due_date || 'none';
+
+            const insertionEl = document.getElementById('setting-default-insertion');
+            if (insertionEl) insertionEl.value = config.default_insertion || 'top';
             
-            document.getElementById('share-code-output').style.display = 'none';
-            document.getElementById('share-code-output').textContent = '';
-            document.getElementById('import-code-input').value = '';
-            document.getElementById('import-name-input').value = '';
-            renderCollabListInSettings();
-            settingsModal.classList.add('active');
+            const shareContainer = document.getElementById('share-output-container');
+            if (shareContainer) shareContainer.style.display = 'none';
+
+            const shareCodeEl = document.getElementById('share-code-output');
+            if (shareCodeEl) shareCodeEl.textContent = '';
+
+            const importCodeEl = document.getElementById('import-code-input');
+            if (importCodeEl) importCodeEl.value = '';
+
+            const importNameEl = document.getElementById('import-name-input');
+            if (importNameEl) importNameEl.value = '';
+
+            try {
+                renderCollabListInSettings();
+            } catch (e) {
+                console.error("Failed to render collab list:", e);
+            }
         });
 
         settingSyncMode.addEventListener('change', (e) => {
@@ -3581,9 +3854,99 @@ window.addEventListener("DOMContentLoaded", () => {
             };
             await invoke("save_app_config", { config: newConfig });
             appState.appConfig = newConfig;
+
+            // 保存提醒配置到 todoData
+            const privacySelect = document.getElementById('setting-privacy-mode');
+            appState.todoData.reminder_settings = {
+                privacy_mode: privacySelect ? (privacySelect.value === 'true') : false,
+                global_rules: collectGlobalRulesFromUI()
+            };
             
             settingsModal.classList.remove('active');
+            await saveData();
             await loadData();
+        });
+
+        // 绑定新增全局规则与导入预设按钮
+        const addRuleBtn = document.getElementById('add-global-rule-btn');
+        if (addRuleBtn) {
+            addRuleBtn.addEventListener('click', () => {
+                const currentRules = collectGlobalRulesFromUI();
+                currentRules.push({
+                    id: generateUUID(),
+                    enabled: true,
+                    time: '12:00',
+                    condition: 'unconditional',
+                    task_scope: 'all',
+                    title: '',
+                    body: getSmartPresetBody('unconditional', 'all', '12:00')
+                });
+                renderGlobalRules(currentRules);
+            });
+        }
+
+        const importPresetBtn = document.getElementById('import-preset-btn');
+        const presetModal = document.getElementById('preset-modal');
+        const closePresetModalBtn = document.getElementById('close-preset-modal-btn');
+        if (importPresetBtn && presetModal) {
+            importPresetBtn.addEventListener('click', () => {
+                presetModal.style.display = 'flex';
+                presetModal.classList.add('active');
+            });
+        }
+        if (closePresetModalBtn && presetModal) {
+            closePresetModalBtn.addEventListener('click', () => {
+                presetModal.style.display = 'none';
+                presetModal.classList.remove('active');
+            });
+        }
+
+        const presetItemBtns = document.querySelectorAll('.import-preset-item-btn');
+        presetItemBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const presetId = btn.getAttribute('data-preset');
+                const currentRules = collectGlobalRulesFromUI();
+                let newRule = null;
+                if (presetId === '1') {
+                    newRule = {
+                        id: generateUUID(),
+                        enabled: true,
+                        time: '12:00',
+                        condition: 'none_completed',
+                        task_scope: 'all',
+                        title: '',
+                        body: '每一个不曾起舞的日子，都是对生命的辜负'
+                    };
+                } else if (presetId === '2') {
+                    newRule = {
+                        id: generateUUID(),
+                        enabled: true,
+                        time: '16:00',
+                        condition: 'unconditional',
+                        task_scope: 'all',
+                        title: '不要放弃下午四点',
+                        body: '不要温和地走进那个良夜'
+                    };
+                } else if (presetId === '3') {
+                    newRule = {
+                        id: generateUUID(),
+                        enabled: true,
+                        time: '20:00',
+                        condition: 'any_remaining',
+                        task_scope: 'today_only',
+                        title: '',
+                        body: '截至（20:00），仅今日任务还有 {remaining_count} 项未完成'
+                    };
+                }
+                if (newRule) {
+                    currentRules.push(newRule);
+                    renderGlobalRules(currentRules);
+                }
+                if (presetModal) {
+                    presetModal.style.display = 'none';
+                    presetModal.classList.remove('active');
+                }
+            });
         });
     }
 
@@ -4120,7 +4483,7 @@ window.addEventListener("DOMContentLoaded", () => {
         if (!input) return;
         const content = input.value.trim();
         if (content && appState.currentEditingTodo) {
-            appState.currentEditingSubtasks.unshift({ id: crypto.randomUUID(), content, completed: false });
+            appState.currentEditingSubtasks.unshift({ id: generateUUID(), content, completed: false });
             input.value = '';
             renderEditSubtasks();
             autoSaveEdit();
@@ -4154,11 +4517,11 @@ window.addEventListener("DOMContentLoaded", () => {
                 newTodo.target_count = orig.target_count || null;
                 newTodo.time = orig.time || null;
                 newTodo.recurring = orig.recurring || 'none';
-                newTodo.order = nowMs + orderOffset * 1000;
-                newTodo.created_at = new Date(nowMs + orderOffset * 10).toISOString();
+                newTodo.order = nowMs - orderOffset * 1000;
+                newTodo.created_at = new Date(nowMs - orderOffset * 10).toISOString();
                 orderOffset++;
                 newTodo.subtasks = orig.subtasks ? deepClone(orig.subtasks).map(s => {
-                    s.id = crypto.randomUUID();
+                    s.id = generateUUID();
                     s.completed = false;
                     s.completed_at = null;
                     return s;
@@ -4175,7 +4538,7 @@ window.addEventListener("DOMContentLoaded", () => {
     });
 
     // 绑定编辑模态框自动保存
-    ['edit-content', 'edit-date', 'edit-has-date-switch', 'edit-task-type', 'edit-target-count', 'edit-completed-date', 'edit-completed-time'].forEach(id => {
+    ['edit-content', 'edit-date', 'edit-has-date-switch', 'edit-task-type', 'edit-target-count', 'edit-completed-date', 'edit-completed-time', 'edit-reminder-switch', 'edit-reminder-date', 'edit-reminder-time', 'edit-reminder-repeat-daily'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
             el.addEventListener('change', autoSaveEdit);
@@ -4183,6 +4546,14 @@ window.addEventListener("DOMContentLoaded", () => {
             el.addEventListener('input', autoSaveEdit); // input 事件能在输入时实时进行 debounced 保存
         }
     });
+
+    const reminderSwitchEl = document.getElementById('edit-reminder-switch');
+    if (reminderSwitchEl) {
+        reminderSwitchEl.addEventListener('change', () => {
+            const detailEl = document.getElementById('edit-reminder-detail');
+            if (detailEl) detailEl.style.display = reminderSwitchEl.checked ? 'block' : 'none';
+        });
+    }
 
     const compTimeEl = document.getElementById('edit-completed-time');
     if (compTimeEl) {
@@ -4237,6 +4608,9 @@ window.addEventListener("DOMContentLoaded", () => {
     const taskTypeSelect = document.getElementById('edit-task-type');
     if (taskTypeSelect) {
         taskTypeSelect.addEventListener('change', () => {
+            const reminderRepeatRow = document.getElementById('edit-reminder-repeat-row');
+            const isRecurring = taskTypeSelect.value === 'daily_repeat' || taskTypeSelect.value === 'weekly_checkin' || taskTypeSelect.value === 'monthly_checkin';
+            if (reminderRepeatRow) reminderRepeatRow.style.display = isRecurring ? 'block' : 'none';
             updateEditModalFields(taskTypeSelect.value);
             if (appState.currentEditingTodo) {
                 // 如果是“每天重复”，底层映射为 normal + recurring = daily_repeat
@@ -4561,7 +4935,13 @@ async function createAndAddTodo(raw) {
             invoke('start_drag').catch(err => console.error('Failed to drag:', err));
         }
     });
-});
+}
+
+if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', initApp);
+} else {
+    initApp();
+}
 
 function scheduleMidnightRefresh() {
     const now = new Date();

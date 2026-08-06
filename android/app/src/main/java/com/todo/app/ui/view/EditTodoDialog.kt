@@ -112,7 +112,8 @@ private fun buildUpdatedTodo(
     parentCompleted: Boolean,
     parentCompletedAt: String?,
     completedDates: List<String>,
-    subtasks: List<Subtask>
+    subtasks: List<Subtask>,
+    reminder: com.todo.app.data.model.Reminder? = null
 ): Todo {
     var mappedTaskType = if (selectedTypeUi == TaskType.DAILY_REPEAT) TaskType.NORMAL else selectedTypeUi
     var mappedRecurring = if (selectedTypeUi == TaskType.DAILY_REPEAT) RecurringType.DAILY_REPEAT else RecurringType.NONE
@@ -180,6 +181,7 @@ private fun buildUpdatedTodo(
             }
         } else null,
         subtasks = subtasks,
+        reminder = reminder,
         updatedAt = nowIso()
     )
 }
@@ -226,19 +228,31 @@ fun EditTodoDialog(
         mutableStateOf(if (todo.recurring == RecurringType.DAILY_REPEAT) TaskType.DAILY_REPEAT else todo.taskType)
     }
 
+    var hasReminder by remember(todo.id, todo.reminder) { mutableStateOf(todo.reminder != null) }
+    var reminderTime by remember(todo.id, todo.reminder) { mutableStateOf(todo.reminder?.reminderTime ?: "09:00") }
+    var reminderRepeatDaily by remember(todo.id, todo.reminder) { mutableStateOf(todo.reminder?.repeatDaily ?: false) }
+
+    val currentReminder = if (hasReminder) {
+        com.todo.app.data.model.Reminder(
+            reminderDate = date.takeIf { it.isNotBlank() },
+            reminderTime = validateAndNormalizeTime(reminderTime, "09:00").second.takeIf { it != "--:--" } ?: "09:00",
+            repeatDaily = reminderRepeatDaily
+        )
+    } else null
+
     val performAutoSave = rememberDebouncedAutoSave(delayMs = 300) { t ->
         onAutoSave(t)
     }
 
     val buildAndSave: () -> Unit = {
-        val updated = buildUpdatedTodo(todo, content, date, time, selectedTypeUi, targetCount, parentCompleted, parentCompletedAt, completedDates, subtasks)
+        val updated = buildUpdatedTodo(todo, content, date, time, selectedTypeUi, targetCount, parentCompleted, parentCompletedAt, completedDates, subtasks, currentReminder)
         performAutoSave(updated)
     }
 
     val onUpdateCompletedDates = { newDates: List<String> ->
         val sorted = newDates.sorted()
         completedDates = sorted
-        val updated = buildUpdatedTodo(todo, content, date, time, selectedTypeUi, targetCount, parentCompleted, parentCompletedAt, sorted, subtasks)
+        val updated = buildUpdatedTodo(todo, content, date, time, selectedTypeUi, targetCount, parentCompleted, parentCompletedAt, sorted, subtasks, currentReminder)
         performAutoSave(updated)
     }
 
@@ -309,6 +323,16 @@ fun EditTodoDialog(
                         selectedTypeUi = type
                         buildAndSave()
                     }
+                )
+
+                EditTodoReminderSection(
+                    hasReminder = hasReminder,
+                    onHasReminderChange = { hasReminder = it; buildAndSave() },
+                    reminderTime = reminderTime,
+                    onReminderTimeChange = { reminderTime = it; buildAndSave() },
+                    reminderRepeatDaily = reminderRepeatDaily,
+                    onReminderRepeatDailyChange = { reminderRepeatDaily = it; buildAndSave() },
+                    isRecurring = selectedTypeUi != TaskType.NORMAL
                 )
 
                 if (selectedTypeUi == TaskType.WEEKLY_CHECKIN || selectedTypeUi == TaskType.MONTHLY_CHECKIN) {
@@ -444,6 +468,55 @@ private fun EditTodoTypeSection(
     val selectedTypeIndex = types.indexOf(selectedTypeUi).takeIf { it >= 0 } ?: 0
     SegmentedButton(typeLabels, selectedTypeIndex) {
         onTypeChange(types[it])
+    }
+}
+
+@Composable
+private fun EditTodoReminderSection(
+    hasReminder: Boolean,
+    onHasReminderChange: (Boolean) -> Unit,
+    reminderTime: String,
+    onReminderTimeChange: (String) -> Unit,
+    reminderRepeatDaily: Boolean,
+    onReminderRepeatDailyChange: (Boolean) -> Unit,
+    isRecurring: Boolean
+) {
+    Spacer(Modifier.height(12.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("设置提醒", style = MaterialTheme.typography.titleMedium)
+        Switch(
+            checked = hasReminder,
+            onCheckedChange = onHasReminderChange
+        )
+    }
+
+    if (hasReminder) {
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(
+            value = reminderTime,
+            onValueChange = onReminderTimeChange,
+            label = { Text("提醒时间 (HH:mm)") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        if (isRecurring) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("每天重复提醒", style = MaterialTheme.typography.bodyMedium)
+                Switch(
+                    checked = reminderRepeatDaily,
+                    onCheckedChange = onReminderRepeatDailyChange
+                )
+            }
+        }
     }
 }
 

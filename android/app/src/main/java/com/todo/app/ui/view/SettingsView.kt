@@ -113,7 +113,7 @@ fun SettingsView(viewModel: TodoViewModel) {
     }
 
     var activeTab by remember { mutableStateOf(0) }
-    val tabTitles = listOf("同步", "协作", "偏好", "维护", "关于")
+    val tabTitles = listOf("关于", "提醒", "偏好", "协作", "同步")
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) }
@@ -145,48 +145,98 @@ fun SettingsView(viewModel: TodoViewModel) {
             ) {
                 when (activeTab) {
                     0 -> {
-                        // 1. 同步配置
-                        Text("坚果云 WebDAV 设置", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
-
+                        // 1. 关于与更新
+                        Text("关于与更新", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
                         ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                OutlinedTextField(
-                                    value = serverUrl,
-                                    onValueChange = { serverUrl = it },
-                                    label = { Text("WebDAV 服务器地址") },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                OutlinedTextField(
-                                    value = username,
-                                    onValueChange = { username = it },
-                                    label = { Text("坚果云账号 (邮箱)") },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                OutlinedTextField(
-                                    value = appPassword,
-                                    onValueChange = { appPassword = it },
-                                    label = { Text("第三方应用密码") },
-                                    visualTransformation = PasswordVisualTransformation(),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                OutlinedTextField(
-                                    value = filePath,
-                                    onValueChange = { filePath = it },
-                                    label = { Text("云端文件路径") },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                                Text("当前版本: v$versionName", style = MaterialTheme.typography.bodyMedium)
+                                Spacer(Modifier.height(16.dp))
+                                var checkingForUpdate by remember { mutableStateOf(false) }
+                                Button(
+                                    onClick = {
+                                        checkingForUpdate = true
+                                        coroutineScope.launch {
+                                            val result = AppUpdater.checkForUpdates(versionName)
+                                            checkingForUpdate = false
+                                            when (result) {
+                                                is UpdateResult.NewVersion -> {
+                                                    updateInfo = result.info
+                                                    showUpdateDialog = true
+                                                }
+                                                is UpdateResult.LatestVersion -> {
+                                                    snackbarHostState.showSnackbar("当前已是最新版本")
+                                                }
+                                                is UpdateResult.Error -> {
+                                                    snackbarHostState.showSnackbar("检查更新失败: ${result.message}")
+                                                }
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = !checkingForUpdate,
+                                    shape = buttonShape
+                                ) {
+                                    if (checkingForUpdate) {
+                                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("正在检查...")
+                                    } else {
+                                        Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("手动检查更新")
+                                    }
+                                }
                             }
                         }
+                    }
+                    1 -> {
+                        // 2. 提醒设置
+                        ReminderSettingsPanel(viewModel, snackbarHostState, coroutineScope)
+                    }
+                    2 -> {
+                        // 3. 偏好习惯
+                        Text("偏好习惯设置", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
+                        ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text("默认截止日期 (新建无 @ 待办时)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val opts = listOf("none" to "无日期", "today" to "今天", "tomorrow" to "明天")
+                                    opts.forEach { (value, label) ->
+                                        FilterChip(
+                                            selected = defaultDueDate == value,
+                                            onClick = { defaultDueDate = value },
+                                            label = { Text(label) }
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
 
+                                Text("新待办默认插入位置", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val opts = listOf("top" to "最上方", "bottom" to "最下方")
+                                    opts.forEach { (value, label) ->
+                                        FilterChip(
+                                            selected = defaultInsertion == value,
+                                            onClick = { defaultInsertion = value },
+                                            label = { Text(label) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         Spacer(modifier = Modifier.height(24.dp))
                         Button(
                             onClick = {
-                                viewModel.saveConfig(serverUrl, username, appPassword, filePath)
+                                viewModel.configManager.defaultDueDate = defaultDueDate
+                                viewModel.configManager.defaultInsertion = defaultInsertion
                                 coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("连接配置已保存")
+                                    snackbarHostState.showSnackbar("偏好习惯已保存")
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -194,28 +244,14 @@ fun SettingsView(viewModel: TodoViewModel) {
                         ) {
                             Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("保存连接设置")
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Button(
-                            onClick = {
-                                showConfirmForcePull = true
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = buttonShape,
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                        ) {
-                            Icon(Icons.Filled.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("强制从云端恢复覆盖本地")
+                            Text("保存偏好设置")
                         }
                     }
-                    1 -> {
-                        // 2. 协作共享
+                    3 -> {
+                        // 4. 协作共享
                         Text("协作共享设置", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
                         ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                // 1. 协作时我的昵称
                                 TextDivider("协作时我的昵称")
                                 OutlinedTextField(
                                     value = nickname,
@@ -228,7 +264,6 @@ fun SettingsView(viewModel: TodoViewModel) {
                                 )
                                 Spacer(Modifier.height(8.dp))
 
-                                // 2. 已绑定的共享协作清单
                                 if (collaborations.isNotEmpty()) {
                                     TextDivider("已绑定的共享协作清单")
                                     Spacer(Modifier.height(4.dp))
@@ -267,7 +302,6 @@ fun SettingsView(viewModel: TodoViewModel) {
                                     }
                                 }
 
-                                // 3. 导入他人共享清单并命名
                                 TextDivider("导入他人授权码并命名")
                                 OutlinedTextField(
                                     value = importCodeInput,
@@ -321,7 +355,6 @@ fun SettingsView(viewModel: TodoViewModel) {
                                     Text("导入口令并绑定")
                                 }
 
-                                // 4. 生成我的共享授权口令
                                 TextDivider("生成我的共享授权口令")
                                 Text("允许被授权者将新待办追加到您的列表中，他们对现有待办仅有只读权限。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.height(8.dp))
@@ -417,50 +450,49 @@ fun SettingsView(viewModel: TodoViewModel) {
                             }
                         }
                     }
-                    2 -> {
-                        // 3. 偏好习惯
-                        Text("偏好习惯设置", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
+                    4 -> {
+                        // 5. 同步与数据维护
+                        Text("坚果云 WebDAV 设置", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
+
                         ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                Text("默认截止日期 (新建无 @ 待办时)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    val opts = listOf("none" to "无日期", "today" to "今天", "tomorrow" to "明天")
-                                    opts.forEach { (value, label) ->
-                                        FilterChip(
-                                            selected = defaultDueDate == value,
-                                            onClick = { defaultDueDate = value },
-                                            label = { Text(label) }
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                Text("新待办默认插入位置", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    val opts = listOf("top" to "最上方", "bottom" to "最下方")
-                                    opts.forEach { (value, label) ->
-                                        FilterChip(
-                                            selected = defaultInsertion == value,
-                                            onClick = { defaultInsertion = value },
-                                            label = { Text(label) }
-                                        )
-                                    }
-                                }
+                                OutlinedTextField(
+                                    value = serverUrl,
+                                    onValueChange = { serverUrl = it },
+                                    label = { Text("WebDAV 服务器地址") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = username,
+                                    onValueChange = { username = it },
+                                    label = { Text("坚果云账号 (邮箱)") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = appPassword,
+                                    onValueChange = { appPassword = it },
+                                    label = { Text("第三方应用密码") },
+                                    visualTransformation = PasswordVisualTransformation(),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = filePath,
+                                    onValueChange = { filePath = it },
+                                    label = { Text("云端文件路径") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
                         }
+
                         Spacer(modifier = Modifier.height(24.dp))
                         Button(
                             onClick = {
-                                viewModel.configManager.defaultDueDate = defaultDueDate
-                                viewModel.configManager.defaultInsertion = defaultInsertion
+                                viewModel.saveConfig(serverUrl, username, appPassword, filePath)
                                 coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("偏好习惯已保存")
+                                    snackbarHostState.showSnackbar("连接配置已保存")
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -468,12 +500,11 @@ fun SettingsView(viewModel: TodoViewModel) {
                         ) {
                             Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("保存偏好设置")
+                            Text("保存连接设置")
                         }
-                    }
-                    3 -> {
-                        // 4. 数据维护
-                        Text("高级与维护", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
+
+                        Spacer(modifier = Modifier.height(24.dp))
+                        TextDivider("数据维护")
                         ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text("如果因为误操作同步导致数据丢失，可以从本地自动生成的快照中恢复。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -496,47 +527,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                             }
                         }
                     }
-                    4 -> {
-                        // 5. 关于与更新
-                        Text("关于与更新", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
-                        ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text("当前版本: v$versionName", style = MaterialTheme.typography.bodyMedium)
-                                Spacer(Modifier.height(16.dp))
-                                var checkingForUpdate by remember { mutableStateOf(false) }
-                                Button(
-                                    onClick = {
-                                        checkingForUpdate = true
-                                        coroutineScope.launch {
-                                            val result = AppUpdater.checkForUpdates(versionName)
-                                            checkingForUpdate = false
-                                            when (result) {
-                                                is UpdateResult.NewVersion -> {
-                                                    updateInfo = result.info
-                                                    showUpdateDialog = true
-                                                }
-                                                is UpdateResult.LatestVersion -> {
-                                                    snackbarHostState.showSnackbar("当前已是最新版本")
-                                                }
-                                                is UpdateResult.Error -> {
-                                                    snackbarHostState.showSnackbar("检测更新失败: ${result.message}")
-                                                }
-                                            }
-                                        }
-                                    },
-                                    enabled = !checkingForUpdate,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = buttonShape
-                                ) {
-                                    Text(if (checkingForUpdate) "正在检查更新..." else "检查更新")
-                                }
-                            }
-                        }
-                    }
                 }
-            }
-
-            if (showConfirmForcePull) {
                 AlertDialog(
                     onDismissRequest = { showConfirmForcePull = false },
                     title = { Text("强制覆盖本地数据") },
@@ -653,21 +644,300 @@ fun SettingsView(viewModel: TodoViewModel) {
 }
 
 @Composable
-fun TextDivider(text: String) {
+private fun ReminderSettingsPanel(
+    viewModel: TodoViewModel,
+    snackbarHostState: SnackbarHostState,
+    coroutineScope: kotlinx.coroutines.CoroutineScope
+) {
+    val todoData by viewModel.todoData.collectAsState()
+    val reminderSettings = todoData.reminderSettings
+
+    var privacyMode by remember(reminderSettings.privacyMode) { mutableStateOf(reminderSettings.privacyMode) }
+    var globalRules by remember(reminderSettings.globalRules) { mutableStateOf(reminderSettings.globalRules) }
+    var showPresetDialog by remember { mutableStateOf(false) }
+
+    Text("提醒设置", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
+
+    ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("单项任务通知模式", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = !privacyMode,
+                    onClick = {
+                        privacyMode = false
+                        viewModel.updateReminderSettings(reminderSettings.copy(privacyMode = false))
+                    },
+                    label = { Text("明细模式") }
+                )
+                FilterChip(
+                    selected = privacyMode,
+                    onClick = {
+                        privacyMode = true
+                        viewModel.updateReminderSettings(reminderSettings.copy(privacyMode = true))
+                    },
+                    label = { Text("隐私模式") }
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+            TextDivider("全局定时提醒")
+            Spacer(Modifier.height(8.dp))
+
+            globalRules.forEachIndexed { index, rule ->
+                GlobalRuleCard(
+                    rule = rule,
+                    onUpdate = { updatedRule ->
+                        val updatedList = globalRules.toMutableList()
+                        updatedList[index] = updatedRule
+                        globalRules = updatedList
+                        viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
+                    },
+                    onDelete = {
+                        val updatedList = globalRules.toMutableList()
+                        updatedList.removeAt(index)
+                        globalRules = updatedList
+                        viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        val newRule = com.todo.app.data.model.GlobalReminderRule(
+                            id = UUID.randomUUID().toString(),
+                            enabled = true,
+                            time = "12:00",
+                            condition = "unconditional",
+                            taskScope = "all",
+                            title = "",
+                            body = "到了设定的提醒时间（12:00），记得按时处理工作与学习"
+                        )
+                        val updatedList = globalRules + newRule
+                        globalRules = updatedList
+                        viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                ) {
+                    Text("+ 新增规则")
+                }
+
+                Button(
+                    onClick = { showPresetDialog = true },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                ) {
+                    Text("导入预设")
+                }
+            }
+        }
+    }
+
+    if (showPresetDialog) {
+        AlertDialog(
+            onDismissRequest = { showPresetDialog = false },
+            title = { Text("导入系统预设提醒") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            val preset = com.todo.app.data.model.GlobalReminderRule(
+                                id = UUID.randomUUID().toString(),
+                                enabled = true,
+                                time = "12:00",
+                                condition = "none_completed",
+                                taskScope = "all",
+                                title = "",
+                                body = "每一个不曾起舞的日子，都是对生命的辜负"
+                            )
+                            val updatedList = globalRules + preset
+                            globalRules = updatedList
+                            viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
+                            showPresetDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("12:00 | 尚未完成任何 | 每一个不曾起舞...")
+                    }
+
+                    Button(
+                        onClick = {
+                            val preset = com.todo.app.data.model.GlobalReminderRule(
+                                id = UUID.randomUUID().toString(),
+                                enabled = true,
+                                time = "16:00",
+                                condition = "unconditional",
+                                taskScope = "all",
+                                title = "不要放弃下午四点",
+                                body = "不要温和地走进那个良夜"
+                            )
+                            val updatedList = globalRules + preset
+                            globalRules = updatedList
+                            viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
+                            showPresetDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("16:00 | 无条件 | 不要放弃下午四点")
+                    }
+
+                    Button(
+                        onClick = {
+                            val preset = com.todo.app.data.model.GlobalReminderRule(
+                                id = UUID.randomUUID().toString(),
+                                enabled = true,
+                                time = "20:00",
+                                condition = "any_remaining",
+                                taskScope = "today_only",
+                                title = "",
+                                body = "截至（20:00），仅今日任务还有 {remaining_count} 项未完成"
+                            )
+                            val updatedList = globalRules + preset
+                            globalRules = updatedList
+                            viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
+                            showPresetDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("20:00 | 存在未完成(仅今日) | 截至（20:00）...")
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showPresetDialog = false }) { Text("关闭") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun GlobalRuleCard(
+    rule: com.todo.app.data.model.GlobalReminderRule,
+    onUpdate: (com.todo.app.data.model.GlobalReminderRule) -> Unit,
+    onDelete: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    val summaryText = if (rule.condition == "unconditional") {
+        "无条件定时提醒"
+    } else {
+        val cond = if (rule.condition == "none_completed") "未完成任何" else "存在未完成"
+        val scope = when (rule.taskScope) {
+            "today_only" -> "仅今日"
+            "recurring_only" -> "仅打卡"
+            else -> "全部"
+        }
+        "$cond · $scope"
+    }
+
+    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = rule.enabled,
+                        onCheckedChange = { onUpdate(rule.copy(enabled = it)) }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(rule.time, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(8.dp))
+                    Text(summaryText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                Row {
+                    IconButton(onClick = { expanded = !expanded }) {
+                        Text(if (expanded) "▲" else "▼")
+                    }
+                    IconButton(onClick = onDelete) {
+                        Icon(Icons.Filled.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+
+            if (expanded) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = rule.time,
+                    onValueChange = { onUpdate(rule.copy(time = it)) },
+                    label = { Text("提醒时间 (HH:mm)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(6.dp))
+
+                Text("触发判定条件", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    val condOpts = listOf("none_completed" to "未完成任何", "any_remaining" to "存在未完成", "unconditional" to "无条件")
+                    condOpts.forEach { (valStr, label) ->
+                        FilterChip(
+                            selected = rule.condition == valStr,
+                            onClick = { onUpdate(rule.copy(condition = valStr)) },
+                            label = { Text(label, fontSize = 11.sp) }
+                        )
+                    }
+                }
+
+                if (rule.condition != "unconditional") {
+                    Spacer(Modifier.height(6.dp))
+                    Text("任务类型筛选", style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        val scopeOpts = listOf("all" to "全部任务", "today_only" to "仅今日", "recurring_only" to "仅打卡")
+                        scopeOpts.forEach { (valStr, label) ->
+                            FilterChip(
+                                selected = rule.taskScope == valStr,
+                                onClick = { onUpdate(rule.copy(taskScope = valStr)) },
+                                label = { Text(label, fontSize = 11.sp) }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = rule.title,
+                    onValueChange = { onUpdate(rule.copy(title = it)) },
+                    label = { Text("通知标题 (留空默认 Todo)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = rule.body,
+                    onValueChange = { onUpdate(rule.copy(body = it)) },
+                    label = { Text("通知正文") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TextDivider(text: String) {
     Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp)
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        Divider(modifier = Modifier.weight(1f))
         Text(
             text = text,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 8.dp)
         )
-        Spacer(modifier = Modifier.width(8.dp))
-        HorizontalDivider(
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-        )
+        Divider(modifier = Modifier.weight(1f))
     }
 }

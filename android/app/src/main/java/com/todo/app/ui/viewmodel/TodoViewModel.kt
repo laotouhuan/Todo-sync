@@ -137,6 +137,27 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         return false
     }
 
+    val todoData: StateFlow<com.todo.app.data.model.TodoData> = repository.getTodoData()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = com.todo.app.data.model.TodoData(1, "", emptyList())
+        )
+
+    fun updateReminderSettings(settings: com.todo.app.data.model.ReminderSettings) {
+        viewModelScope.launch {
+            repository.updateReminderSettings(settings)
+            rescheduleAlarms()
+        }
+    }
+
+    fun rescheduleAlarms() {
+        viewModelScope.launch {
+            val data = repository.getCurrentData()
+            com.todo.app.notification.ReminderScheduler(configManager.context).rescheduleAll(data)
+        }
+    }
+
     val todos = repository.getTodoData().map { data ->
         data.todos.filter { !it.deleted }
     }.stateIn(

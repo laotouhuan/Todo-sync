@@ -55,6 +55,7 @@ function migrateAndNormalize(todo) {
     todo.task_type = todo.task_type || 'normal';
     todo.completed_dates = todo.completed_dates || [];
     todo.target_count = todo.target_count ?? null;
+    if (todo.reminder === undefined) todo.reminder = null;
     if (todo.subtasks) {
         todo.subtasks.forEach(s => {
             s.completed_at = s.completed_at || null;
@@ -65,15 +66,33 @@ function migrateAndNormalize(todo) {
     return todo;
 }
 
+function mergeReminderSettings(localData, cloudData) {
+    const ls = localData?.reminder_settings;
+    const cs = cloudData?.reminder_settings;
+    if (!ls && !cs) return { privacy_mode: false, global_rules: [] };
+    if (!ls) return cs;
+    if (!cs) return ls;
+    const lt = localData?.last_updated || '';
+    const ct = cloudData?.last_updated || '';
+    return ct > lt ? cs : ls;
+}
+
 function mergeTodoData(localData, cloudData) {
     if (!localData || !localData.todos) {
         if (cloudData && cloudData.todos) {
             cloudData.todos.forEach(migrateAndNormalize);
         }
-        return { data: cloudData, changed: true };
+        const data = cloudData || { version: 1, last_updated: new Date().toISOString(), todos: [] };
+        if (!data.reminder_settings) {
+            data.reminder_settings = { privacy_mode: false, global_rules: [] };
+        }
+        return { data, changed: true };
     }
     if (!cloudData || !cloudData.todos) {
         localData.todos.forEach(migrateAndNormalize);
+        if (!localData.reminder_settings) {
+            localData.reminder_settings = { privacy_mode: false, global_rules: [] };
+        }
         return { data: localData, changed: false };
     }
 
@@ -168,21 +187,23 @@ function mergeTodoData(localData, cloudData) {
         }
     }
     mergedTodos.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const mergedReminderSettings = mergeReminderSettings(localData, cloudData);
     return {
         data: {
             version: localData.version || 1,
             last_updated: new Date().toISOString(),
-            todos: mergedTodos
+            todos: mergedTodos,
+            reminder_settings: mergedReminderSettings
         },
         changed: changed || mergedTodos.length !== localData.todos.length
     };
 }
 
-// ====== 辅助函数 ======
+import { generateUUID } from '../src/dateUtils.js';
 
 function makeTodo(overrides = {}) {
     return {
-        id: overrides.id || crypto.randomUUID(),
+        id: overrides.id || generateUUID(),
         content: overrides.content || '测试任务',
         date: overrides.date || null,
         time: null,

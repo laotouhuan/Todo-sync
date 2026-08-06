@@ -49,6 +49,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        com.todo.app.notification.PermissionHelper.checkAndRequestNotificationPermission(this)
+        viewModel.rescheduleAlarms()
+
         setContent {
             TodoAppTheme {
                 TodoApp(viewModel)

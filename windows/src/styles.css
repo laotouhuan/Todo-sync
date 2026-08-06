@@ -2308,36 +2308,35 @@ input:checked + .slider:before {
 }
 
 
-
-/* 设置页面 Tabs 重构样式 */
-.settings-tab-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  padding: 8px 12px;
-  text-align: left;
-  font-size: 0.85rem;
-  font-weight: 500;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  width: 100%;
-}
-
-.settings-tab-btn:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-primary);
-}
-
-.settings-tab-btn.active {
-  background: rgba(24, 144, 255, 0.15);
+.recurring-badge {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: rgba(123, 97, 255, 0.15);
   color: var(--accent-color);
+  border: 1px solid rgba(123, 97, 255, 0.3);
+  margin-left: 6px;
+  font-weight: 500;
+  display: inline-block;
+  vertical-align: middle;
 }
 
-.settings-panel {
-  display: none;
+/* 主列表子任务复选框悬停视觉优化 */
+.inline-subtasks-list .subtask-item:not(.completed) .subtask-checkbox:hover {
+  border-color: var(--accent-color);
+  background: rgba(255, 255, 255, 0.08);
 }
 
+/* Switch Toggle Styling */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
   height: 0;
 }
 .slider {
@@ -2723,3 +2722,32 @@ input:checked + .slider:before {
 .stats-filter-item:hover .dot {
   box-shadow: 0 0 0 2px currentColor, 0 0 6px currentColor;
 }
+
+/* ====== Reminder Styles ====== */
+.reminder-overdue-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 0.65rem;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  margin-left: 6px;
+  font-weight: 500;
+}
+
+.global-rule-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+  transition: background 0.2s;
+}
+
+.global-rule-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.rule-header {
+  user-select: none;
+}
+
