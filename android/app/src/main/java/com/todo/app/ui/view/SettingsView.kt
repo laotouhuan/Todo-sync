@@ -989,12 +989,64 @@ private fun GlobalRuleCard(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(6.dp))
+                Text("快捷插值变量 (点击插入)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                ) {
+                    val varList = listOf(
+                        "{remaining_count}" to "未完成数",
+                        "{completed_count}" to "已完成数",
+                        "{total_count}" to "总任务数",
+                        "{overdue_count}" to "逾期任务数",
+                        "{completion_rate}" to "完成率",
+                        "{time}" to "设定时间",
+                        "{now_time}" to "当前时间",
+                        "{today_date}" to "今日日期",
+                        "{weekday}" to "当前星期"
+                    )
+                    items(varList) { (code, label) ->
+                        SuggestionChip(
+                            onClick = {
+                                onUpdate(rule.copy(body = rule.body + code))
+                            },
+                            label = { Text("$code ($label)", fontSize = 10.sp) }
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(4.dp))
                 OutlinedTextField(
                     value = rule.body,
                     onValueChange = { onUpdate(rule.copy(body = it)) },
                     label = { Text("通知正文") },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                if (rule.body.contains("{") && rule.body.contains("}")) {
+                    Spacer(Modifier.height(4.dp))
+                    val previewText = rule.body
+                        .replace("{remaining_count}", "3")
+                        .replace("{completed_count}", "5")
+                        .replace("{total_count}", "8")
+                        .replace("{overdue_count}", "2")
+                        .replace("{completion_rate}", "62%")
+                        .replace("{time}", rule.time)
+                        .replace("{now_time}", "12:00")
+                        .replace("{today_date}", "08月06日")
+                        .replace("{weekday}", "周四")
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text("✨ 实时效果渲染预览：", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                            Text(previewText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
             }
         }
     }

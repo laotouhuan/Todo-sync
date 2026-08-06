@@ -815,8 +815,18 @@ function renderGlobalRules(rules = []) {
                     <input type="text" class="rule-title-input" value="${escapeHtml(rule.title || '')}" placeholder="Todo" />
                 </div>
                 <div class="input-group">
-                    <label>通知正文</label>
-                    <textarea class="rule-body-input" rows="2" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; resize: vertical;" placeholder="自定义或使用预设内容">${escapeHtml(rule.body || '')}</textarea>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <label style="margin: 0; font-size: 0.8rem; font-weight: 500;">通知正文</label>
+                        <span style="font-size: 0.68rem; color: var(--text-secondary);">输入 <code style="color: var(--accent-color); background: rgba(255,255,255,0.1); padding: 0 3px; border-radius: 3px;">{</code> 可快捷插入变量</span>
+                    </div>
+                    <div style="position: relative;">
+                        <textarea class="rule-body-input" rows="2" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; resize: vertical;" placeholder="自定义或使用预设内容，输入 { 可选择变量">${escapeHtml(rule.body || '')}</textarea>
+                        <div class="rule-var-autocomplete" style="display: none;"></div>
+                    </div>
+                    <div class="rule-live-preview" style="display: none;">
+                        <div class="rule-live-preview-title">✨ 实时效果渲染预览：</div>
+                        <div class="rule-live-preview-text"></div>
+                    </div>
                 </div>
             </div>
         `;
@@ -841,9 +851,139 @@ function renderGlobalRules(rules = []) {
         const timeInput = card.querySelector('.rule-time-input');
         const bodyInput = card.querySelector('.rule-body-input');
         const timeLabel = card.querySelector('.rule-time-label');
+        const varAutocomplete = card.querySelector('.rule-var-autocomplete');
+        const livePreviewBox = card.querySelector('.rule-live-preview');
+        const livePreviewText = card.querySelector('.rule-live-preview-text');
+
+        const AVAILABLE_RULE_VARS = [
+            { code: '{remaining_count}', label: '未完成任务数' },
+            { code: '{completed_count}', label: '已完成任务数' },
+            { code: '{total_count}', label: '任务总数量' },
+            { code: '{overdue_count}', label: '逾期任务数' },
+            { code: '{completion_rate}', label: '任务完成百分比' },
+            { code: '{time}', label: '提醒设定的时间' },
+            { code: '{now_time}', label: '当前精确时间' },
+            { code: '{today_date}', label: '今日日期' },
+            { code: '{weekday}', label: '当前星期' }
+        ];
+
+        // 实时渲染预览计算
+        function updateLivePreview() {
+            const rawBody = bodyInput.value || '';
+            const hasVarPattern = /\{[^}]+\}/.test(rawBody) || rawBody.includes('{');
+            
+            if (!hasVarPattern) {
+                livePreviewBox.style.display = 'none';
+                return;
+            }
+
+            const tVal = timeInput.value.trim() || '12:00';
+            const today = new Date();
+            const dateStr = `${String(today.getMonth() + 1).padStart(2, '0')}月${String(today.getDate()).padStart(2, '0')}日`;
+            const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+            const weekdayStr = weekdays[today.getDay()];
+            const nowTimeStr = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
+
+            // 计算实际环境中的待办统计数据作为渲染参考
+            const activeTodos = getActiveTodos().filter(t => !t.deleted);
+            const remainingCount = activeTodos.filter(t => !t.completed).length;
+            const completedCount = activeTodos.filter(t => t.completed).length;
+            const totalCount = activeTodos.length;
+            const overdueCount = activeTodos.filter(t => isOverdue(t)).length;
+            const rateVal = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 62.5;
+
+            let previewText = rawBody
+                .replace(/\{remaining_count\}/g, String(remainingCount > 0 ? remainingCount : 3))
+                .replace(/\{completed_count\}/g, String(completedCount > 0 ? completedCount : 5))
+                .replace(/\{total_count\}/g, String(totalCount > 0 ? totalCount : 8))
+                .replace(/\{overdue_count\}/g, String(overdueCount > 0 ? overdueCount : 2))
+                .replace(/\{completion_rate\}/g, `${rateVal}%`)
+                .replace(/\{time\}/g, tVal)
+                .replace(/\{now_time\}/g, nowTimeStr)
+                .replace(/\{today_date\}/g, dateStr)
+                .replace(/\{weekday\}/g, weekdayStr);
+
+            livePreviewText.textContent = previewText || '(暂无预览内容)';
+            livePreviewBox.style.display = 'block';
+        }
 
         timeInput.addEventListener('input', () => {
             timeLabel.textContent = timeInput.value || '12:00';
+            updateLivePreview();
+        });
+
+        // 绑定 { 触发的快捷变量联想菜单
+        function renderVarAutocomplete(filterQuery = '') {
+            const query = filterQuery.toLowerCase();
+            const filtered = AVAILABLE_RULE_VARS.filter(v => v.code.toLowerCase().includes(query) || v.label.toLowerCase().includes(query));
+
+            varAutocomplete.innerHTML = '';
+            if (filtered.length === 0) {
+                varAutocomplete.style.display = 'none';
+                return;
+            }
+
+            filtered.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'rule-var-item';
+                div.innerHTML = `<span class="var-code">${escapeHtml(item.code)}</span><span class="var-label">${escapeHtml(item.label)}</span>`;
+                div.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    insertVarAtCursor(item.code);
+                    varAutocomplete.style.display = 'none';
+                });
+                varAutocomplete.appendChild(div);
+            });
+            varAutocomplete.style.display = 'block';
+        }
+
+        function insertVarAtCursor(varCode) {
+            const start = bodyInput.selectionStart;
+            const end = bodyInput.selectionEnd;
+            const text = bodyInput.value;
+            
+            // 找寻以 { 开头的输入片段并替换
+            const lastBraceIdx = text.lastIndexOf('{', start - 1);
+            if (lastBraceIdx !== -1 && lastBraceIdx >= start - 20) {
+                const before = text.substring(0, lastBraceIdx);
+                const after = text.substring(end);
+                bodyInput.value = before + varCode + after;
+                const newPos = lastBraceIdx + varCode.length;
+                bodyInput.setSelectionRange(newPos, newPos);
+            } else {
+                const before = text.substring(0, start);
+                const after = text.substring(end);
+                bodyInput.value = before + varCode + after;
+                const newPos = start + varCode.length;
+                bodyInput.setSelectionRange(newPos, newPos);
+            }
+            bodyInput.focus();
+            updateLivePreview();
+        }
+
+        bodyInput.addEventListener('input', () => {
+            const text = bodyInput.value;
+            const start = bodyInput.selectionStart;
+            const match = text.substring(0, start).match(/\{([a-zA-Z0-9_]*)$/);
+
+            if (match) {
+                renderVarAutocomplete(match[1]);
+            } else {
+                varAutocomplete.style.display = 'none';
+            }
+            updateLivePreview();
+        });
+
+        bodyInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                varAutocomplete.style.display = 'none';
+            }
+        });
+
+        bodyInput.addEventListener('blur', () => {
+            setTimeout(() => {
+                varAutocomplete.style.display = 'none';
+            }, 200);
         });
 
         function updateSmartBody() {
@@ -859,10 +999,14 @@ function renderGlobalRules(rules = []) {
             if (isDefaultTmpl) {
                 bodyInput.value = getSmartPresetBody(cVal, sVal, tVal);
             }
+            updateLivePreview();
         }
 
         condSelect.addEventListener('change', updateSmartBody);
         scopeSelect.addEventListener('change', updateSmartBody);
+
+        // 初始渲染一次预览
+        updateLivePreview();
 
         container.appendChild(card);
     });
@@ -1817,12 +1961,14 @@ let _autoSaveTimer = null;
 
 async function _doAutoSave() {
     if (!appState.currentEditingTodo) return;
-    const newContent = document.getElementById('edit-content').value.trim();
-    // 空内容时不更新 content 字段，但仍允许保存其他字段（date、time、subtasks 等）
+    const contentEl = document.getElementById('edit-content');
+    const newContent = contentEl ? contentEl.value.trim() : '';
     const hasContent = !!newContent;
 
     const index = appState.todoData.todos.findIndex(t => t.id === appState.currentEditingTodo.id);
-    if (index !== -1) {
+    if (index === -1) return;
+
+    try {
         if (hasContent) {
             const { nickname } = extractCollaborator(appState.currentEditingTodo.content);
             appState.todoData.todos[index].content = nickname ? `${newContent} (由 [${nickname}] 添加)` : newContent;
@@ -1835,7 +1981,6 @@ async function _doAutoSave() {
                 appState.todoData.todos[index].task_type = 'normal';
                 appState.todoData.todos[index].recurring = 'daily_repeat';
                 appState.todoData.todos[index].time = null;
-                // 确保每天重复任务拥有有效的今日/现有日期
                 const existingDate = appState.todoData.todos[index].date;
                 if (!existingDate || isWeekDate(existingDate) || isMonthDate(existingDate)) {
                     appState.todoData.todos[index].date = getTodayString();
@@ -1846,24 +1991,22 @@ async function _doAutoSave() {
 
                 if (taskTypeVal === 'normal') {
                     const hasDateSwitch = document.getElementById('edit-has-date-switch');
-                    if (hasDateSwitch && hasDateSwitch.checked) {
-                        let dateVal = document.getElementById('edit-date').value || null;
+                    const dateInput = document.getElementById('edit-date');
+                    if (hasDateSwitch && hasDateSwitch.checked && dateInput) {
+                        let dateVal = dateInput.value || null;
                         if (dateVal) {
                             dateVal = dateVal.trim();
                             const isDay = /^\d{4}-\d{2}-\d{2}$/.test(dateVal);
                             const isWeek = isWeekDate(dateVal);
                             const isMonth = isMonthDate(dateVal);
                             if (!isDay && !isWeek && !isMonth) {
-                                // 格式不合规时，恢复为上一合法值或空
                                 dateVal = appState.currentEditingTodo.date || null;
-                                document.getElementById('edit-date').value = dateVal || '';
+                                dateInput.value = dateVal || '';
                             } else if (isWeek) {
-                                // 强转为周打卡任务
                                 appState.todoData.todos[index].task_type = 'weekly_checkin';
                                 if (taskTypeSelect) taskTypeSelect.value = 'weekly_checkin';
                                 updateEditModalFields('weekly_checkin');
                             } else if (isMonth) {
-                                // 强转为月打卡任务
                                 appState.todoData.todos[index].task_type = 'monthly_checkin';
                                 if (taskTypeSelect) taskTypeSelect.value = 'monthly_checkin';
                                 updateEditModalFields('monthly_checkin');
@@ -1895,11 +2038,12 @@ async function _doAutoSave() {
             appState.todoData.todos[index].target_count = (isNaN(val) || val <= 0) ? null : val;
         }
 
-        // 保存完成日期和时间 (仅针对普通/每天重复任务且已完成的情况)
         const completedAtRow = document.getElementById('edit-completed-at-row');
-        if (completedAtRow && completedAtRow.style.display !== 'none' && appState.todoData.todos[index].completed) {
-            const compDateVal = document.getElementById('edit-completed-date').value;
-            const compTimeVal = document.getElementById('edit-completed-time').value;
+        const compDateInput = document.getElementById('edit-completed-date');
+        const compTimeInput = document.getElementById('edit-completed-time');
+        if (completedAtRow && completedAtRow.style.display !== 'none' && appState.todoData.todos[index].completed && compDateInput && compTimeInput) {
+            const compDateVal = compDateInput.value;
+            const compTimeVal = compTimeInput.value;
             const normalizedTimeRes = validateAndNormalizeTime(compTimeVal, '--:--');
             const validTimeStr = normalizedTimeRes.value;
             if (compDateVal && validTimeStr !== '--:--') {
@@ -1914,9 +2058,12 @@ async function _doAutoSave() {
 
         const reminderSwitch = document.getElementById('edit-reminder-switch');
         if (reminderSwitch && reminderSwitch.checked) {
-            const rDate = document.getElementById('edit-reminder-date').value || null;
-            const rTimeRaw = document.getElementById('edit-reminder-time').value.trim();
-            const rRepeat = document.getElementById('edit-reminder-repeat-daily').checked;
+            const rDateEl = document.getElementById('edit-reminder-date');
+            const rTimeEl = document.getElementById('edit-reminder-time');
+            const rRepeatEl = document.getElementById('edit-reminder-repeat-daily');
+            const rDate = rDateEl ? (rDateEl.value || null) : null;
+            const rTimeRaw = rTimeEl ? rTimeEl.value.trim() : '09:00';
+            const rRepeat = rRepeatEl ? rRepeatEl.checked : false;
             const normalizedTime = validateAndNormalizeTime(rTimeRaw, '09:00').value;
             appState.todoData.todos[index].reminder = {
                 reminder_date: rDate,
@@ -1938,6 +2085,8 @@ async function _doAutoSave() {
 
         render();
         await saveData();
+    } catch (e) {
+        console.error("Auto save edit failed:", e);
     }
 }
 
@@ -1979,111 +2128,125 @@ function updateEditModalFields(taskTypeVal) {
 }
 
 function openEditModal(todo) {
+    if (!todo) return;
     appState.currentEditingTodo = todo;
 
     const modal = document.getElementById('edit-modal');
-    const input = document.getElementById('edit-content');
-    const { cleanContent } = extractCollaborator(todo.content);
-    input.value = cleanContent;
+    if (!modal) return;
 
-    const taskTypeSelect = document.getElementById('edit-task-type');
-    let taskTypeVal = todo.task_type || 'normal';
-    if (todo.recurring === 'daily_repeat') {
-        taskTypeVal = 'daily_repeat';
-    }
-    if (taskTypeSelect) {
-        taskTypeSelect.value = taskTypeVal;
-    }
-
-    updateEditModalFields(taskTypeVal);
-
-    // 日期开关及缓存初始化
-    const dateInput = document.getElementById('edit-date');
-    const hasDateSwitch = document.getElementById('edit-has-date-switch');
-    const dateContainer = document.getElementById('edit-date-container');
-    const dateVal = todo.date || '';
-
-    dateInput.type = 'date';
-
-    if (dateVal && !isWeekDate(dateVal) && !isMonthDate(dateVal)) {
-        hasDateSwitch.checked = true;
-        dateContainer.style.display = 'flex';
-        dateInput.value = dateVal;
-        appState.editCachedDate = dateVal;
-    } else {
-        hasDateSwitch.checked = false;
-        dateContainer.style.display = 'none';
-        dateInput.value = '';
-        appState.editCachedDate = (todo.task_type === 'normal' && todo.date && !isWeekDate(todo.date) && !isMonthDate(todo.date)) ? todo.date : getTodayString();
-    }
-
-    const targetCountInput = document.getElementById('edit-target-count');
-    if (targetCountInput) {
-        targetCountInput.value = todo.target_count || '';
-    }
-
-    // 初始化并填充完成日期和时间
-    const completedAtRow = document.getElementById('edit-completed-at-row');
-    if (completedAtRow) {
-        const isNormalOrDaily = taskTypeVal === 'normal' || taskTypeVal === 'daily_repeat';
-        if (todo.completed && isNormalOrDaily) {
-            completedAtRow.style.display = 'flex';
-            const compDateInput = document.getElementById('edit-completed-date');
-            const compTimeInput = document.getElementById('edit-completed-time');
-            if (todo.completed_at && todo.completed_at.includes('T')) {
-                const d = new Date(todo.completed_at);
-                if (!isNaN(d.getTime())) {
-                    const yyyy = d.getFullYear();
-                    const mm = String(d.getMonth() + 1).padStart(2, '0');
-                    const dd = String(d.getDate()).padStart(2, '0');
-                    compDateInput.value = `${yyyy}-${mm}-${dd}`;
-                    const hh = String(d.getHours()).padStart(2, '0');
-                    const min = String(d.getMinutes()).padStart(2, '0');
-                    compTimeInput.value = `${hh}:${min}`;
-                } else {
-                    compDateInput.value = todo.completed_at.substring(0, 10);
-                    compTimeInput.value = '--:--';
-                }
-            } else if (todo.completed_at) {
-                compDateInput.value = todo.completed_at.substring(0, 10);
-                compTimeInput.value = '--:--';
-            } else {
-                compDateInput.value = '';
-                compTimeInput.value = '--:--';
-            }
-            compTimeInput.dataset.lastValue = compTimeInput.value;
-        } else {
-            completedAtRow.style.display = 'none';
+    try {
+        const input = document.getElementById('edit-content');
+        if (input) {
+            const { cleanContent } = extractCollaborator(todo.content);
+            input.value = cleanContent;
         }
+
+        const taskTypeSelect = document.getElementById('edit-task-type');
+        let taskTypeVal = todo.task_type || 'normal';
+        if (todo.recurring === 'daily_repeat') {
+            taskTypeVal = 'daily_repeat';
+        }
+        if (taskTypeSelect) {
+            taskTypeSelect.value = taskTypeVal;
+        }
+
+        updateEditModalFields(taskTypeVal);
+
+        // 日期开关及缓存初始化
+        const dateInput = document.getElementById('edit-date');
+        const hasDateSwitch = document.getElementById('edit-has-date-switch');
+        const dateContainer = document.getElementById('edit-date-container');
+        const dateVal = todo.date || '';
+
+        if (dateInput) dateInput.type = 'date';
+
+        if (dateVal && !isWeekDate(dateVal) && !isMonthDate(dateVal)) {
+            if (hasDateSwitch) hasDateSwitch.checked = true;
+            if (dateContainer) dateContainer.style.display = 'flex';
+            if (dateInput) dateInput.value = dateVal;
+            appState.editCachedDate = dateVal;
+        } else {
+            if (hasDateSwitch) hasDateSwitch.checked = false;
+            if (dateContainer) dateContainer.style.display = 'none';
+            if (dateInput) dateInput.value = '';
+            appState.editCachedDate = (todo.task_type === 'normal' && todo.date && !isWeekDate(todo.date) && !isMonthDate(todo.date)) ? todo.date : getTodayString();
+        }
+
+        const targetCountInput = document.getElementById('edit-target-count');
+        if (targetCountInput) {
+            targetCountInput.value = todo.target_count || '';
+        }
+
+        // 初始化并填充完成日期和时间
+        const completedAtRow = document.getElementById('edit-completed-at-row');
+        if (completedAtRow) {
+            const isNormalOrDaily = taskTypeVal === 'normal' || taskTypeVal === 'daily_repeat';
+            if (todo.completed && isNormalOrDaily) {
+                completedAtRow.style.display = 'flex';
+                const compDateInput = document.getElementById('edit-completed-date');
+                const compTimeInput = document.getElementById('edit-completed-time');
+                if (todo.completed_at && todo.completed_at.includes('T')) {
+                    const d = new Date(todo.completed_at);
+                    if (!isNaN(d.getTime())) {
+                        const yyyy = d.getFullYear();
+                        const mm = String(d.getMonth() + 1).padStart(2, '0');
+                        const dd = String(d.getDate()).padStart(2, '0');
+                        if (compDateInput) compDateInput.value = `${yyyy}-${mm}-${dd}`;
+                        const hh = String(d.getHours()).padStart(2, '0');
+                        const min = String(d.getMinutes()).padStart(2, '0');
+                        if (compTimeInput) compTimeInput.value = `${hh}:${min}`;
+                    } else {
+                        if (compDateInput) compDateInput.value = todo.completed_at.substring(0, 10);
+                        if (compTimeInput) compTimeInput.value = '--:--';
+                    }
+                } else if (todo.completed_at) {
+                    if (compDateInput) compDateInput.value = todo.completed_at.substring(0, 10);
+                    if (compTimeInput) compTimeInput.value = '--:--';
+                } else {
+                    if (compDateInput) compDateInput.value = '';
+                    if (compTimeInput) compTimeInput.value = '--:--';
+                }
+                if (compTimeInput) compTimeInput.dataset.lastValue = compTimeInput.value;
+            } else {
+                completedAtRow.style.display = 'none';
+            }
+        }
+
+        // 提醒控件回填
+        const reminderSwitch = document.getElementById('edit-reminder-switch');
+        const reminderDetail = document.getElementById('edit-reminder-detail');
+        const reminderRepeatRow = document.getElementById('edit-reminder-repeat-row');
+        const reminderDateEl = document.getElementById('edit-reminder-date');
+        const reminderTimeEl = document.getElementById('edit-reminder-time');
+        const reminderRepeatEl = document.getElementById('edit-reminder-repeat-daily');
+
+        const hasReminder = todo.reminder !== null && todo.reminder !== undefined;
+        if (reminderSwitch) reminderSwitch.checked = hasReminder;
+        if (reminderDetail) reminderDetail.style.display = hasReminder ? 'block' : 'none';
+
+        if (hasReminder && todo.reminder) {
+            if (reminderDateEl) reminderDateEl.value = todo.reminder.reminder_date || todo.date || getTodayString();
+            if (reminderTimeEl) reminderTimeEl.value = todo.reminder.reminder_time || '09:00';
+            if (reminderRepeatEl) reminderRepeatEl.checked = todo.reminder.repeat_daily || false;
+        } else {
+            if (reminderDateEl) reminderDateEl.value = todo.date || getTodayString();
+            if (reminderTimeEl) reminderTimeEl.value = '09:00';
+            if (reminderRepeatEl) reminderRepeatEl.checked = false;
+        }
+
+        const isRecurring = taskTypeVal === 'daily_repeat' || taskTypeVal === 'weekly_checkin' || taskTypeVal === 'monthly_checkin';
+        if (reminderRepeatRow) reminderRepeatRow.style.display = isRecurring ? 'block' : 'none';
+
+        appState.currentEditingSubtasks = todo.subtasks ? deepClone(todo.subtasks) : [];
+        renderEditSubtasks();
+        renderEditCheckinGrid(todo);
+    } catch (e) {
+        console.error("Error populating edit modal:", e);
     }
-
-    // 提醒控件回填
-    const reminderSwitch = document.getElementById('edit-reminder-switch');
-    const reminderDetail = document.getElementById('edit-reminder-detail');
-    const reminderRepeatRow = document.getElementById('edit-reminder-repeat-row');
-    const hasReminder = todo.reminder !== null && todo.reminder !== undefined;
-    if (reminderSwitch) reminderSwitch.checked = hasReminder;
-    if (reminderDetail) reminderDetail.style.display = hasReminder ? 'block' : 'none';
-
-    if (hasReminder && todo.reminder) {
-        document.getElementById('edit-reminder-date').value = todo.reminder.reminder_date || todo.date || getTodayString();
-        document.getElementById('edit-reminder-time').value = todo.reminder.reminder_time || '09:00';
-        document.getElementById('edit-reminder-repeat-daily').checked = todo.reminder.repeat_daily || false;
-    } else {
-        document.getElementById('edit-reminder-date').value = todo.date || getTodayString();
-        document.getElementById('edit-reminder-time').value = '09:00';
-        document.getElementById('edit-reminder-repeat-daily').checked = false;
-    }
-
-    const isRecurring = taskTypeVal === 'daily_repeat' || taskTypeVal === 'weekly_checkin' || taskTypeVal === 'monthly_checkin';
-    if (reminderRepeatRow) reminderRepeatRow.style.display = isRecurring ? 'block' : 'none';
-
-    appState.currentEditingSubtasks = todo.subtasks ? deepClone(todo.subtasks) : [];
-    renderEditSubtasks();
-    renderEditCheckinGrid(todo);
 
     modal.classList.add('active');
-    setTimeout(() => input.focus(), 80);
+    const input = document.getElementById('edit-content');
+    if (input) setTimeout(() => input.focus(), 80);
 }
 
 function closeEditModal() {
@@ -5072,12 +5235,11 @@ async function createAndAddTodo(raw) {
 
     // 全局拖动支持
     document.addEventListener('mousedown', (e) => {
-        const isInteractive = e.target.closest('button, input, select, .checkbox, .edit-btn, .tab-btn, .todo-item, .collapsible-header, .reminder-bar, .reminder-btn, .clear-search-btn');
-        const editModalEl2 = document.getElementById('edit-modal');
-        const modalActive = editModalEl2 && editModalEl2.classList.contains('active');
+        const isInteractive = e.target.closest('button, input, textarea, select, label, .checkbox, .edit-btn, .tab-btn, .todo-item, .collapsible-header, .reminder-bar, .reminder-btn, .clear-search-btn, .modal, .modal-content');
+        const anyModalActive = document.querySelector('.modal.active') !== null;
         const isScrollbar = e.offsetX > e.target.clientWidth || e.offsetY > e.target.clientHeight;
 
-        if (!isInteractive && !modalActive && !isScrollbar) {
+        if (!isInteractive && !anyModalActive && !isScrollbar) {
             invoke('start_drag').catch(err => console.error('Failed to drag:', err));
         }
     });
