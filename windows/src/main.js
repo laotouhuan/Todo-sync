@@ -298,7 +298,7 @@ function resolveCheckinConflict(checkinL, checkinC, lTime, cTime) {
 function mergeReminderSettings(localData, cloudData) {
     const ls = localData?.reminder_settings;
     const cs = cloudData?.reminder_settings;
-    if (!ls && !cs) return { privacy_mode: false, global_rules: [] };
+    if (!ls && !cs) return { enabled: true, privacy_mode: false, global_rules: [] };
     if (!ls) return cs;
     if (!cs) return ls;
     const lt = localData?.last_updated || '';
@@ -313,14 +313,14 @@ function mergeTodoData(localData, cloudData) {
         }
         const data = cloudData || { version: 1, last_updated: new Date().toISOString(), todos: [] };
         if (!data.reminder_settings) {
-            data.reminder_settings = { privacy_mode: false, global_rules: [] };
+            data.reminder_settings = { enabled: true, privacy_mode: false, global_rules: [] };
         }
         return { data, changed: true };
     }
     if (!cloudData || !cloudData.todos) {
         localData.todos.forEach(migrateAndNormalize);
         if (!localData.reminder_settings) {
-            localData.reminder_settings = { privacy_mode: false, global_rules: [] };
+            localData.reminder_settings = { enabled: true, privacy_mode: false, global_rules: [] };
         }
         return { data: localData, changed: false };
     }
@@ -3644,6 +3644,13 @@ function initApp() {
     inputEl = document.getElementById('todo-input');
     statusEl = document.getElementById('sync-status');
 
+    // 优先加载核心数据，保证即使个别可选 UI 元素事件绑定失败，清单也能正常呈现
+    try {
+        loadData();
+    } catch (e) {
+        console.error("Failed to execute initial loadData:", e);
+    }
+
     // 绑定智能输入联想
     const todoAutocompleteList = document.getElementById('todo-autocomplete-list');
     bindAutocomplete(inputEl, todoAutocompleteList);
@@ -3721,6 +3728,35 @@ function initApp() {
         });
     });
 
+    const reminderToggleTrack = document.getElementById('reminder-toggle-track');
+    const reminderToggleKnob = document.getElementById('reminder-toggle-knob');
+    const reminderDetailContainer = document.getElementById('reminder-detail-container');
+    const reminderHiddenInput = document.getElementById('setting-reminder-enabled');
+
+    function applyReminderToggleVisual(enabled) {
+        if (reminderToggleTrack) {
+            reminderToggleTrack.style.background = enabled ? 'var(--accent-color)' : 'rgba(255,255,255,0.1)';
+            reminderToggleTrack.style.borderColor = enabled ? 'var(--accent-color)' : 'rgba(255,255,255,0.2)';
+        }
+        if (reminderToggleKnob) {
+            reminderToggleKnob.style.left = enabled ? '18px' : '2px';
+        }
+        if (reminderDetailContainer) {
+            reminderDetailContainer.style.display = enabled ? 'block' : 'none';
+        }
+        if (reminderHiddenInput) {
+            reminderHiddenInput.value = enabled ? 'true' : 'false';
+        }
+    }
+
+    const reminderToggleBtn = document.getElementById('reminder-toggle-btn');
+    if (reminderToggleBtn) {
+        reminderToggleBtn.addEventListener('click', () => {
+            const currentEnabled = reminderHiddenInput ? (reminderHiddenInput.value === 'true') : true;
+            applyReminderToggleVisual(!currentEnabled);
+        });
+    }
+
     if (settingsBtn) {
         settingsBtn.addEventListener('click', async () => {
             if (settingsModal) {
@@ -3753,8 +3789,11 @@ function initApp() {
             const firstPanel = document.getElementById('panel-about');
             if (firstPanel) firstPanel.classList.add('active');
 
-            // 填充提醒设置
-            const rs = appState.todoData?.reminder_settings || { privacy_mode: false, global_rules: [] };
+            // 恢复真实的提醒设置并更新 UI
+            const rs = appState.todoData?.reminder_settings || { enabled: true, privacy_mode: false, global_rules: [] };
+            const isEnabled = rs.enabled !== false;
+            applyReminderToggleVisual(isEnabled);
+
             const privacySelect = document.getElementById('setting-privacy-mode');
             if (privacySelect) privacySelect.value = String(rs.privacy_mode || false);
             try {
@@ -3763,7 +3802,7 @@ function initApp() {
                 console.error("Failed to render global rules:", e);
             }
 
-            // 获取并显示当前版本号
+            // 获取并设当前版本号
             try {
                 const currentVersion = await invoke('get_app_version');
                 const versionTextEl = document.getElementById('current-version-text');
@@ -3810,62 +3849,80 @@ function initApp() {
                 console.error("Failed to render collab list:", e);
             }
         });
+    }
 
+    if (settingSyncMode) {
         settingSyncMode.addEventListener('change', (e) => {
             if (e.target.value === 'webdav') {
-                settingLocalGroup.style.display = 'none';
-                settingWebdavGroup.style.display = 'block';
+                if (settingLocalGroup) settingLocalGroup.style.display = 'none';
+                if (settingWebdavGroup) settingWebdavGroup.style.display = 'block';
             } else {
-                settingLocalGroup.style.display = 'block';
-                settingWebdavGroup.style.display = 'none';
+                if (settingLocalGroup) settingLocalGroup.style.display = 'block';
+                if (settingWebdavGroup) settingWebdavGroup.style.display = 'none';
             }
         });
+    }
 
+    if (settingChooseDirBtn) {
         settingChooseDirBtn.addEventListener('click', async () => {
             try {
                 await invoke('set_always_on_top', { alwaysOnTop: true });
                 const selectedPath = await invoke("pick_sync_folder");
                 await invoke('set_always_on_top', { alwaysOnTop: false });
-                if (selectedPath) {
+                if (selectedPath && settingSyncPath) {
                     settingSyncPath.value = selectedPath;
-                    await invoke("set_sync_path", { newPath: selectedPath });
                 }
             } catch (e) {
                 console.error("Failed to pick folder", e);
                 await invoke('set_always_on_top', { alwaysOnTop: false });
             }
         });
+    }
 
+    if (settingsCancelBtn) {
         settingsCancelBtn.addEventListener('click', () => {
-            settingsModal.classList.remove('active');
+            if (settingsModal) settingsModal.classList.remove('active');
         });
+    }
 
+    if (settingsSaveBtn) {
         settingsSaveBtn.addEventListener('click', async () => {
             const newConfig = {
-                sync_mode: settingSyncMode.value,
-                sync_path: settingSyncPath.value,
-                webdav_url: settingWebdavUrl.value,
-                webdav_username: settingWebdavUser.value,
-                webdav_password: settingWebdavPass.value,
-                webdav_filepath: settingWebdavFilepath.value,
-                nickname: document.getElementById('setting-nickname').value.trim() || null,
-                default_due_date: document.getElementById('setting-default-due-date').value,
-                default_insertion: document.getElementById('setting-default-insertion').value
+                sync_mode: settingSyncMode ? settingSyncMode.value : 'local',
+                sync_path: settingSyncPath ? settingSyncPath.value : '',
+                webdav_url: settingWebdavUrl ? settingWebdavUrl.value : '',
+                webdav_username: settingWebdavUser ? settingWebdavUser.value : '',
+                webdav_password: settingWebdavPass ? settingWebdavPass.value : '',
+                webdav_filepath: settingWebdavFilepath ? settingWebdavFilepath.value : '',
+                nickname: document.getElementById('setting-nickname') ? document.getElementById('setting-nickname').value.trim() || null : null,
+                default_due_date: document.getElementById('setting-default-due-date') ? document.getElementById('setting-default-due-date').value : 'none',
+                default_insertion: document.getElementById('setting-default-insertion') ? document.getElementById('setting-default-insertion').value : 'top'
             };
+
+            if (newConfig.sync_mode === 'local' && newConfig.sync_path) {
+                try {
+                    await invoke("set_sync_path", { newPath: newConfig.sync_path });
+                } catch (e) {
+                    console.error("Failed to set sync path on save:", e);
+                }
+            }
+
             await invoke("save_app_config", { config: newConfig });
             appState.appConfig = newConfig;
 
             // 保存提醒配置到 todoData
             const privacySelect = document.getElementById('setting-privacy-mode');
             appState.todoData.reminder_settings = {
+                enabled: reminderHiddenInput ? (reminderHiddenInput.value === 'true') : true,
                 privacy_mode: privacySelect ? (privacySelect.value === 'true') : false,
                 global_rules: collectGlobalRulesFromUI()
             };
             
-            settingsModal.classList.remove('active');
+            if (settingsModal) settingsModal.classList.remove('active');
             await saveData();
             await loadData();
         });
+    }
 
         // 绑定新增全局规则与导入预设按钮
         const addRuleBtn = document.getElementById('add-global-rule-btn');
@@ -3888,8 +3945,14 @@ function initApp() {
         const importPresetBtn = document.getElementById('import-preset-btn');
         const presetModal = document.getElementById('preset-modal');
         const closePresetModalBtn = document.getElementById('close-preset-modal-btn');
+        const confirmImportPresetsBtn = document.getElementById('confirm-import-presets-btn');
+        const presetSelectAll = document.getElementById('preset-select-all');
+        const presetItemCheckboxes = document.querySelectorAll('.preset-item-checkbox');
+
         if (importPresetBtn && presetModal) {
             importPresetBtn.addEventListener('click', () => {
+                if (presetSelectAll) presetSelectAll.checked = true;
+                presetItemCheckboxes.forEach(cb => cb.checked = true);
                 presetModal.style.display = 'flex';
                 presetModal.classList.add('active');
             });
@@ -3901,14 +3964,27 @@ function initApp() {
             });
         }
 
-        const presetItemBtns = document.querySelectorAll('.import-preset-item-btn');
-        presetItemBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const presetId = btn.getAttribute('data-preset');
+        if (presetSelectAll) {
+            presetSelectAll.addEventListener('change', (e) => {
+                const isChecked = e.target.checked;
+                presetItemCheckboxes.forEach(cb => cb.checked = isChecked);
+            });
+        }
+
+        presetItemCheckboxes.forEach(cb => {
+            cb.addEventListener('change', () => {
+                if (presetSelectAll) {
+                    const allChecked = Array.from(presetItemCheckboxes).every(item => item.checked);
+                    presetSelectAll.checked = allChecked;
+                }
+            });
+        });
+
+        if (confirmImportPresetsBtn) {
+            confirmImportPresetsBtn.addEventListener('click', () => {
                 const currentRules = collectGlobalRulesFromUI();
-                let newRule = null;
-                if (presetId === '1') {
-                    newRule = {
+                const presetsMap = {
+                    '1': {
                         id: generateUUID(),
                         enabled: true,
                         time: '12:00',
@@ -3916,19 +3992,17 @@ function initApp() {
                         task_scope: 'all',
                         title: '',
                         body: '每一个不曾起舞的日子，都是对生命的辜负'
-                    };
-                } else if (presetId === '2') {
-                    newRule = {
+                    },
+                    '2': {
                         id: generateUUID(),
                         enabled: true,
                         time: '16:00',
                         condition: 'unconditional',
                         task_scope: 'all',
-                        title: '不要放弃下午四点',
-                        body: '不要温和地走进那个良夜'
-                    };
-                } else if (presetId === '3') {
-                    newRule = {
+                        title: '',
+                        body: 'Do not go gentle into that good night'
+                    },
+                    '3': {
                         id: generateUUID(),
                         enabled: true,
                         time: '20:00',
@@ -3936,10 +4010,22 @@ function initApp() {
                         task_scope: 'today_only',
                         title: '',
                         body: '截至（20:00），仅今日任务还有 {remaining_count} 项未完成'
-                    };
-                }
-                if (newRule) {
-                    currentRules.push(newRule);
+                    }
+                };
+
+                let addedCount = 0;
+                presetItemCheckboxes.forEach(cb => {
+                    if (cb.checked) {
+                        const presetId = cb.getAttribute('data-preset');
+                        if (presetsMap[presetId]) {
+                            const newRule = { ...presetsMap[presetId], id: generateUUID() };
+                            currentRules.push(newRule);
+                            addedCount++;
+                        }
+                    }
+                });
+
+                if (addedCount > 0) {
                     renderGlobalRules(currentRules);
                 }
                 if (presetModal) {
@@ -3947,7 +4033,7 @@ function initApp() {
                     presetModal.classList.remove('active');
                 }
             });
-        });
+        }
     }
 
     // ====== 协作共享相关事件绑定 ======
@@ -4335,19 +4421,25 @@ function initApp() {
         });
     });
 
-    document.getElementById('stats-prev-btn').addEventListener('click', () => {
-        if (appState.statsPeriod === 'day') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() - 1);
-        else if (appState.statsPeriod === 'week') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() - 7);
-        else appState.statsTargetDate.setMonth(appState.statsTargetDate.getMonth() - 1);
-        render();
-    });
+    const statsPrevBtn = document.getElementById('stats-prev-btn');
+    if (statsPrevBtn) {
+        statsPrevBtn.addEventListener('click', () => {
+            if (appState.statsPeriod === 'day') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() - 1);
+            else if (appState.statsPeriod === 'week') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() - 7);
+            else appState.statsTargetDate.setMonth(appState.statsTargetDate.getMonth() - 1);
+            render();
+        });
+    }
 
-    document.getElementById('stats-next-btn').addEventListener('click', () => {
-        if (appState.statsPeriod === 'day') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() + 1);
-        else if (appState.statsPeriod === 'week') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() + 7);
-        else appState.statsTargetDate.setMonth(appState.statsTargetDate.getMonth() + 1);
-        render();
-    });
+    const statsNextBtn = document.getElementById('stats-next-btn');
+    if (statsNextBtn) {
+        statsNextBtn.addEventListener('click', () => {
+            if (appState.statsPeriod === 'day') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() + 1);
+            else if (appState.statsPeriod === 'week') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() + 7);
+            else appState.statsTargetDate.setMonth(appState.statsTargetDate.getMonth() + 1);
+            render();
+        });
+    }
 
     // 统计筛选下拉菜单事件绑定
     const filterToggleBtn = document.getElementById('stats-filter-toggle-btn');
@@ -4395,31 +4487,35 @@ function initApp() {
     const searchInput = document.getElementById('search-input');
     const clearSearchBtn = document.getElementById('clear-search-btn');
 
-    tabToday.addEventListener('click', () => {
-        appState.dateFilter = 'today';
-        tabToday.classList.add('active');
-        tabAll.classList.remove('active');
-        if (allSubTabs) allSubTabs.classList.add('hidden');
-        toggleStatsView(false);
-    });
+    if (tabToday) {
+        tabToday.addEventListener('click', () => {
+            appState.dateFilter = 'today';
+            tabToday.classList.add('active');
+            if (tabAll) tabAll.classList.remove('active');
+            if (allSubTabs) allSubTabs.classList.add('hidden');
+            toggleStatsView(false);
+        });
+    }
 
-    tabAll.addEventListener('click', () => {
-        appState.dateFilter = 'all';
-        tabAll.classList.add('active');
-        tabToday.classList.remove('active');
-        if (allSubTabs) {
-            allSubTabs.classList.remove('hidden');
-            // 同步选中样式
-            if (appState.allTabMode === 'uncompleted') {
-                subTabUncompleted.classList.add('active');
-                subTabCompleted.classList.remove('active');
-            } else {
-                subTabCompleted.classList.add('active');
-                subTabUncompleted.classList.remove('active');
+    if (tabAll) {
+        tabAll.addEventListener('click', () => {
+            appState.dateFilter = 'all';
+            tabAll.classList.add('active');
+            if (tabToday) tabToday.classList.remove('active');
+            if (allSubTabs) {
+                allSubTabs.classList.remove('hidden');
+                // 同步选中样式
+                if (appState.allTabMode === 'uncompleted') {
+                    if (subTabUncompleted) subTabUncompleted.classList.add('active');
+                    if (subTabCompleted) subTabCompleted.classList.remove('active');
+                } else {
+                    if (subTabCompleted) subTabCompleted.classList.add('active');
+                    if (subTabUncompleted) subTabUncompleted.classList.remove('active');
+                }
             }
-        }
-        toggleStatsView(false);
-    });
+            toggleStatsView(false);
+        });
+    }
 
     // 搜索按钮切换显隐
     if (searchBtn && searchBar) {
@@ -4478,17 +4574,20 @@ function initApp() {
     }
 
     // 添加子步骤
-    document.getElementById('add-subtask-btn').addEventListener('click', () => {
-        const input = document.getElementById('add-subtask-input');
-        if (!input) return;
-        const content = input.value.trim();
-        if (content && appState.currentEditingTodo) {
-            appState.currentEditingSubtasks.unshift({ id: generateUUID(), content, completed: false });
-            input.value = '';
-            renderEditSubtasks();
-            autoSaveEdit();
-        }
-    });
+    const addSubtaskBtn = document.getElementById('add-subtask-btn');
+    if (addSubtaskBtn) {
+        addSubtaskBtn.addEventListener('click', () => {
+            const input = document.getElementById('add-subtask-input');
+            if (!input) return;
+            const content = input.value.trim();
+            if (content && appState.currentEditingTodo) {
+                appState.currentEditingSubtasks.unshift({ id: generateUUID(), content, completed: false });
+                input.value = '';
+                renderEditSubtasks();
+                autoSaveEdit();
+            }
+        });
+    }
 
     const addSubtaskInput = document.getElementById('add-subtask-input');
     if (addSubtaskInput) {
@@ -4501,9 +4600,11 @@ function initApp() {
     }
 
     // 导入模态框
-    document.getElementById('import-cancel-btn').addEventListener('click', closeImportModal);
+    const importCancelBtn = document.getElementById('import-cancel-btn');
+    if (importCancelBtn) importCancelBtn.addEventListener('click', closeImportModal);
 
-    document.getElementById('import-confirm-btn').addEventListener('click', async () => {
+    const importConfirmBtnEl = document.getElementById('import-confirm-btn');
+    if (importConfirmBtnEl) importConfirmBtnEl.addEventListener('click', async () => {
         const listItems = document.querySelectorAll('#import-tasks-list .subtask-item');
         const targetDateStr = appState.currentImportType === 'weekly' ? getThisWeekString() : getThisMonthString();
         let imported = false;
@@ -4661,86 +4762,116 @@ function initApp() {
         });
     }
 
-    document.getElementById('edit-modal').addEventListener('click', (e) => {
-        if (e.target.id === 'edit-modal') closeEditModal();
-    });
+    const editModalEl = document.getElementById('edit-modal');
+    if (editModalEl) {
+        editModalEl.addEventListener('click', (e) => {
+            if (e.target.id === 'edit-modal') closeEditModal();
+        });
+    }
 
-    document.getElementById('delete-confirm-modal').addEventListener('click', (e) => {
-        if (e.target.id === 'delete-confirm-modal') {
-            document.getElementById('delete-confirm-modal').classList.remove('active');
-        }
-    });
+    const deleteConfirmModalEl = document.getElementById('delete-confirm-modal');
+    if (deleteConfirmModalEl) {
+        deleteConfirmModalEl.addEventListener('click', (e) => {
+            if (e.target.id === 'delete-confirm-modal') {
+                deleteConfirmModalEl.classList.remove('active');
+            }
+        });
+    }
 
-    document.getElementById('modal-delete-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (!appState.currentEditingTodo) return;
-        const confirmModal = document.getElementById('delete-confirm-modal');
-        confirmModal.classList.add('active');
-    });
+    const modalDeleteBtn = document.getElementById('modal-delete-btn');
+    if (modalDeleteBtn) {
+        modalDeleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!appState.currentEditingTodo) return;
+            if (deleteConfirmModalEl) deleteConfirmModalEl.classList.add('active');
+        });
+    }
 
-    document.getElementById('delete-cancel-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        document.getElementById('delete-confirm-modal').classList.remove('active');
-    });
+    const deleteCancelBtn = document.getElementById('delete-cancel-btn');
+    if (deleteCancelBtn) {
+        deleteCancelBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (deleteConfirmModalEl) deleteConfirmModalEl.classList.remove('active');
+        });
+    }
 
-    document.getElementById('delete-confirm-btn').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (!appState.currentEditingTodo) return;
-        const index = appState.todoData.todos.findIndex(t => t.id === appState.currentEditingTodo.id);
-        if (index !== -1) {
-            appState.todoData.todos[index].deleted = true;
-            appState.todoData.todos[index].updated_at = new Date().toISOString();
-            render();
-            await saveData();
-        }
-        document.getElementById('delete-confirm-modal').classList.remove('active');
-        closeEditModal();
-    });
+    const deleteConfirmBtn = document.getElementById('delete-confirm-btn');
+    if (deleteConfirmBtn) {
+        deleteConfirmBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!appState.currentEditingTodo) return;
+            const index = appState.todoData.todos.findIndex(t => t.id === appState.currentEditingTodo.id);
+            if (index !== -1) {
+                appState.todoData.todos[index].deleted = true;
+                appState.todoData.todos[index].updated_at = new Date().toISOString();
+                render();
+                await saveData();
+            }
+            if (deleteConfirmModalEl) deleteConfirmModalEl.classList.remove('active');
+            closeEditModal();
+        });
+    }
 
-    document.getElementById('modal-tomorrow-btn').addEventListener('click', async () => {
-        if (!appState.currentEditingTodo) return;
-        document.getElementById('edit-date').value = getTomorrowString();
-        await autoSaveEdit();
-        closeEditModal();
-    });
+    const modalTomorrowBtn = document.getElementById('modal-tomorrow-btn');
+    if (modalTomorrowBtn) {
+        modalTomorrowBtn.addEventListener('click', async () => {
+            if (!appState.currentEditingTodo) return;
+            const editDateEl = document.getElementById('edit-date');
+            if (editDateEl) editDateEl.value = getTomorrowString();
+            await autoSaveEdit();
+            closeEditModal();
+        });
+    }
 
     // Back button
-    document.getElementById('modal-back-btn').addEventListener('click', () => {
-        closeEditModal();
-    });
+    const modalBackBtn = document.getElementById('modal-back-btn');
+    if (modalBackBtn) {
+        modalBackBtn.addEventListener('click', () => {
+            closeEditModal();
+        });
+    }
 
     // 复制子步骤逻辑
     const copyModal = document.getElementById('copy-modal');
-    document.getElementById('sort-subtasks-btn').addEventListener('click', () => {
-        if (!appState.currentEditingSubtasks || appState.currentEditingSubtasks.length === 0) return;
-        appState.currentEditingSubtasks.sort((a, b) => {
-            if (a.completed !== b.completed) {
-                return a.completed ? 1 : -1;
-            }
-            if (a.completed) {
-                const timeA = a.completed_at || '';
-                const timeB = b.completed_at || '';
-                return timeB.localeCompare(timeA);
-            }
-            return 0;
+    const sortSubtasksBtn = document.getElementById('sort-subtasks-btn');
+    if (sortSubtasksBtn) {
+        sortSubtasksBtn.addEventListener('click', () => {
+            if (!appState.currentEditingSubtasks || appState.currentEditingSubtasks.length === 0) return;
+            appState.currentEditingSubtasks.sort((a, b) => {
+                if (a.completed !== b.completed) {
+                    return a.completed ? 1 : -1;
+                }
+                if (a.completed) {
+                    const timeA = a.completed_at || '';
+                    const timeB = b.completed_at || '';
+                    return timeB.localeCompare(timeA);
+                }
+                return 0;
+            });
+            renderEditSubtasks();
+            autoSaveEdit();
         });
-        renderEditSubtasks();
-        autoSaveEdit();
-    });
+    }
 
-    document.getElementById('copy-subtasks-btn').addEventListener('click', () => {
-        if (!appState.currentEditingSubtasks || appState.currentEditingSubtasks.length === 0) {
-            showToast('没有子步骤可复制');
-            return;
-        }
-        copyModal.style.display = 'flex';
-        // Force reflow
-        void copyModal.offsetWidth;
-        copyModal.classList.add('active');
-    });
+    const copySubtasksBtn = document.getElementById('copy-subtasks-btn');
+    if (copySubtasksBtn) {
+        copySubtasksBtn.addEventListener('click', () => {
+            if (!appState.currentEditingSubtasks || appState.currentEditingSubtasks.length === 0) {
+                showToast('没有子步骤可复制');
+                return;
+            }
+            if (copyModal) {
+                copyModal.style.display = 'flex';
+                // Force reflow
+                void copyModal.offsetWidth;
+                copyModal.classList.add('active');
+            }
+        });
+    }
 
     const performCopy = async (format) => {
-        const copyOnlyUncompleted = document.getElementById('copy-only-uncompleted-switch').checked;
+        const copyOnlyUncompletedSwitch = document.getElementById('copy-only-uncompleted-switch');
+        const copyOnlyUncompleted = copyOnlyUncompletedSwitch ? copyOnlyUncompletedSwitch.checked : false;
         let textToCopy = '';
         let indexForNumberedList = 1;
         appState.currentEditingSubtasks.forEach((sub, i) => {
@@ -4761,16 +4892,24 @@ function initApp() {
         } catch (e) {
             console.error('Clipboard error', e);
         }
-        copyModal.classList.remove('active');
-        setTimeout(() => copyModal.style.display = 'none', 200);
+        if (copyModal) {
+            copyModal.classList.remove('active');
+            setTimeout(() => copyModal.style.display = 'none', 200);
+        }
     };
 
-    document.getElementById('copy-opt-1').addEventListener('click', () => performCopy('1'));
-    document.getElementById('copy-opt-2').addEventListener('click', () => performCopy('2'));
-    document.getElementById('copy-opt-3').addEventListener('click', () => performCopy('3'));
-    document.getElementById('copy-opt-cancel').addEventListener('click', () => {
-        copyModal.classList.remove('active');
-        setTimeout(() => copyModal.style.display = 'none', 200);
+    const copyOpt1 = document.getElementById('copy-opt-1');
+    const copyOpt2 = document.getElementById('copy-opt-2');
+    const copyOpt3 = document.getElementById('copy-opt-3');
+    const copyOptCancel = document.getElementById('copy-opt-cancel');
+    if (copyOpt1) copyOpt1.addEventListener('click', () => performCopy('1'));
+    if (copyOpt2) copyOpt2.addEventListener('click', () => performCopy('2'));
+    if (copyOpt3) copyOpt3.addEventListener('click', () => performCopy('3'));
+    if (copyOptCancel) copyOptCancel.addEventListener('click', () => {
+        if (copyModal) {
+            copyModal.classList.remove('active');
+            setTimeout(() => copyModal.style.display = 'none', 200);
+        }
     });
 
 // ====== 创建并添加待办的统一逻辑 ======
@@ -4852,12 +4991,14 @@ async function createAndAddTodo(raw) {
 }
 
     // 添加新待办表单
-    formEl.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const raw = inputEl.value;
-        const ok = await createAndAddTodo(raw);
-        if (ok) inputEl.value = '';
-    });
+    if (formEl) {
+        formEl.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const raw = inputEl ? inputEl.value : '';
+            const ok = await createAndAddTodo(raw);
+            if (ok && inputEl) inputEl.value = '';
+        });
+    }
 
     // Watch file changes
     listen("todo_data_changed", () => {
@@ -4890,22 +5031,26 @@ async function createAndAddTodo(raw) {
         }
     });
 
-    quickAddInput.addEventListener('keydown', async (e) => {
-        if (e.key === 'Escape') {
-            quickAddModal.classList.remove('active');
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            const raw = quickAddInput.value.trim();
-            const ok = await createAndAddTodo(raw);
-            if (ok) quickAddModal.classList.remove('active');
-        }
-    });
+    if (quickAddInput) {
+        quickAddInput.addEventListener('keydown', async (e) => {
+            if (e.key === 'Escape') {
+                if (quickAddModal) quickAddModal.classList.remove('active');
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                const raw = quickAddInput.value.trim();
+                const ok = await createAndAddTodo(raw);
+                if (ok && quickAddModal) quickAddModal.classList.remove('active');
+            }
+        });
+    }
 
-    quickAddModal.addEventListener('mousedown', (e) => {
-        if (e.target === quickAddModal) {
-            quickAddModal.classList.remove('active');
-        }
-    });
+    if (quickAddModal) {
+        quickAddModal.addEventListener('mousedown', (e) => {
+            if (e.target === quickAddModal) {
+                quickAddModal.classList.remove('active');
+            }
+        });
+    }
 
     // 初始加载
     loadData();
@@ -4928,14 +5073,14 @@ async function createAndAddTodo(raw) {
     // 全局拖动支持
     document.addEventListener('mousedown', (e) => {
         const isInteractive = e.target.closest('button, input, select, .checkbox, .edit-btn, .tab-btn, .todo-item, .collapsible-header, .reminder-bar, .reminder-btn, .clear-search-btn');
-        const modalActive = document.getElementById('edit-modal').classList.contains('active');
+        const editModalEl2 = document.getElementById('edit-modal');
+        const modalActive = editModalEl2 && editModalEl2.classList.contains('active');
         const isScrollbar = e.offsetX > e.target.clientWidth || e.offsetY > e.target.clientHeight;
 
         if (!isInteractive && !modalActive && !isScrollbar) {
             invoke('start_drag').catch(err => console.error('Failed to drag:', err));
         }
     });
-}
 
 if (document.readyState === 'loading') {
     window.addEventListener('DOMContentLoaded', initApp);

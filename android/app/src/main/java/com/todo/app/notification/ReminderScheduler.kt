@@ -21,6 +21,10 @@ class ReminderScheduler(private val context: Context) {
     private val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
     fun rescheduleAll(todoData: TodoData) {
+        if (!todoData.reminderSettings.enabled) {
+            return
+        }
+
         val now = System.currentTimeMillis()
         val todayStr = LocalDate.now().toString()
 

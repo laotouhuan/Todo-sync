@@ -20,6 +20,10 @@ class ReminderReceiver : BroadcastReceiver() {
         val repo = app.repository
         val todoData = repo.getCurrentData()
 
+        if (!todoData.reminderSettings.enabled) {
+            return
+        }
+
         when (type) {
             "task" -> handleTaskReminder(context, todoData, targetId)
             "global" -> handleGlobalReminder(context, todoData, targetId)
