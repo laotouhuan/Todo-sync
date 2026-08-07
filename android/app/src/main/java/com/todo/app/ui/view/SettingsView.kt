@@ -50,6 +50,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import com.todo.app.data.model.ShareCodePayload
 import com.todo.app.data.model.CollaborationSource
+import com.todo.app.data.model.isOverdue
 import java.util.UUID
 
 @Composable
@@ -127,13 +128,13 @@ fun SettingsView(viewModel: TodoViewModel) {
         ) {
             TabRow(
                 selectedTabIndex = activeTab,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().height(48.dp)
             ) {
                 tabTitles.forEachIndexed { index, title ->
                     Tab(
                         selected = activeTab == index,
                         onClick = { activeTab = index },
-                        text = { Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                        text = { Text(title, fontWeight = FontWeight.Bold, maxLines = 1) }
                     )
                 }
             }
@@ -691,6 +692,122 @@ private fun ReminderSettingsPanel(
             }
 
             if (enabled) {
+                Spacer(Modifier.height(10.dp))
+
+                var showPermissionDialog by remember { mutableStateOf(false) }
+                val context = androidx.compose.ui.platform.LocalContext.current
+
+                val hasNotif = com.todo.app.notification.PermissionHelper.isNotificationPermissionGranted(context)
+                val hasAlarm = com.todo.app.notification.PermissionHelper.checkExactAlarmPermission(context)
+                val hasBattery = com.todo.app.notification.PermissionHelper.checkBatteryOptimizationPermission(context)
+                val allGranted = hasNotif && hasAlarm && hasBattery
+
+                OutlinedButton(
+                    onClick = { showPermissionDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(
+                        if (allGranted) Icons.Default.Check else Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = if (allGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (allGranted) "系统提醒权限：已全部开启" else "检测并开启必要提醒权限",
+                        color = if (allGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    )
+                }
+
+                if (showPermissionDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showPermissionDialog = false },
+                        title = { Text("提醒权限检测", fontWeight = FontWeight.Bold) },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text(
+                                    "为保证提醒能准时到达，请确保以下系统权限已开启：",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                // 1. 通知权限
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("通知权限", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                        Text("允许应用弹出通知消息", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (hasNotif) {
+                                        Text("已开启", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                                    } else {
+                                        TextButton(onClick = {
+                                            com.todo.app.notification.PermissionHelper.openNotificationSettings(context)
+                                        }) {
+                                            Text("去开启")
+                                        }
+                                    }
+                                }
+
+                                HorizontalDivider()
+
+                                // 2. 精确闹钟权限
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("精确闹钟权限", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                        Text("允许应用准时触发闹钟", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (hasAlarm) {
+                                        Text("已开启", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                                    } else {
+                                        TextButton(onClick = {
+                                            com.todo.app.notification.PermissionHelper.requestExactAlarmPermission(context)
+                                        }) {
+                                            Text("去开启")
+                                        }
+                                    }
+                                }
+
+                                HorizontalDivider()
+
+                                // 3. 忽略电池优化
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("后台运行 / 忽略电池优化", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                        Text("防止锁屏后被系统休眠杀死", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (hasBattery) {
+                                        Text("已开启", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                                    } else {
+                                        TextButton(onClick = {
+                                            com.todo.app.notification.PermissionHelper.requestBatteryOptimizationPermission(context)
+                                        }) {
+                                            Text("去开启")
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showPermissionDialog = false }) {
+                                Text("完成")
+                            }
+                        }
+                    )
+                }
+
                 Spacer(Modifier.height(12.dp))
                 TextDivider("提醒模式与规则")
                 Spacer(Modifier.height(8.dp))
@@ -759,6 +876,7 @@ private fun ReminderSettingsPanel(
                 globalRules.forEachIndexed { index, rule ->
                     GlobalRuleCard(
                         rule = rule,
+                        allTodos = todoData.todos,
                         onUpdate = { updatedRule ->
                             val updatedList = globalRules.toMutableList()
                             updatedList[index] = updatedRule
@@ -900,6 +1018,7 @@ private fun ReminderSettingsPanel(
 @Composable
 private fun GlobalRuleCard(
     rule: com.todo.app.data.model.GlobalReminderRule,
+    allTodos: List<com.todo.app.data.model.Todo> = emptyList(),
     onUpdate: (com.todo.app.data.model.GlobalReminderRule) -> Unit,
     onDelete: () -> Unit
 ) {
@@ -963,7 +1082,7 @@ private fun GlobalRuleCard(
                     Spacer(Modifier.height(6.dp))
                     Text("任务类型筛选", style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        val scopeOpts = listOf("all" to "全部任务", "today_only" to "仅今日", "recurring_only" to "仅打卡")
+                        val scopeOpts = listOf("all" to "全部任务", "today_only" to "仅今日任务（含逾期）", "recurring_only" to "仅打卡")
                         scopeOpts.forEach { (valStr, label) ->
                             FilterChip(
                                 selected = localTaskScope == valStr,
@@ -972,6 +1091,12 @@ private fun GlobalRuleCard(
                             )
                         }
                     }
+                    Text(
+                        text = "💡 说明：所有统计均基于【今日视角】，计算今日的任务情况",
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                        color = androidx.compose.ui.graphics.Color(0xFF10B981),
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
                 }
 
                 Spacer(Modifier.height(6.dp))
@@ -1008,10 +1133,9 @@ private fun GlobalRuleCard(
                             "{total_count}" to "总任务数量",
                             "{overdue_count}" to "逾期任务数量",
                             "{completion_rate}" to "任务完成百分比",
-                            "{time}" to "提醒设定时间",
-                            "{now_time}" to "当前精确时间",
-                            "{today_date}" to "今日日期",
-                            "{weekday}" to "当前星期"
+                            "{time}" to "系统实时精确时间",
+                            "{date}" to "系统今日日期",
+                            "{weekday}" to "当前星期几"
                         )
                         varList.forEach { (code, label) ->
                             DropdownMenuItem(
@@ -1042,16 +1166,67 @@ private fun GlobalRuleCard(
 
                 if (localBody.contains("{") && localBody.contains("}")) {
                     Spacer(Modifier.height(4.dp))
+                    val today = java.time.LocalDate.now()
+                    val todayStr = today.toString()
+                    val thisWeekStr = com.todo.app.data.model.weekStringOf(today)
+                    val thisMonthStr = com.todo.app.data.model.monthStringOf(today)
+
+                    val activeTodos = allTodos.filter { !it.deleted }
+                    val isRecurringTask = { t: com.todo.app.data.model.Todo ->
+                        if (t.recurring == com.todo.app.data.model.RecurringType.DAILY_REPEAT) {
+                            val d = t.date
+                            d == null || d == todayStr
+                        } else if (t.taskType == com.todo.app.data.model.TaskType.WEEKLY_CHECKIN) {
+                            t.date == thisWeekStr || t.date == null
+                        } else if (t.taskType == com.todo.app.data.model.TaskType.MONTHLY_CHECKIN) {
+                            t.date == thisMonthStr || t.date == null
+                        } else {
+                            false
+                        }
+                    }
+
+                    val scopedTodos = activeTodos.filter {
+                        when (localTaskScope) {
+                            "today_only" -> !isRecurringTask(it) && (it.date == todayStr || it.isOverdue(todayStr))
+                            "recurring_only" -> isRecurringTask(it)
+                            else -> it.date == todayStr || it.isOverdue(todayStr) || isRecurringTask(it)
+                        }
+                    }
+
+                    val isTaskCompletedToday = { t: com.todo.app.data.model.Todo ->
+                        if (t.completed) {
+                            true
+                        } else if (t.taskType == com.todo.app.data.model.TaskType.WEEKLY_CHECKIN || t.taskType == com.todo.app.data.model.TaskType.MONTHLY_CHECKIN) {
+                            t.completedDates.any { it.startsWith(todayStr) }
+                        } else {
+                            false
+                        }
+                    }
+
+                    val realOverdue = if (localTaskScope == "recurring_only") 0 else scopedTodos.count { it.isOverdue(todayStr) }
+                    val realRemaining = scopedTodos.count { !isTaskCompletedToday(it) }
+                    val realCompleted = scopedTodos.count { isTaskCompletedToday(it) }
+                    val realTotal = scopedTodos.size
+                    val realRate = if (realTotal > 0) Math.round((realCompleted.toDouble() / realTotal) * 100).toInt() else 0
+
+                    val now = java.time.LocalTime.now()
+                    val nowTimeStr = String.format("%02d:%02d", now.hour, now.minute)
+                    val todayDate = java.time.LocalDate.now()
+                    val todayDateStr = String.format("%02d月%02d日", todayDate.monthValue, todayDate.dayOfMonth)
+                    val weekdays = arrayOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")
+                    val weekdayStr = weekdays[todayDate.dayOfWeek.value % 7]
+
                     val previewText = localBody
-                        .replace("{remaining_count}", "3")
-                        .replace("{completed_count}", "5")
-                        .replace("{total_count}", "8")
-                        .replace("{overdue_count}", "2")
-                        .replace("{completion_rate}", "62%")
-                        .replace("{time}", localTime)
-                        .replace("{now_time}", "12:00")
-                        .replace("{today_date}", "08月06日")
-                        .replace("{weekday}", "周四")
+                        .replace("{remaining_count}", realRemaining.toString())
+                        .replace("{completed_count}", realCompleted.toString())
+                        .replace("{total_count}", realTotal.toString())
+                        .replace("{overdue_count}", realOverdue.toString())
+                        .replace("{completion_rate}", "$realRate%")
+                        .replace("{time}", nowTimeStr)
+                        .replace("{now_time}", nowTimeStr)
+                        .replace("{date}", todayDateStr)
+                        .replace("{today_date}", todayDateStr)
+                        .replace("{weekday}", weekdayStr)
 
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),

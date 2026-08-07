@@ -9,6 +9,9 @@ import com.todo.app.data.model.RecurringType
 import com.todo.app.data.model.TaskType
 import com.todo.app.data.model.Todo
 import com.todo.app.data.model.TodoData
+import com.todo.app.data.model.isOverdue
+import com.todo.app.data.model.weekStringOf
+import com.todo.app.data.model.monthStringOf
 import java.time.LocalDate
 
 class ReminderReceiver : BroadcastReceiver() {
@@ -50,23 +53,55 @@ class ReminderReceiver : BroadcastReceiver() {
         val rule = todoData.reminderSettings.globalRules.find { it.id == ruleId } ?: return
         if (!rule.enabled) return
 
-        val todayStr = LocalDate.now().toString()
-        val todayTodos = todoData.todos.filter { !it.deleted && (it.date == todayStr || isCheckinTask(it)) }
-        val scopedTodos = filterByScope(todayTodos, rule.taskScope)
+        val today = LocalDate.now()
+        val todayStr = today.toString()
+        val thisWeekStr = com.todo.app.data.model.weekStringOf(today)
+        val thisMonthStr = com.todo.app.data.model.monthStringOf(today)
+
+        val activeTodos = todoData.todos.filter { !it.deleted }
+        val isRecurringTask = { t: Todo ->
+            if (t.recurring == RecurringType.DAILY_REPEAT) {
+                val d = t.date
+                d == null || d == todayStr
+            } else if (t.taskType == TaskType.WEEKLY_CHECKIN) {
+                t.date == thisWeekStr || t.date == null
+            } else if (t.taskType == TaskType.MONTHLY_CHECKIN) {
+                t.date == thisMonthStr || t.date == null
+            } else {
+                false
+            }
+        }
+
+        val scopedTodos = activeTodos.filter {
+            when (rule.taskScope) {
+                "today_only" -> !isRecurringTask(it) && (it.date == todayStr || it.isOverdue(todayStr))
+                "recurring_only" -> isRecurringTask(it)
+                else -> it.date == todayStr || it.isOverdue(todayStr) || isRecurringTask(it)
+            }
+        }
+
+        val isTaskCompletedToday = { t: Todo ->
+            if (t.completed) {
+                true
+            } else if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
+                t.completedDates.any { it.startsWith(todayStr) }
+            } else {
+                false
+            }
+        }
 
         val shouldTrigger = when (rule.condition) {
-            "none_completed" -> scopedTodos.none { it.completed }
-            "any_remaining" -> scopedTodos.any { !it.completed }
+            "none_completed" -> scopedTodos.none { isTaskCompletedToday(it) }
+            "any_remaining" -> scopedTodos.any { !isTaskCompletedToday(it) }
             "unconditional" -> true
             else -> false
         }
-
         if (!shouldTrigger) return
 
-        val remainingCount = scopedTodos.count { !it.completed }
-        val completedCount = scopedTodos.count { it.completed }
+        val remainingCount = scopedTodos.count { !isTaskCompletedToday(it) }
+        val completedCount = scopedTodos.count { isTaskCompletedToday(it) }
         val totalCount = scopedTodos.size
-        val overdueCount = scopedTodos.count { !it.completed && (it.date?.let { d -> d < todayStr } == true) }
+        val overdueCount = if (rule.taskScope == "recurring_only") 0 else scopedTodos.count { it.isOverdue(todayStr) }
         val rateVal = if (totalCount > 0) Math.round((completedCount.toDouble() / totalCount) * 100).toInt() else 0
 
         val now = java.time.LocalTime.now()
@@ -78,14 +113,15 @@ class ReminderReceiver : BroadcastReceiver() {
         val weekdayStr = weekdays[todayDate.dayOfWeek.value % 7]
 
         val resolvedBody = rule.body
-            .replace("{time}", rule.time)
+            .replace("{time}", nowTimeStr)
             .replace("{now_time}", nowTimeStr)
+            .replace("{date}", todayDateStr)
+            .replace("{today_date}", todayDateStr)
             .replace("{remaining_count}", remainingCount.toString())
             .replace("{completed_count}", completedCount.toString())
             .replace("{total_count}", totalCount.toString())
             .replace("{overdue_count}", overdueCount.toString())
             .replace("{completion_rate}", "$rateVal%")
-            .replace("{today_date}", todayDateStr)
             .replace("{weekday}", weekdayStr)
 
         val notification = NotificationHelper.buildGlobalNotification(context, rule, resolvedBody)

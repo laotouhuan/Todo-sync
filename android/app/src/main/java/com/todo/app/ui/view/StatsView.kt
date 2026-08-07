@@ -141,10 +141,10 @@ fun StatsView(viewModel: TodoViewModel) {
     var showEditDialogFor by remember { mutableStateOf<Todo?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 二级 Tab (顶栏零间距挂载)
-        TabRow(selectedTabIndex = subTab, modifier = Modifier.fillMaxWidth()) {
-            Tab(selected = subTab == 0, onClick = { subTab = 0 }, text = { Text("效率洞察", fontWeight = FontWeight.Bold) })
-            Tab(selected = subTab == 1, onClick = { subTab = 1 }, text = { Text("清单健康", fontWeight = FontWeight.Bold) })
+        // 二级 Tab (顶栏零间距挂载，固定 48.dp 高度)
+        TabRow(selectedTabIndex = subTab, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+            Tab(selected = subTab == 0, onClick = { subTab = 0 }, text = { Text("效率洞察", fontWeight = FontWeight.Bold, maxLines = 1) })
+            Tab(selected = subTab == 1, onClick = { subTab = 1 }, text = { Text("清单健康", fontWeight = FontWeight.Bold, maxLines = 1) })
         }
 
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {

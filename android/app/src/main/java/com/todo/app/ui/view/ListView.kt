@@ -409,9 +409,9 @@ fun ClassicListView(viewModel: TodoViewModel) {
     val isReadOnly = activeSource is TodoViewModel.ActiveSource.Collaboration
 
     Column(modifier = Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = selectedTab, modifier = Modifier.fillMaxWidth()) {
-            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("今天聚焦", fontWeight = FontWeight.Bold) })
-            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("全部待办", fontWeight = FontWeight.Bold) })
+        TabRow(selectedTabIndex = selectedTab, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("今天聚焦", fontWeight = FontWeight.Bold, maxLines = 1) })
+            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("全部待办", fontWeight = FontWeight.Bold, maxLines = 1) })
         }
 
         // Real-time Search Input Bar
