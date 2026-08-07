@@ -140,19 +140,19 @@ fun StatsView(viewModel: TodoViewModel) {
     var subTab by remember { mutableIntStateOf(0) } // 0 = Insights, 1 = Health
     var showEditDialogFor by remember { mutableStateOf<Todo?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        // 二级 Tab
-        TabRow(selectedTabIndex = subTab) {
-            Tab(selected = subTab == 0, onClick = { subTab = 0 }, text = { Text("效率洞察") })
-            Tab(selected = subTab == 1, onClick = { subTab = 1 }, text = { Text("清单健康") })
+    Column(modifier = Modifier.fillMaxSize()) {
+        // 二级 Tab (顶栏零间距挂载)
+        TabRow(selectedTabIndex = subTab, modifier = Modifier.fillMaxWidth()) {
+            Tab(selected = subTab == 0, onClick = { subTab = 0 }, text = { Text("效率洞察", fontWeight = FontWeight.Bold) })
+            Tab(selected = subTab == 1, onClick = { subTab = 1 }, text = { Text("清单健康", fontWeight = FontWeight.Bold) })
         }
 
-        Spacer(Modifier.height(16.dp))
-
-        AnimatedContent(targetState = subTab, label = "statsSubTab") { currentTab ->
-            when (currentTab) {
-                0 -> InsightsContent(viewModel, onEditTodo = { showEditDialogFor = it })
-                1 -> HealthContent(viewModel)
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            AnimatedContent(targetState = subTab, label = "statsSubTab") { currentTab ->
+                when (currentTab) {
+                    0 -> InsightsContent(viewModel, onEditTodo = { showEditDialogFor = it })
+                    1 -> HealthContent(viewModel)
+                }
             }
         }
     }
