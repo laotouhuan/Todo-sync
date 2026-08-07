@@ -769,14 +769,12 @@ function renderGlobalRules(rules = []) {
     if (!container) return;
     container.innerHTML = '';
 
-    rules.forEach((rule) => {
+    const sortedRules = (rules || []).slice().sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+
+    sortedRules.forEach((rule) => {
         const card = document.createElement('div');
         card.className = 'global-rule-card';
         card.dataset.ruleId = rule.id || generateUUID();
-
-        const summaryText = rule.condition === 'unconditional'
-            ? '无条件定时提醒'
-            : `${rule.condition === 'none_completed' ? '未完成任何' : '存在未完成'} · ${rule.task_scope === 'all' ? '全部任务' : (rule.task_scope === 'today_only' ? '仅今日' : '仅打卡')}`;
 
         card.innerHTML = `
             <div class="rule-header" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
@@ -785,7 +783,7 @@ function renderGlobalRules(rules = []) {
                     <span class="slider"></span>
                 </label>
                 <span class="rule-time-label" style="font-weight: 600; font-size: 0.9rem;">${escapeHtml(rule.time || '12:00')}</span>
-                <span class="rule-summary" style="font-size: 0.75rem; color: var(--text-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(summaryText)}</span>
+                <div style="flex: 1;"></div>
                 <button type="button" class="rule-expand-btn icon-btn-small" style="background: none; border: none; color: var(--text-secondary); cursor: pointer;">▼</button>
                 <button type="button" class="rule-delete-btn icon-btn-small" style="background: none; border: none; color: var(--danger-color); cursor: pointer;" onclick="event.stopPropagation();">✕</button>
             </div>
@@ -1014,7 +1012,7 @@ function renderGlobalRules(rules = []) {
 
 function collectGlobalRulesFromUI() {
     const cards = Array.from(document.querySelectorAll('#global-rules-list .global-rule-card'));
-    return cards.map(card => {
+    const rules = cards.map(card => {
         const id = card.dataset.ruleId || generateUUID();
         const enabled = card.querySelector('.rule-enabled-switch')?.checked !== false;
         const timeRaw = card.querySelector('.rule-time-input')?.value.trim() || '12:00';
@@ -1033,6 +1031,7 @@ function collectGlobalRulesFromUI() {
             body
         };
     });
+    return rules.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
 }
 
 function saveData() {

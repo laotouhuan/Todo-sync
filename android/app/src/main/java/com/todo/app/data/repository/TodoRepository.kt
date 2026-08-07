@@ -323,13 +323,14 @@ class TodoRepository(private val context: Context) {
                     val mergedData = com.todo.app.data.model.MergeUtils.mergeTodoData(localData, cloudData)
 
                     val mergedJson = jsonFormat.encodeToString(mergedData)
-                    val localChanged = mergedData.todos != localData.todos
-                    val cloudChanged = mergedData.todos != cloudData.todos
+                    val localChanged = mergedData != localData
+                    val cloudChanged = mergedData != cloudData
                     if (localChanged) {
                         createLocalBackup()
                         _todoData.value = mergedData
                         atomicWriteJson(mergedJson)
                         com.todo.app.widget.refreshAllWidgets(context)
+                        com.todo.app.notification.ReminderScheduler(context).rescheduleAll(mergedData)
                         _uiEvent.send(UiEvent.ShowMessage("检测到云端更新，已自动同步完成"))
                     }
                     if (cloudChanged || localChanged) {
@@ -340,8 +341,10 @@ class TodoRepository(private val context: Context) {
                     Log.e(TAG, "syncWithCloud merge failed", e)
                 }
             } else {
-                // 当云端不存在该文件，或获取失败时，尝试将本地数据作为初始版本上传
-                client.uploadFile(configManager.filePath, jsonFormat.encodeToString(_todoData.value))
+                // 如果云端没有文件，尝试上传本地
+                val localData = _todoData.value
+                val localJson = jsonFormat.encodeToString(localData)
+                client.uploadFile(configManager.filePath, localJson)
             }
             _syncStatus.value = 0
             com.todo.app.widget.refreshAllWidgets(context)
@@ -369,6 +372,7 @@ class TodoRepository(private val context: Context) {
                 _todoData.value = migratedData
                 atomicWriteJson(jsonFormat.encodeToString(migratedData))
                 com.todo.app.widget.refreshAllWidgets(context)
+                com.todo.app.notification.ReminderScheduler(context).rescheduleAll(migratedData)
                 _uiEvent.send(UiEvent.ShowMessage("强制拉取成功！"))
             } else {
                 _uiEvent.send(UiEvent.ShowError("下载失败：找不到文件或密码错误"))
