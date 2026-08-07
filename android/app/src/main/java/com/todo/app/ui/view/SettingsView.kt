@@ -694,88 +694,90 @@ private fun ReminderSettingsPanel(
                 TextDivider("提醒模式与规则")
                 Spacer(Modifier.height(8.dp))
                 Text("单项任务通知模式", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChip(
-                    selected = !privacyMode,
-                    onClick = {
-                        privacyMode = false
-                        viewModel.updateReminderSettings(reminderSettings.copy(privacyMode = false))
-                    },
-                    label = { Text("明细模式") }
-                )
-                FilterChip(
-                    selected = privacyMode,
-                    onClick = {
-                        privacyMode = true
-                        viewModel.updateReminderSettings(reminderSettings.copy(privacyMode = true))
-                    },
-                    label = { Text("隐私模式") }
-                )
-            }
-
-            Spacer(Modifier.height(16.dp))
-            TextDivider("全局定时提醒")
-            Spacer(Modifier.height(8.dp))
-
-            globalRules.forEachIndexed { index, rule ->
-                GlobalRuleCard(
-                    rule = rule,
-                    onUpdate = { updatedRule ->
-                        val updatedList = globalRules.toMutableList()
-                        updatedList[index] = updatedRule
-                        globalRules = updatedList
-                        viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
-                    },
-                    onDelete = {
-                        val updatedList = globalRules.toMutableList()
-                        updatedList.removeAt(index)
-                        globalRules = updatedList
-                        viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
-                    }
-                )
-                Spacer(Modifier.height(8.dp))
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        val newRule = com.todo.app.data.model.GlobalReminderRule(
-                            id = UUID.randomUUID().toString(),
-                            enabled = true,
-                            time = "12:00",
-                            condition = "unconditional",
-                            taskScope = "all",
-                            title = "",
-                            body = "到了设定的提醒时间（12:00），记得按时处理工作与学习"
-                        )
-                        val updatedList = globalRules + newRule
-                        globalRules = updatedList
-                        viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
-                    },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("+ 新增规则")
+                    FilterChip(
+                        selected = !privacyMode,
+                        onClick = {
+                            privacyMode = false
+                            viewModel.updateReminderSettings(reminderSettings.copy(privacyMode = false))
+                        },
+                        label = { Text("明细模式") }
+                    )
+                    FilterChip(
+                        selected = privacyMode,
+                        onClick = {
+                            privacyMode = true
+                            viewModel.updateReminderSettings(reminderSettings.copy(privacyMode = true))
+                        },
+                        label = { Text("隐私模式") }
+                    )
                 }
 
-                Button(
-                    onClick = { showPresetDialog = true },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                Spacer(Modifier.height(16.dp))
+                TextDivider("全局定时提醒")
+                Spacer(Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("导入预设")
+                    Button(
+                        onClick = {
+                            val newRule = com.todo.app.data.model.GlobalReminderRule(
+                                id = UUID.randomUUID().toString(),
+                                enabled = true,
+                                time = "12:00",
+                                condition = "unconditional",
+                                taskScope = "all",
+                                title = "",
+                                body = "到了设定的提醒时间（12:00），记得按时处理工作与学习"
+                            )
+                            val updatedList = (globalRules + newRule).sortedBy { it.time }
+                            globalRules = updatedList
+                            viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                    ) {
+                        Text("+ 新增规则")
+                    }
+
+                    Button(
+                        onClick = { showPresetDialog = true },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                    ) {
+                        Text("💡 导入预设")
+                    }
+                }
+
+                globalRules.forEachIndexed { index, rule ->
+                    GlobalRuleCard(
+                        rule = rule,
+                        onUpdate = { updatedRule ->
+                            val updatedList = globalRules.toMutableList()
+                            updatedList[index] = updatedRule
+                            val sortedList = updatedList.sortedBy { it.time }
+                            globalRules = sortedList
+                            viewModel.updateReminderSettings(reminderSettings.copy(globalRules = sortedList))
+                        },
+                        onDelete = {
+                            val updatedList = globalRules.toMutableList()
+                            updatedList.removeAt(index)
+                            val sortedList = updatedList.sortedBy { it.time }
+                            globalRules = sortedList
+                            viewModel.updateReminderSettings(reminderSettings.copy(globalRules = sortedList))
+                        }
+                    )
+                    Spacer(Modifier.height(8.dp))
                 }
             }
         }
     }
-}
 
     if (showPresetDialog) {
         var sel1 by remember { mutableStateOf(true) }
@@ -785,15 +787,13 @@ private fun ReminderSettingsPanel(
 
         AlertDialog(
             onDismissRequest = { showPresetDialog = false },
-            title = { Text("导入系统预设提醒") },
+            title = { Text("💡 导入预设提醒规则", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(modifier = Modifier.padding(vertical = 4.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth().clickable {
-                            val newVal = !allSelected
-                            sel1 = newVal
-                            sel2 = newVal
-                            sel3 = newVal
+                            val next = !allSelected
+                            sel1 = next; sel2 = next; sel3 = next
                         },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -815,7 +815,7 @@ private fun ReminderSettingsPanel(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Checkbox(checked = sel1, onCheckedChange = { sel1 = it })
-                        Text("12:00 | 尚未完成任何 | 每一个不曾起舞...", style = MaterialTheme.typography.bodySmall)
+                        Text("12:00 | 每一个不曾起舞...", style = MaterialTheme.typography.bodySmall)
                     }
 
                     Row(
@@ -823,7 +823,7 @@ private fun ReminderSettingsPanel(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Checkbox(checked = sel2, onCheckedChange = { sel2 = it })
-                        Text("16:00 | 无条件 | Do not go gentle into...", style = MaterialTheme.typography.bodySmall)
+                        Text("16:00 | Do not go gentle into...", style = MaterialTheme.typography.bodySmall)
                     }
 
                     Row(
@@ -831,7 +831,7 @@ private fun ReminderSettingsPanel(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Checkbox(checked = sel3, onCheckedChange = { sel3 = it })
-                        Text("20:00 | 存在未完成(仅今日) | 截至（20:00）...", style = MaterialTheme.typography.bodySmall)
+                        Text("20:00 | 截至（20:00）...", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             },
@@ -861,7 +861,7 @@ private fun ReminderSettingsPanel(
                                     condition = "unconditional",
                                     taskScope = "all",
                                     title = "",
-                                    body = "不要温和地走进那个良夜"
+                                    body = "Do not go gentle into that good night"
                                 )
                             )
                         }
@@ -879,7 +879,7 @@ private fun ReminderSettingsPanel(
                             )
                         }
                         if (newPresets.isNotEmpty()) {
-                            val updatedList = globalRules + newPresets
+                            val updatedList = (globalRules + newPresets).sortedBy { it.time }
                             globalRules = updatedList
                             viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
                         }
@@ -904,17 +904,11 @@ private fun GlobalRuleCard(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    val summaryText = if (rule.condition == "unconditional") {
-        "无条件定时提醒"
-    } else {
-        val cond = if (rule.condition == "none_completed") "未完成任何" else "存在未完成"
-        val scope = when (rule.taskScope) {
-            "today_only" -> "仅今日"
-            "recurring_only" -> "仅打卡"
-            else -> "全部"
-        }
-        "$cond · $scope"
-    }
+    var localTime by remember(rule.time, expanded) { mutableStateOf(rule.time) }
+    var localCondition by remember(rule.condition, expanded) { mutableStateOf(rule.condition) }
+    var localTaskScope by remember(rule.taskScope, expanded) { mutableStateOf(rule.taskScope) }
+    var localTitle by remember(rule.title, expanded) { mutableStateOf(rule.title) }
+    var localBody by remember(rule.body, expanded) { mutableStateOf(rule.body) }
 
     OutlinedCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -930,8 +924,6 @@ private fun GlobalRuleCard(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(rule.time, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.width(8.dp))
-                    Text(summaryText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
                 Row {
@@ -947,8 +939,8 @@ private fun GlobalRuleCard(
             if (expanded) {
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = rule.time,
-                    onValueChange = { onUpdate(rule.copy(time = it)) },
+                    value = localTime,
+                    onValueChange = { localTime = it },
                     label = { Text("提醒时间 (HH:mm)") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -959,22 +951,22 @@ private fun GlobalRuleCard(
                     val condOpts = listOf("none_completed" to "未完成任何", "any_remaining" to "存在未完成", "unconditional" to "无条件")
                     condOpts.forEach { (valStr, label) ->
                         FilterChip(
-                            selected = rule.condition == valStr,
-                            onClick = { onUpdate(rule.copy(condition = valStr)) },
+                            selected = localCondition == valStr,
+                            onClick = { localCondition = valStr },
                             label = { Text(label, fontSize = 11.sp) }
                         )
                     }
                 }
 
-                if (rule.condition != "unconditional") {
+                if (localCondition != "unconditional") {
                     Spacer(Modifier.height(6.dp))
                     Text("任务类型筛选", style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         val scopeOpts = listOf("all" to "全部任务", "today_only" to "仅今日", "recurring_only" to "仅打卡")
                         scopeOpts.forEach { (valStr, label) ->
                             FilterChip(
-                                selected = rule.taskScope == valStr,
-                                onClick = { onUpdate(rule.copy(taskScope = valStr)) },
+                                selected = localTaskScope == valStr,
+                                onClick = { localTaskScope = valStr },
                                 label = { Text(label, fontSize = 11.sp) }
                             )
                         }
@@ -983,8 +975,8 @@ private fun GlobalRuleCard(
 
                 Spacer(Modifier.height(6.dp))
                 OutlinedTextField(
-                    value = rule.title,
-                    onValueChange = { onUpdate(rule.copy(title = it)) },
+                    value = localTitle,
+                    onValueChange = { localTitle = it },
                     label = { Text("通知标题 (留空默认 Todo)") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1008,7 +1000,7 @@ private fun GlobalRuleCard(
                     items(varList) { (code, label) ->
                         SuggestionChip(
                             onClick = {
-                                onUpdate(rule.copy(body = rule.body + code))
+                                localBody += code
                             },
                             label = { Text("$code ($label)", fontSize = 10.sp) }
                         )
@@ -1017,15 +1009,15 @@ private fun GlobalRuleCard(
 
                 Spacer(Modifier.height(4.dp))
                 OutlinedTextField(
-                    value = rule.body,
-                    onValueChange = { onUpdate(rule.copy(body = it)) },
+                    value = localBody,
+                    onValueChange = { localBody = it },
                     label = { Text("通知正文") },
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                if (rule.body.contains("{") && rule.body.contains("}")) {
+                if (localBody.contains("{") && localBody.contains("}")) {
                     Spacer(Modifier.height(4.dp))
-                    val previewText = rule.body
+                    val previewText = localBody
                         .replace("{remaining_count}", "3")
                         .replace("{completed_count}", "5")
                         .replace("{total_count}", "8")
