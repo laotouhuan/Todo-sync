@@ -804,9 +804,10 @@ function renderGlobalRules(rules = []) {
                     <label>任务类型筛选</label>
                     <select class="rule-scope-select custom-select">
                         <option value="all" ${rule.task_scope === 'all' ? 'selected' : ''}>全部任务</option>
-                        <option value="today_only" ${rule.task_scope === 'today_only' ? 'selected' : ''}>仅今日任务</option>
+                        <option value="today_only" ${rule.task_scope === 'today_only' ? 'selected' : ''}>仅今日任务（含逾期）</option>
                         <option value="recurring_only" ${rule.task_scope === 'recurring_only' ? 'selected' : ''}>仅打卡/重复任务</option>
                     </select>
+                    <div class="rule-scope-hint" style="font-size: 0.72rem; color: #10B981; margin-top: 4px; line-height: 1.3;">💡 说明：所有统计均基于【今日视角】，计算今日的任务情况</div>
                 </div>
                 <div class="input-group" style="margin-bottom: 8px;">
                     <label>通知标题（留空默认 Todo）</label>
@@ -818,7 +819,7 @@ function renderGlobalRules(rules = []) {
                         <span style="font-size: 0.68rem; color: var(--text-secondary);">输入 <code style="color: var(--accent-color); background: rgba(255,255,255,0.1); padding: 0 3px; border-radius: 3px;">{</code> 可快捷插入变量</span>
                     </div>
                     <div style="position: relative;">
-                        <textarea class="rule-body-input" rows="2" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; resize: vertical;" placeholder="自定义或使用预设内容，输入 { 可选择变量">${escapeHtml(rule.body || '')}</textarea>
+                        <textarea class="rule-body-input" rows="2" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; line-height: 1.4; resize: none; overflow-y: auto;" placeholder="自定义或使用预设内容，输入 { 可选择变量">${escapeHtml(rule.body || '')}</textarea>
                         <div class="rule-var-autocomplete" style="display: none;"></div>
                     </div>
                     <div class="rule-live-preview" style="display: none;">
@@ -846,6 +847,7 @@ function renderGlobalRules(rules = []) {
         const condSelect = card.querySelector('.rule-condition-select');
         const scopeSelect = card.querySelector('.rule-scope-select');
         const scopeGroup = card.querySelector('.rule-scope-group');
+        const scopeHint = card.querySelector('.rule-scope-hint');
         const timeInput = card.querySelector('.rule-time-input');
         const bodyInput = card.querySelector('.rule-body-input');
         const timeLabel = card.querySelector('.rule-time-label');
@@ -853,16 +855,22 @@ function renderGlobalRules(rules = []) {
         const livePreviewBox = card.querySelector('.rule-live-preview');
         const livePreviewText = card.querySelector('.rule-live-preview-text');
 
+        function updateScopeHint() {
+            if (scopeHint) {
+                scopeHint.textContent = '💡 说明：所有统计均基于【今日视角】，计算今日的任务情况';
+            }
+        }
+        updateScopeHint();
+
         const AVAILABLE_RULE_VARS = [
             { code: '{remaining_count}', label: '未完成任务数' },
             { code: '{completed_count}', label: '已完成任务数' },
             { code: '{total_count}', label: '任务总数量' },
             { code: '{overdue_count}', label: '逾期任务数' },
             { code: '{completion_rate}', label: '任务完成百分比' },
-            { code: '{time}', label: '提醒设定的时间' },
-            { code: '{now_time}', label: '当前精确时间' },
-            { code: '{today_date}', label: '今日日期' },
-            { code: '{weekday}', label: '当前星期' }
+            { code: '{time}', label: '系统实时精确时间' },
+            { code: '{date}', label: '系统今日日期' },
+            { code: '{weekday}', label: '当前星期几' }
         ];
 
         // 实时渲染预览计算
@@ -875,7 +883,6 @@ function renderGlobalRules(rules = []) {
                 return;
             }
 
-            const tVal = timeInput.value.trim() || '12:00';
             const today = new Date();
             const dateStr = `${String(today.getMonth() + 1).padStart(2, '0')}月${String(today.getDate()).padStart(2, '0')}日`;
             const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -883,21 +890,58 @@ function renderGlobalRules(rules = []) {
             const nowTimeStr = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
 
             // 计算实际环境中的待办统计数据作为渲染参考
+            const todayStr = getTodayString();
+            const thisWeekStr = getThisWeekString();
+            const thisMonthStr = getThisMonthString();
             const activeTodos = getActiveTodos().filter(t => !t.deleted);
-            const remainingCount = activeTodos.filter(t => !t.completed).length;
-            const completedCount = activeTodos.filter(t => t.completed).length;
-            const totalCount = activeTodos.length;
-            const overdueCount = activeTodos.filter(t => isOverdue(t)).length;
-            const rateVal = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 62.5;
+            const scopeVal = scopeSelect.value;
+
+            const isRecurringTask = (t) => {
+                if (t.recurring === 'daily_repeat') {
+                    return !t.date || t.date === todayStr;
+                }
+                if (t.task_type === 'weekly_checkin') {
+                    return t.date === thisWeekStr || !t.date;
+                }
+                if (t.task_type === 'monthly_checkin') {
+                    return t.date === thisMonthStr || !t.date;
+                }
+                return false;
+            };
+
+            const scopedTodos = activeTodos.filter(t => {
+                if (scopeVal === 'today_only') {
+                    return !isRecurringTask(t) && (t.date === todayStr || isOverdue(t, todayStr));
+                } else if (scopeVal === 'recurring_only') {
+                    return isRecurringTask(t);
+                }
+                // 'all'
+                return (t.date === todayStr || isOverdue(t, todayStr) || isRecurringTask(t));
+            });
+
+            const isTaskCompletedToday = (t) => {
+                if (t.completed) return true;
+                if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
+                    return Boolean(t.completed_dates && t.completed_dates.some(dStr => dStr.startsWith(todayStr)));
+                }
+                return false;
+            };
+
+            const remainingCount = scopedTodos.filter(t => !isTaskCompletedToday(t)).length;
+            const completedCount = scopedTodos.filter(t => isTaskCompletedToday(t)).length;
+            const totalCount = scopedTodos.length;
+            const overdueCount = scopeVal === 'recurring_only' ? 0 : scopedTodos.filter(t => isOverdue(t, todayStr)).length;
+            const rateVal = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
             let previewText = rawBody
-                .replace(/\{remaining_count\}/g, String(remainingCount > 0 ? remainingCount : 3))
-                .replace(/\{completed_count\}/g, String(completedCount > 0 ? completedCount : 5))
-                .replace(/\{total_count\}/g, String(totalCount > 0 ? totalCount : 8))
-                .replace(/\{overdue_count\}/g, String(overdueCount > 0 ? overdueCount : 2))
+                .replace(/\{remaining_count\}/g, String(remainingCount))
+                .replace(/\{completed_count\}/g, String(completedCount))
+                .replace(/\{total_count\}/g, String(totalCount))
+                .replace(/\{overdue_count\}/g, String(overdueCount))
                 .replace(/\{completion_rate\}/g, `${rateVal}%`)
-                .replace(/\{time\}/g, tVal)
+                .replace(/\{time\}/g, nowTimeStr)
                 .replace(/\{now_time\}/g, nowTimeStr)
+                .replace(/\{date\}/g, dateStr)
                 .replace(/\{today_date\}/g, dateStr)
                 .replace(/\{weekday\}/g, weekdayStr);
 
@@ -907,6 +951,11 @@ function renderGlobalRules(rules = []) {
 
         timeInput.addEventListener('input', () => {
             timeLabel.textContent = timeInput.value || '12:00';
+            updateLivePreview();
+        });
+
+        scopeSelect.addEventListener('change', () => {
+            updateScopeHint();
             updateLivePreview();
         });
 
@@ -959,7 +1008,14 @@ function renderGlobalRules(rules = []) {
             updateLivePreview();
         }
 
+        function autoResizeBodyInput() {
+            bodyInput.style.height = 'auto';
+            bodyInput.style.height = Math.min(Math.max(bodyInput.scrollHeight, 44), 140) + 'px';
+        }
+        autoResizeBodyInput();
+
         bodyInput.addEventListener('input', () => {
+            autoResizeBodyInput();
             const text = bodyInput.value;
             const start = bodyInput.selectionStart;
             const match = text.substring(0, start).match(/\{([a-zA-Z0-9_]*)$/);

@@ -2829,22 +2829,37 @@ input:checked + .slider:before {
 }
 
 /* 自定义精致滚动条 */
-.rule-var-autocomplete::-webkit-scrollbar {
+.rule-var-autocomplete::-webkit-scrollbar,
+.rule-body-input::-webkit-scrollbar,
+textarea::-webkit-scrollbar {
   width: 5px;
+  height: 5px;
 }
 
-.rule-var-autocomplete::-webkit-scrollbar-track {
+.rule-var-autocomplete::-webkit-scrollbar-track,
+.rule-body-input::-webkit-scrollbar-track,
+textarea::-webkit-scrollbar-track {
   background: transparent;
   border-radius: 4px;
 }
 
-.rule-var-autocomplete::-webkit-scrollbar-thumb {
+.rule-var-autocomplete::-webkit-scrollbar-thumb,
+.rule-body-input::-webkit-scrollbar-thumb,
+textarea::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
   border-radius: 4px;
 }
 
-.rule-var-autocomplete::-webkit-scrollbar-thumb:hover {
+.rule-var-autocomplete::-webkit-scrollbar-thumb:hover,
+.rule-body-input::-webkit-scrollbar-thumb:hover,
+textarea::-webkit-scrollbar-thumb:hover {
   background: var(--accent-color, #7b61ff);
+}
+
+.rule-body-input,
+textarea {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
 .rule-var-item {

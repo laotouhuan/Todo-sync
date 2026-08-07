@@ -241,47 +241,45 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?) {
             }
         }
 
-        if (currentRoute != "settings") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Show Search toggle button ONLY on List screen
-                if (currentRoute == "list") {
-                    IconButton(onClick = {
-                        viewModel.setShowSearchBar(!showSearchBar)
-                    }) {
-                        Icon(
-                            imageVector = if (showSearchBar) Icons.Filled.Close else Icons.Filled.Search,
-                            contentDescription = "搜索",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Show Search toggle button ONLY on List screen
+            if (currentRoute == "list") {
+                IconButton(onClick = {
+                    viewModel.setShowSearchBar(!showSearchBar)
+                }) {
+                    Icon(
+                        imageVector = if (showSearchBar) Icons.Filled.Close else Icons.Filled.Search,
+                        contentDescription = "搜索",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
-                IconButton(
-                    onClick = {
-                        if (showSuccess) return@IconButton
-                        val source = activeSource
-                        if (source is TodoViewModel.ActiveSource.Collaboration) {
-                            viewModel.loadCollabData(source.collab)
-                        } else {
-                            viewModel.syncWithCloud()
-                        }
-                    },
-                    enabled = true
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                    } else if (showSuccess) {
-                        Icon(
-                            imageVector = Icons.Filled.Check,
-                            contentDescription = "同步成功",
-                            tint = androidx.compose.ui.graphics.Color(0xFF10B981)
-                        )
+            }
+            IconButton(
+                onClick = {
+                    if (showSuccess) return@IconButton
+                    val source = activeSource
+                    if (source is TodoViewModel.ActiveSource.Collaboration) {
+                        viewModel.loadCollabData(source.collab)
                     } else {
-                        Icon(
-                            imageVector = Icons.Filled.Refresh,
-                            contentDescription = "同步",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                        viewModel.syncWithCloud()
                     }
+                },
+                enabled = true
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                } else if (showSuccess) {
+                    Icon(
+                        imageVector = Icons.Filled.Check,
+                        contentDescription = "同步成功",
+                        tint = androidx.compose.ui.graphics.Color(0xFF10B981)
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.Refresh,
+                        contentDescription = "同步",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
         }
