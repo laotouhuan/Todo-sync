@@ -1,6 +1,7 @@
 package com.todo.app.ui.view
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
@@ -123,11 +124,10 @@ fun SettingsView(viewModel: TodoViewModel) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(16.dp)
         ) {
             TabRow(
                 selectedTabIndex = activeTab,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                modifier = Modifier.fillMaxWidth()
             ) {
                 tabTitles.forEachIndexed { index, title ->
                     Tab(
@@ -142,6 +142,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .padding(16.dp)
                     .verticalScroll(rememberScrollState())
             ) {
                 when (activeTab) {
@@ -981,39 +982,63 @@ private fun GlobalRuleCard(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(6.dp))
-                Text("快捷插值变量 (点击插入)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                androidx.compose.foundation.lazy.LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                ) {
-                    val varList = listOf(
-                        "{remaining_count}" to "未完成数",
-                        "{completed_count}" to "已完成数",
-                        "{total_count}" to "总任务数",
-                        "{overdue_count}" to "逾期任务数",
-                        "{completion_rate}" to "完成率",
-                        "{time}" to "设定时间",
-                        "{now_time}" to "当前时间",
-                        "{today_date}" to "今日日期",
-                        "{weekday}" to "当前星期"
+                var showVarMenu by remember { mutableStateOf(false) }
+
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = localBody,
+                        onValueChange = { newValue ->
+                            localBody = newValue
+                            val lastOpen = newValue.lastIndexOf('{')
+                            val lastClose = newValue.lastIndexOf('}')
+                            showVarMenu = lastOpen != -1 && lastOpen > lastClose
+                        },
+                        label = { Text("通知正文 (输入 { 自动弹出变量菜单)") },
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    items(varList) { (code, label) ->
-                        SuggestionChip(
-                            onClick = {
-                                localBody += code
-                            },
-                            label = { Text("$code ($label)", fontSize = 10.sp) }
+
+                    DropdownMenu(
+                        expanded = showVarMenu,
+                        onDismissRequest = { showVarMenu = false },
+                        modifier = Modifier.fillMaxWidth(0.85f)
+                    ) {
+                        val varList = listOf(
+                            "{remaining_count}" to "未完成任务数",
+                            "{completed_count}" to "已完成任务数",
+                            "{total_count}" to "总任务数量",
+                            "{overdue_count}" to "逾期任务数量",
+                            "{completion_rate}" to "任务完成百分比",
+                            "{time}" to "提醒设定时间",
+                            "{now_time}" to "当前精确时间",
+                            "{today_date}" to "今日日期",
+                            "{weekday}" to "当前星期"
                         )
+                        varList.forEach { (code, label) ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(code, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                                    }
+                                },
+                                onClick = {
+                                    val lastOpen = localBody.lastIndexOf('{')
+                                    if (lastOpen != -1) {
+                                        localBody = localBody.substring(0, lastOpen) + code
+                                    } else {
+                                        localBody += code
+                                    }
+                                    showVarMenu = false
+                                }
+                            )
+                        }
                     }
                 }
-
-                Spacer(Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = localBody,
-                    onValueChange = { localBody = it },
-                    label = { Text("通知正文") },
-                    modifier = Modifier.fillMaxWidth()
-                )
 
                 if (localBody.contains("{") && localBody.contains("}")) {
                     Spacer(Modifier.height(4.dp))
@@ -1023,7 +1048,7 @@ private fun GlobalRuleCard(
                         .replace("{total_count}", "8")
                         .replace("{overdue_count}", "2")
                         .replace("{completion_rate}", "62%")
-                        .replace("{time}", rule.time)
+                        .replace("{time}", localTime)
                         .replace("{now_time}", "12:00")
                         .replace("{today_date}", "08月06日")
                         .replace("{weekday}", "周四")
@@ -1038,6 +1063,27 @@ private fun GlobalRuleCard(
                             Text(previewText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
                         }
                     }
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = {
+                        val updated = rule.copy(
+                            time = localTime,
+                            condition = localCondition,
+                            taskScope = localTaskScope,
+                            title = localTitle,
+                            body = localBody
+                        )
+                        onUpdate(updated)
+                        expanded = false
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(Icons.Filled.Check, contentDescription = "确认保存", modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("确认保存", fontWeight = FontWeight.Bold)
                 }
             }
         }

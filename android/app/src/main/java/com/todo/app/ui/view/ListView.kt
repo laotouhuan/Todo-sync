@@ -410,8 +410,8 @@ fun ClassicListView(viewModel: TodoViewModel) {
 
     Column(modifier = Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = selectedTab, modifier = Modifier.fillMaxWidth()) {
-            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("今天聚焦") })
-            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("全部待办") })
+            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("今天聚焦", fontWeight = FontWeight.Bold) })
+            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("全部待办", fontWeight = FontWeight.Bold) })
         }
 
         // Real-time Search Input Bar
