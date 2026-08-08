@@ -118,18 +118,13 @@ fun SettingsView(viewModel: TodoViewModel) {
     var activeTab by remember { mutableStateOf(0) }
     val tabTitles = listOf("关于", "提醒", "偏好", "协作", "同步")
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) }
-    ) { innerPadding ->
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
+            modifier = Modifier.fillMaxSize()
         ) {
-            ScrollableTabRow(
+            TabRow(
                 selectedTabIndex = activeTab,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                edgePadding = 0.dp
+                modifier = Modifier.fillMaxWidth().height(48.dp)
             ) {
                 tabTitles.forEachIndexed { index, title ->
                     Tab(
@@ -656,6 +651,10 @@ fun SettingsView(viewModel: TodoViewModel) {
                 )
             }
         }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
 
@@ -796,6 +795,29 @@ private fun ReminderSettingsPanel(
                                             com.todo.app.notification.PermissionHelper.requestBatteryOptimizationPermission(context)
                                         }) {
                                             Text("去开启")
+                                        }
+                                    }
+                                }
+
+                                HorizontalDivider()
+
+                                // 4. 国产 ROM 辅助权限指引
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("厂商系统辅助权限", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                            Spacer(Modifier.height(2.dp))
+                                            Text("小米/华为/OPPO/vivo等设备请在系统应用权限中开启「后台自启动」及「锁屏/后台弹出界面」", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        Spacer(Modifier.width(8.dp))
+                                        TextButton(onClick = {
+                                            com.todo.app.notification.PermissionHelper.openNotificationSettings(context)
+                                        }) {
+                                            Text("应用设置")
                                         }
                                     }
                                 }

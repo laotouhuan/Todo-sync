@@ -80,18 +80,20 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
 
     @android.annotation.SuppressLint("StateFlowValueCalledInComposition")
     override suspend fun provideGlance(context: Context, id: GlanceId) {
+        val repository = TodoApplication.instance.repository
+        val loadedData = try {
+            repository.ensureDataLoaded()
+        } catch (e: Exception) {
+            android.util.Log.e("TodoWidget", "Widget ensureDataLoaded 失败: ${e.message}", e)
+            com.todo.app.data.model.TodoData(version = 1, last_updated = "", todos = emptyList())
+        }
+
         provideContent {
             val prefs = currentState<Preferences>()
             @Suppress("UNUSED_VARIABLE")
             val version = prefs[VERSION_KEY] ?: 0
 
-            val repository = TodoApplication.instance.repository
-            val currentData = try {
-                repository.getCurrentData()
-            } catch (e: Exception) {
-                android.util.Log.e("TodoWidget", "Widget getCurrentData 失败: ${e.message}", e)
-                com.todo.app.data.model.TodoData(version = 1, last_updated = "", todos = emptyList())
-            }
+            val currentData = loadedData
             val expandedTodos = prefs[EXPANDED_TODOS_KEY] ?: emptySet()
 
             val dates = DateStrings.now()
