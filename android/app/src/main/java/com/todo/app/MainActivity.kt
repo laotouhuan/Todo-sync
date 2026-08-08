@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         com.todo.app.notification.PermissionHelper.checkAndRequestNotificationPermission(this)
+        requestBatteryOptimizationIfNeeded()
         viewModel.rescheduleAlarms()
 
         setContent {
@@ -59,6 +60,16 @@ class MainActivity : ComponentActivity() {
         }
 
         startMidnightRefreshJob()
+    }
+
+    /**
+     * 首次启动时主动弹出系统「忽略电池优化」授权对话框。
+     * 仅在尚未授权时弹出，避免重复打扰用户。
+     */
+    private fun requestBatteryOptimizationIfNeeded() {
+        if (!com.todo.app.notification.PermissionHelper.checkBatteryOptimizationPermission(this)) {
+            com.todo.app.notification.PermissionHelper.requestBatteryOptimizationPermission(this)
+        }
     }
 
     override fun onResume() {
