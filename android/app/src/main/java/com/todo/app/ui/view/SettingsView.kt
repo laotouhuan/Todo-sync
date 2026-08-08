@@ -841,7 +841,14 @@ private fun ReminderSettingsPanel(
                                             }
                                             Spacer(Modifier.width(8.dp))
                                             TextButton(onClick = {
-                                                com.todo.app.notification.PermissionHelper.openAutoStartSettings(context)
+                                                val jumped = com.todo.app.notification.PermissionHelper.openAutoStartSettings(context)
+                                                if (!jumped) {
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        "已跳至应用详情，若未精确定位，请依据下方路径手动开启自启动",
+                                                        android.widget.Toast.LENGTH_LONG
+                                                    ).show()
+                                                }
                                             }) {
                                                 Text("直达设置")
                                             }
@@ -859,12 +866,20 @@ private fun ReminderSettingsPanel(
                                                     )
                                                     .padding(10.dp)
                                             ) {
-                                                Text(
-                                                    autoStartSteps,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    lineHeight = 18.sp
-                                                )
+                                                Column {
+                                                    Text(
+                                                        autoStartSteps,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        lineHeight = 18.sp
+                                                    )
+                                                    Spacer(Modifier.height(4.dp))
+                                                    Text(
+                                                        "💡 说明：若直达位置不精准，请根据上述文字路径在设置中找到【自启动】并开启。",
+                                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -944,7 +959,7 @@ private fun ReminderSettingsPanel(
                                 condition = "unconditional",
                                 taskScope = "all",
                                 title = "",
-                                body = "到了设定的提醒时间（12:00），记得按时处理工作与学习"
+                                body = getSmartPresetBody("unconditional", "all")
                             )
                             val updatedList = (globalRules + newRule).sortedBy { it.time }
                             globalRules = updatedList
@@ -1042,7 +1057,7 @@ private fun ReminderSettingsPanel(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Checkbox(checked = sel3, onCheckedChange = { sel3 = it })
-                        Text("20:00 | 截至（20:00）...", style = MaterialTheme.typography.bodySmall)
+                        Text("20:00 | 截至{time}...", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             },
@@ -1085,7 +1100,7 @@ private fun ReminderSettingsPanel(
                                     condition = "any_remaining",
                                     taskScope = "today_only",
                                     title = "",
-                                    body = "截至（20:00），仅今日任务还有 {remaining_count} 项未完成"
+                                    body = "截至{time}，仅今日任务还有{remaining_count}项未完成"
                                 )
                             )
                         }
@@ -1121,6 +1136,17 @@ private fun GlobalRuleCard(
     var localTaskScope by remember(rule.taskScope, expanded) { mutableStateOf(rule.taskScope) }
     var localTitle by remember(rule.title, expanded) { mutableStateOf(rule.title) }
     var localBody by remember(rule.body, expanded) { mutableStateOf(rule.body) }
+
+    fun updateSmartBody(newCondition: String, newTaskScope: String) {
+        val currentBody = localBody.trim()
+        val isDefaultTmpl = currentBody.isEmpty() || SMART_PRESET_MATRIX.values.contains(currentBody) || SMART_PRESET_MATRIX.values.any { tmpl ->
+            val prefix = tmpl.split("{time}")[0]
+            currentBody.startsWith(prefix)
+        }
+        if (isDefaultTmpl) {
+            localBody = getSmartPresetBody(newCondition, newTaskScope)
+        }
+    }
 
     OutlinedCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -1164,7 +1190,10 @@ private fun GlobalRuleCard(
                     condOpts.forEach { (valStr, label) ->
                         FilterChip(
                             selected = localCondition == valStr,
-                            onClick = { localCondition = valStr },
+                            onClick = {
+                                localCondition = valStr
+                                updateSmartBody(valStr, localTaskScope)
+                            },
                             label = { Text(label, fontSize = 11.sp) }
                         )
                     }
@@ -1178,7 +1207,10 @@ private fun GlobalRuleCard(
                         scopeOpts.forEach { (valStr, label) ->
                             FilterChip(
                                 selected = localTaskScope == valStr,
-                                onClick = { localTaskScope = valStr },
+                                onClick = {
+                                    localTaskScope = valStr
+                                    updateSmartBody(localCondition, valStr)
+                                },
                                 label = { Text(label, fontSize = 11.sp) }
                             )
                         }
@@ -1372,4 +1404,19 @@ private fun TextDivider(text: String) {
         )
         Divider(modifier = Modifier.weight(1f))
     }
+}
+
+private val SMART_PRESET_MATRIX = mapOf(
+    "any_remaining_all" to "截至{time}，全部任务还有{remaining_count}项未完成",
+    "any_remaining_today_only" to "截至{time}，仅今日任务还有{remaining_count}项未完成",
+    "any_remaining_recurring_only" to "截至{time}，打卡任务还有{remaining_count}项未完成",
+    "none_completed_all" to "截至{time}，今日尚未完成任何任务哦",
+    "none_completed_today_only" to "截至{time}，今日待办任务尚未完成任何一项哦",
+    "none_completed_recurring_only" to "截至{time}，今日习惯打卡尚未完成任何一项哦",
+    "unconditional_all" to "到了设定的提醒时间{time}，记得按时处理工作与学习"
+)
+
+private fun getSmartPresetBody(condition: String, taskScope: String): String {
+    val key = if (condition == "unconditional") "unconditional_all" else "${condition}_${taskScope}"
+    return SMART_PRESET_MATRIX[key] ?: SMART_PRESET_MATRIX["unconditional_all"]!!
 }
