@@ -21,12 +21,24 @@ object NotificationHelper {
             val taskChannel = NotificationChannel(
                 CHANNEL_TASK, "任务提醒",
                 NotificationManager.IMPORTANCE_HIGH
-            ).apply { description = "单项任务到期提醒" }
+            ).apply {
+                description = "单项任务到期提醒"
+                enableVibration(true)
+                enableLights(true)
+                setShowBadge(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
 
             val globalChannel = NotificationChannel(
                 CHANNEL_GLOBAL, "全局提醒",
                 NotificationManager.IMPORTANCE_HIGH
-            ).apply { description = "全局定时提醒" }
+            ).apply {
+                description = "全局定时提醒"
+                enableVibration(true)
+                enableLights(true)
+                setShowBadge(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
 
             val nm = context.getSystemService(NotificationManager::class.java)
             nm.createNotificationChannels(listOf(taskChannel, globalChannel))
@@ -56,12 +68,14 @@ object NotificationHelper {
         )
 
         return NotificationCompat.Builder(context, CHANNEL_TASK)
-            .setSmallIcon(android.R.drawable.ic_popup_reminder)
+            .setSmallIcon(com.todo.app.R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(body)
             .setContentIntent(pi)
             .setAutoCancel(true)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
     }
 
@@ -79,12 +93,14 @@ object NotificationHelper {
         )
 
         return NotificationCompat.Builder(context, CHANNEL_GLOBAL)
-            .setSmallIcon(android.R.drawable.ic_popup_reminder)
+            .setSmallIcon(com.todo.app.R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(resolvedBody)
             .setContentIntent(pi)
             .setAutoCancel(true)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
     }
 }

@@ -15,15 +15,32 @@ import com.todo.app.data.model.monthStringOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import android.os.PowerManager
 import java.time.LocalDate
 
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val pendingResult = goAsync()
-        val targetId = intent.getStringExtra("target_id") ?: run { pendingResult.finish(); return }
-        val type = intent.getStringExtra("type") ?: run { pendingResult.finish(); return }
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Todo:ReminderWakeLock")
+        wakeLock?.acquire(10000)
 
-        val app = context.applicationContext as? TodoApplication ?: run { pendingResult.finish(); return }
+        val targetId = intent.getStringExtra("target_id") ?: run {
+            try { if (wakeLock?.isHeld == true) wakeLock.release() } catch (_: Exception) {}
+            pendingResult.finish()
+            return
+        }
+        val type = intent.getStringExtra("type") ?: run {
+            try { if (wakeLock?.isHeld == true) wakeLock.release() } catch (_: Exception) {}
+            pendingResult.finish()
+            return
+        }
+
+        val app = context.applicationContext as? TodoApplication ?: run {
+            try { if (wakeLock?.isHeld == true) wakeLock.release() } catch (_: Exception) {}
+            pendingResult.finish()
+            return
+        }
         val repo = app.repository
 
         CoroutineScope(Dispatchers.IO).launch {
@@ -39,6 +56,7 @@ class ReminderReceiver : BroadcastReceiver() {
                 // 触发后重新调度以更新下个周期
                 ReminderScheduler(context).rescheduleAll(todoData)
             } finally {
+                try { if (wakeLock?.isHeld == true) wakeLock.release() } catch (_: Exception) {}
                 pendingResult.finish()
             }
         }
