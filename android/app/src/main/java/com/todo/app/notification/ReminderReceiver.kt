@@ -4,7 +4,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationManagerCompat
-import com.todo.app.TodoApplication
 import com.todo.app.data.model.RecurringType
 import com.todo.app.data.model.TaskType
 import com.todo.app.data.model.Todo
@@ -16,9 +15,21 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import android.os.PowerManager
+import android.util.Log
+import kotlinx.serialization.json.Json
+import java.io.File
 import java.time.LocalDate
 
 class ReminderReceiver : BroadcastReceiver() {
+
+    private val TAG = "ReminderReceiver"
+
+    // 独立 Json 实例：不依赖 Application，BroadcastReceiver 进程中直接使用
+    private val jsonFormat = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         val pendingResult = goAsync()
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -36,16 +47,15 @@ class ReminderReceiver : BroadcastReceiver() {
             return
         }
 
-        val app = context.applicationContext as? TodoApplication ?: run {
-            try { if (wakeLock?.isHeld == true) wakeLock.release() } catch (_: Exception) {}
-            pendingResult.finish()
-            return
-        }
-        val repo = app.repository
-
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val todoData = repo.ensureDataLoaded()
+                // ★ 核心修复：直接从磁盘读取数据，完全不依赖 TodoApplication 进程状态
+                // 即使 App 被系统杀死，闹钟唤醒后也能独立读取文件并发出通知
+                val todoData = readTodoDataFromDisk(context) ?: run {
+                    Log.w(TAG, "无法从磁盘读取数据，跳过通知 (targetId=$targetId)")
+                    return@launch
+                }
+
                 if (!todoData.reminderSettings.enabled) return@launch
 
                 when (type) {
@@ -55,10 +65,32 @@ class ReminderReceiver : BroadcastReceiver() {
 
                 // 触发后重新调度以更新下个周期
                 ReminderScheduler(context).rescheduleAll(todoData)
+            } catch (e: Exception) {
+                Log.e(TAG, "onReceive 处理异常 (targetId=$targetId, type=$type)", e)
             } finally {
                 try { if (wakeLock?.isHeld == true) wakeLock.release() } catch (_: Exception) {}
                 pendingResult.finish()
             }
+        }
+    }
+
+    /**
+     * 直接从 App 内部存储读取 todo_data.json，无需 Application 初始化完成。
+     * 这是通知能在 App 被杀死后仍然可靠触发的关键。
+     */
+    private fun readTodoDataFromDisk(context: Context): TodoData? {
+        return try {
+            val file = File(context.filesDir, "todo_data.json")
+            if (!file.exists()) {
+                Log.d(TAG, "todo_data.json 不存在，返回 null")
+                return null
+            }
+            val content = file.readText(Charsets.UTF_8)
+            val parsed = jsonFormat.decodeFromString<TodoData>(content)
+            com.todo.app.data.model.MergeUtils.normalizeData(parsed)
+        } catch (e: Exception) {
+            Log.e(TAG, "readTodoDataFromDisk 失败", e)
+            null
         }
     }
 

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -721,6 +722,22 @@ private fun ReminderSettingsPanel(
                 }
 
                 if (showPermissionDialog) {
+                    val manufacturerLabel = com.todo.app.notification.PermissionHelper.getManufacturerLabel()
+                    val isChineseRom = com.todo.app.notification.PermissionHelper.isChineseRom()
+                    val autoStartSteps: String = when {
+                        com.todo.app.notification.PermissionHelper.isHuawei() ->
+                            "手机管家 → 应用启动管理 → 找到 Todo → 关闭「自动管理」→ 手动开启「允许自启动」「允许后台活动」"
+                        com.todo.app.notification.PermissionHelper.isXiaomi() ->
+                            "手机管家 → 应用管理 → 权限 → 自启动 → 找到 Todo 并开启；或：设置 → 应用 → 权限管理 → 后台弹出界面"
+                        com.todo.app.notification.PermissionHelper.isOppo() ->
+                            "手机管家 → 权限隐私 → 自启动管理 → 开启 Todo；或：设置 → 电池 → 更多耗电设置 → 找到 Todo 选「不限制」"
+                        com.todo.app.notification.PermissionHelper.isVivo() ->
+                            "i管家 → 应用管理 → 自启动 → 开启 Todo；或：设置 → 电池 → 后台耗电管理 → 找到 Todo 允许后台运行"
+                        com.todo.app.notification.PermissionHelper.isSamsung() ->
+                            "设置 → 电池 → 后台使用限制 → 找到 Todo → 选择「无限制」"
+                        else -> ""
+                    }
+
                     AlertDialog(
                         onDismissRequest = { showPermissionDialog = false },
                         title = { Text("提醒权限检测", fontWeight = FontWeight.Bold) },
@@ -799,19 +816,71 @@ private fun ReminderSettingsPanel(
                                     }
                                 }
 
-                                HorizontalDivider()
+                                // 4. 国产 ROM 自启动指引（仅在检测到国产 ROM 时显示）
+                                if (isChineseRom) {
+                                    HorizontalDivider()
 
-                                // 4. 国产 ROM 辅助权限指引
-                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    if (manufacturerLabel.isNotEmpty()) "$manufacturerLabel 自启动权限" else "自启动权限",
+                                                    fontWeight = FontWeight.Bold,
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                                Spacer(Modifier.height(2.dp))
+                                                Text(
+                                                    "国产系统会额外限制后台唤醒，必须在系统管理中手动开启自启动",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            Spacer(Modifier.width(8.dp))
+                                            TextButton(onClick = {
+                                                com.todo.app.notification.PermissionHelper.openAutoStartSettings(context)
+                                            }) {
+                                                Text("直达设置")
+                                            }
+                                        }
+
+                                        // 展示品牌专属操作步骤
+                                        if (autoStartSteps.isNotEmpty()) {
+                                            Spacer(Modifier.height(6.dp))
+                                            androidx.compose.foundation.layout.Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .background(
+                                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    )
+                                                    .padding(10.dp)
+                                            ) {
+                                                Text(
+                                                    autoStartSteps,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    lineHeight = 18.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 5. 非国产 ROM 通用提示
+                                if (!isChineseRom) {
+                                    HorizontalDivider()
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text("厂商系统辅助权限", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                                            Spacer(Modifier.height(2.dp))
-                                            Text("小米/华为/OPPO/vivo等设备请在系统应用权限中开启「后台自启动」及「锁屏/后台弹出界面」", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text("应用设置", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                            Text("确保应用通知及后台权限完整开启", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                         Spacer(Modifier.width(8.dp))
                                         TextButton(onClick = {
