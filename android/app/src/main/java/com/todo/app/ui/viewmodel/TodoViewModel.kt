@@ -153,7 +153,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
 
     fun rescheduleAlarms() {
         viewModelScope.launch {
-            val data = repository.getCurrentData()
+            val data = repository.ensureDataLoaded()
             com.todo.app.notification.ReminderScheduler(configManager.context).rescheduleAll(data)
         }
     }

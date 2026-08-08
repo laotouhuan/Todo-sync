@@ -17,6 +17,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -202,6 +203,8 @@ class TodoRepository(private val context: Context) {
         )
     )
 
+    private val dataLoaded = CompletableDeferred<Unit>()
+
     val isSyncing = MutableStateFlow(false)
     private val _syncStatus = MutableStateFlow(0) // 0: success/none, 1: syncing, 2: error
     val syncStatus: kotlinx.coroutines.flow.StateFlow<Int> = _syncStatus.asStateFlow()
@@ -211,7 +214,11 @@ class TodoRepository(private val context: Context) {
     init {
         // P1-12: Load from disk asynchronously
         repoScope.launch {
-            loadFromDisk()
+            try {
+                loadFromDisk()
+            } finally {
+                dataLoaded.complete(Unit)
+            }
         }
         repoScope.launch {
             for (item in uploadChannel) {
@@ -406,6 +413,16 @@ class TodoRepository(private val context: Context) {
 
     /** 同步获取当前内存中的最新数据（非挂起），供 Glance provideContent 内部使用 */
     fun getCurrentData(): TodoData = _todoData.value
+
+    /**
+     * 等待磁盘数据加载完成后返回当前数据。
+     * 如果已加载完毕则立即返回（零开销）。
+     * 供冷启动场景（BroadcastReceiver / Boot / Widget / App 启动）使用。
+     */
+    suspend fun ensureDataLoaded(): TodoData {
+        dataLoaded.await()
+        return _todoData.value
+    }
 
     /**
      * Save the given list of todos to disk and trigger a background upload.

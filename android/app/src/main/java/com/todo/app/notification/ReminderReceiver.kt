@@ -12,28 +12,36 @@ import com.todo.app.data.model.TodoData
 import com.todo.app.data.model.isOverdue
 import com.todo.app.data.model.weekStringOf
 import com.todo.app.data.model.monthStringOf
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val targetId = intent.getStringExtra("target_id") ?: return
-        val type = intent.getStringExtra("type") ?: return
+        val pendingResult = goAsync()
+        val targetId = intent.getStringExtra("target_id") ?: run { pendingResult.finish(); return }
+        val type = intent.getStringExtra("type") ?: run { pendingResult.finish(); return }
 
-        val app = context.applicationContext as? TodoApplication ?: return
+        val app = context.applicationContext as? TodoApplication ?: run { pendingResult.finish(); return }
         val repo = app.repository
-        val todoData = repo.getCurrentData()
 
-        if (!todoData.reminderSettings.enabled) {
-            return
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val todoData = repo.ensureDataLoaded()
+                if (!todoData.reminderSettings.enabled) return@launch
+
+                when (type) {
+                    "task" -> handleTaskReminder(context, todoData, targetId)
+                    "global" -> handleGlobalReminder(context, todoData, targetId)
+                }
+
+                // 触发后重新调度以更新下个周期
+                ReminderScheduler(context).rescheduleAll(todoData)
+            } finally {
+                pendingResult.finish()
+            }
         }
-
-        when (type) {
-            "task" -> handleTaskReminder(context, todoData, targetId)
-            "global" -> handleGlobalReminder(context, todoData, targetId)
-        }
-
-        // 触发后重新调度以更新下个周期
-        ReminderScheduler(context).rescheduleAll(todoData)
     }
 
     private fun handleTaskReminder(context: Context, todoData: TodoData, todoId: String) {
