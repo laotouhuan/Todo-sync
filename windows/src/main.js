@@ -749,19 +749,18 @@ function purgeOldDeletedTodos() {
 
 // ====== Global Reminder Rules Helpers ======
 const SMART_PRESET_MATRIX = {
-    'any_remaining_all': '截至（{time}），全部任务还有 {remaining_count} 项未完成',
-    'any_remaining_today_only': '截至（{time}），仅今日任务还有 {remaining_count} 项未完成',
-    'any_remaining_recurring_only': '截至（{time}），打卡任务还有 {remaining_count} 项未完成',
-    'none_completed_all': '截至（{time}），今日尚未完成任何任务哦',
-    'none_completed_today_only': '截至（{time}），今日待办任务尚未完成任何一项哦',
-    'none_completed_recurring_only': '截至（{time}），今日习惯打卡尚未完成任何一项哦',
-    'unconditional_all': '到了设定的提醒时间（{time}），记得按时处理工作与学习'
+    'any_remaining_all': '截至{time}，全部任务还有{remaining_count}项未完成',
+    'any_remaining_today_only': '截至{time}，仅今日任务还有{remaining_count}项未完成',
+    'any_remaining_recurring_only': '截至{time}，打卡任务还有{remaining_count}项未完成',
+    'none_completed_all': '截至{time}，今日尚未完成任何任务哦',
+    'none_completed_today_only': '截至{time}，今日待办任务尚未完成任何一项哦',
+    'none_completed_recurring_only': '截至{time}，今日习惯打卡尚未完成任何一项哦',
+    'unconditional_all': '到了设定的提醒时间{time}，记得按时处理工作与学习'
 };
 
-function getSmartPresetBody(condition, taskScope, time = '12:00') {
+function getSmartPresetBody(condition, taskScope) {
     const key = condition === 'unconditional' ? 'unconditional_all' : `${condition}_${taskScope}`;
-    const tmpl = SMART_PRESET_MATRIX[key] || SMART_PRESET_MATRIX['unconditional_all'];
-    return tmpl.replace('{time}', time);
+    return SMART_PRESET_MATRIX[key] || SMART_PRESET_MATRIX['unconditional_all'];
 }
 
 function renderGlobalRules(rules = []) {
@@ -1051,7 +1050,7 @@ function renderGlobalRules(rules = []) {
                 return currentBody.startsWith(prefix);
             });
             if (isDefaultTmpl) {
-                bodyInput.value = getSmartPresetBody(cVal, sVal, tVal);
+                bodyInput.value = getSmartPresetBody(cVal, sVal);
             }
             updateLivePreview();
         }
@@ -1076,7 +1075,7 @@ function collectGlobalRulesFromUI() {
         const condition = card.querySelector('.rule-condition-select')?.value || 'unconditional';
         const taskScope = card.querySelector('.rule-scope-select')?.value || 'all';
         const title = card.querySelector('.rule-title-input')?.value.trim() || '';
-        const body = card.querySelector('.rule-body-input')?.value.trim() || getSmartPresetBody(condition, taskScope, validatedTime);
+        const body = card.querySelector('.rule-body-input')?.value.trim() || getSmartPresetBody(condition, taskScope);
         return {
             id,
             enabled,
@@ -3862,6 +3861,16 @@ function initApp() {
     inputEl = document.getElementById('todo-input');
     statusEl = document.getElementById('sync-status');
 
+    // 添加新待办表单
+    if (formEl) {
+        formEl.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const raw = inputEl ? inputEl.value : '';
+            const ok = await createAndAddTodo(raw);
+            if (ok && inputEl) inputEl.value = '';
+        });
+    }
+
     // 优先加载核心数据，保证即使个别可选 UI 元素事件绑定失败，清单也能正常呈现
     try {
         loadData();
@@ -4154,7 +4163,7 @@ function initApp() {
                     condition: 'unconditional',
                     task_scope: 'all',
                     title: '',
-                    body: getSmartPresetBody('unconditional', 'all', '12:00')
+                    body: getSmartPresetBody('unconditional', 'all')
                 });
                 renderGlobalRules(currentRules);
             });
@@ -4227,7 +4236,7 @@ function initApp() {
                         condition: 'any_remaining',
                         task_scope: 'today_only',
                         title: '',
-                        body: '截至（20:00），仅今日任务还有 {remaining_count} 项未完成'
+                        body: '截至{time}，仅今日任务还有{remaining_count}项未完成'
                     }
                 };
 
@@ -5139,7 +5148,7 @@ async function createAndAddTodo(raw) {
     if (hasExplicitDate) {
         finalDate = taskDate; // 显式指定（含 @none 解析出的 null），无条件服从
     } else if (taskType === 'normal') {
-        // 普通任务未显式指定，应用本地偏好
+        // 普通任务未显式指定，应用本地偏好或当前视图上下文
         const defaultDueDate = appState.appConfig.default_due_date || 'none';
         if (defaultDueDate === 'today') {
             finalDate = getTodayString();
@@ -5208,16 +5217,6 @@ async function createAndAddTodo(raw) {
     return true;
 }
 
-    // 添加新待办表单
-    if (formEl) {
-        formEl.addEventListener("submit", async (e) => {
-            e.preventDefault();
-            const raw = inputEl ? inputEl.value : '';
-            const ok = await createAndAddTodo(raw);
-            if (ok && inputEl) inputEl.value = '';
-        });
-    }
-
     // Watch file changes
     listen("todo_data_changed", () => {
         if (appState.saveVersion > 0) {
@@ -5269,9 +5268,6 @@ async function createAndAddTodo(raw) {
             }
         });
     }
-
-    // 初始加载
-    loadData();
 
     // 启动 24 点自动刷新
     scheduleMidnightRefresh();

@@ -153,38 +153,63 @@ object PermissionHelper {
      * 尝试打开当前品牌的「自启动管理」或「后台应用管理」设置页面。
      * 按照优先顺序逐一尝试 ComponentName，均失败则回退到通用应用详情页。
      */
-    fun openAutoStartSettings(context: Context) {
+    /**
+     * 尝试打开当前品牌的「自启动管理」或「后台应用管理」设置页面。
+     * 按照优先顺序逐一尝试 ComponentName / Action，均失败则回退到通用应用详情页。
+     * @return true 表示匹配并成功打开了厂商私有 Activity，false 表示回退到了系统通用应用详情页
+     */
+    fun openAutoStartSettings(context: Context): Boolean {
         val intents: List<Intent> = when {
+            isXiaomi() -> listOf(
+                // 1. MIUI / HyperOS 专用自启动 Action (带包名)
+                Intent("miui.intent.action.OP_AUTO_START").apply {
+                    putExtra("extra_pkgname", context.packageName)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                },
+                // 2. MIUI 自启动详情页 (带包名)
+                makeComponentIntent("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartDetailActivity").apply {
+                    putExtra("extra_pkgname", context.packageName)
+                },
+                // 3. MIUI 应用权限编辑页 (带包名)
+                makeComponentIntent("com.miui.securitycenter", "com.miui.permcenter.permissions.AppPermissionsEditorActivity").apply {
+                    putExtra("extra_pkgname", context.packageName)
+                },
+                // 4. MIUI 自启动管理列表
+                makeComponentIntent("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+                makeComponentIntent("com.xiaomi.permit", "com.xiaomi.permit.autostart.AutoStartManagementActivity"),
+                makeComponentIntent("com.miui.securitycenter", "com.miui.securitycenter.MainActivity")
+            )
             isHuawei() -> listOf(
-                // HarmonyOS / EMUI 自启动管理
+                // HarmonyOS / EMUI 应用启动管理 (新版)
+                makeComponentIntent("com.huawei.systemmanager", "com.huawei.systemmanager.startupmanager.ui.StartupNormalAppListActivity"),
+                makeComponentIntent("com.huawei.systemmanager", "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity"),
+                // EMUI 自启动管理
                 makeComponentIntent("com.huawei.systemmanager", "com.huawei.systemmanager.startempoint.ui.StartEntryActivity"),
-                // 旧版 EMUI
                 makeComponentIntent("com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"),
                 // 电池优化白名单
                 makeComponentIntent("com.huawei.systemmanager", "com.huawei.systemmanager.power.ui.HwPowerManagerActivity")
             )
-            isXiaomi() -> listOf(
-                // MIUI 自启动管理
-                makeComponentIntent("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
-                // 新版 MIUI
-                makeComponentIntent("com.xiaomi.permit", "com.xiaomi.permit.autostart.AutoStartManagementActivity"),
-                // MIUI 安全中心
-                makeComponentIntent("com.miui.securitycenter", "com.miui.securitycenter.MainActivity")
-            )
             isOppo() -> listOf(
-                // ColorOS 自启动
+                // ColorOS / Realme UI 自启动管理
                 makeComponentIntent("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"),
+                makeComponentIntent("com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity"),
+                makeComponentIntent("com.coloros.startupapp", "com.coloros.startupapp.StartupAppListActivity"),
+                makeComponentIntent("com.oplus.safecenter", "com.oplus.safecenter.permission.startup.StartupAppListActivity"),
+                makeComponentIntent("com.oplus.pay", "com.oplus.pay.permission.startup.StartupAppListActivity"),
                 makeComponentIntent("com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity"),
-                // 新版 ColorOS 权限管理
                 makeComponentIntent("com.coloros.securitypermission", "com.coloros.securitypermission.permission.PermissionManagerActivity"),
                 // 一加
                 makeComponentIntent("com.oneplus.security", "com.oneplus.security.chainlaunch.view.ChainLaunchAppListActivity")
             )
             isVivo() -> listOf(
-                // FuntouchOS / OriginOS 自启动
-                makeComponentIntent("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity"),
+                // FuntouchOS / OriginOS 自启动与后台高耗电
+                makeComponentIntent("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager"),
+                makeComponentIntent("com.iqoo.secure", "com.iqoo.secure.safeguard.SoftPermissionDetailActivity").apply {
+                    putExtra("packagename", context.packageName)
+                },
                 makeComponentIntent("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity"),
-                makeComponentIntent("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager")
+                makeComponentIntent("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.PurviewTabActivity"),
+                makeComponentIntent("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity")
             )
             isSamsung() -> listOf(
                 // Samsung 设备维护 → 电池
@@ -197,8 +222,8 @@ object PermissionHelper {
         // 依次尝试，找到第一个可用的
         for (intent in intents) {
             if (tryStartActivity(context, intent)) {
-                Log.d(TAG, "成功打开自启动设置: ${intent.component}")
-                return
+                Log.d(TAG, "成功打开自启动设置: ${intent.component ?: intent.action}")
+                return true
             }
         }
 
@@ -211,6 +236,7 @@ object PermissionHelper {
             }
             context.startActivity(fallback)
         } catch (_: Exception) {}
+        return false
     }
 
     private fun makeComponentIntent(pkg: String, cls: String): Intent {
