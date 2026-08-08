@@ -126,9 +126,10 @@ fun SettingsView(viewModel: TodoViewModel) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            TabRow(
+            ScrollableTabRow(
                 selectedTabIndex = activeTab,
-                modifier = Modifier.fillMaxWidth().height(48.dp)
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                edgePadding = 0.dp
             ) {
                 tabTitles.forEachIndexed { index, title ->
                     Tab(
