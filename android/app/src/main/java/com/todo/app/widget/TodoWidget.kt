@@ -233,7 +233,10 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                             items = todayFocus,
                             itemId = { item -> when (item) {
                                 is WidgetItem.Separator -> item.id.hashCode().toLong()
-                                is WidgetItem.TodoItem -> item.todo.id.hashCode().toLong()
+                                is WidgetItem.TodoItem -> {
+                                    val t = item.todo
+                                    "${t.id}_${t.completed}_${t.completedAt}_${t.updatedAt}_${t.completedDates.size}".hashCode().toLong()
+                                }
                             }}
                         ) { item ->
                             when (item) {
@@ -283,19 +286,23 @@ fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProv
             verticalAlignment = Alignment.CenterVertically
         ) {
 
-            Image(
-                provider = ImageProvider(
-                    if (isCompletedToShow) android.R.drawable.checkbox_on_background
-                    else android.R.drawable.checkbox_off_background
-                ),
-                contentDescription = "Toggle",
+            Box(
                 modifier = GlanceModifier
-                    .size(38.dp)
-                    .padding(10.dp)
+                    .size(44.dp)
                     .clickable(
                         actionRunCallback<ToggleActionCallback>(actionParametersOf(TodoIdKey to todo.id))
-                    )
-            )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    provider = ImageProvider(
+                        if (isCompletedToShow) android.R.drawable.checkbox_on_background
+                        else android.R.drawable.checkbox_off_background
+                    ),
+                    contentDescription = "Toggle",
+                    modifier = GlanceModifier.size(24.dp)
+                )
+            }
             Text(
                 text = todo.content,
                 style = TextStyle(
@@ -336,7 +343,6 @@ class ToggleActionCallback : ActionCallback {
         try {
             val todoId = parameters[TodoIdKey] ?: return
             TodoApplication.instance.repository.toggleTodoStatus(todoId)
-            refreshAllWidgets(context)
         } catch (e: Exception) {
             android.util.Log.e("TodoWidget", "ToggleActionCallback onAction 失败: ${e.message}", e)
         }
