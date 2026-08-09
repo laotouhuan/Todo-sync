@@ -93,7 +93,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
             @Suppress("UNUSED_VARIABLE")
             val version = prefs[VERSION_KEY] ?: 0
 
-            val currentData = loadedData
+            val currentData = repository.getCurrentData()
             val expandedTodos = prefs[EXPANDED_TODOS_KEY] ?: emptySet()
 
             val dates = DateStrings.now()
@@ -234,8 +234,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                             itemId = { item -> when (item) {
                                 is WidgetItem.Separator -> item.id.hashCode().toLong()
                                 is WidgetItem.TodoItem -> {
-                                    val t = item.todo
-                                    "${t.id}_${t.completed}_${t.completedAt}_${t.updatedAt}_${t.completedDates.size}".hashCode().toLong()
+                                    item.todo.id.hashCode().toLong()
                                 }
                             }}
                         ) { item ->
