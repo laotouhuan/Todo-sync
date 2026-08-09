@@ -13,8 +13,8 @@ android {
         applicationId = "com.todo.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 29
-        versionName = "1.3.8"
+        versionCode = 30
+        versionName = "1.3.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
