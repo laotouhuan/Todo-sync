@@ -85,6 +85,16 @@ class TodoDateUtilsTest {
         // Weekly tasks -> not overdue
         val weeklyTodo = Todo.create("Test", date = "2026-W03")
         assertFalse(weeklyTodo.isOverdue("2026-06-15"))
+
+        // Daily repeat tasks past date -> not overdue
+        val dailyTodo = Todo.create("Test", date = "2026-06-10")
+        dailyTodo.recurring = RecurringType.DAILY_REPEAT
+        assertFalse(dailyTodo.isOverdue("2026-06-15"))
+
+        // Monthly checkin tasks past date -> not overdue
+        val monthlyTodo = Todo.create("Test", date = "2026-05")
+        monthlyTodo.taskType = TaskType.MONTHLY_CHECKIN
+        assertFalse(monthlyTodo.isOverdue("2026-06-15"))
     }
 
     @Test

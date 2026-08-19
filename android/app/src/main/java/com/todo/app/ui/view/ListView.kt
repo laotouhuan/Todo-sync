@@ -838,9 +838,9 @@ fun ClassicListView(viewModel: TodoViewModel) {
         EditTodoDialog(
             todo = todo,
             onDismiss = { showEditDialogFor = null },
-            onAutoSave = { updated ->
+            onConfirm = { updated ->
                 viewModel.updateTodo(updated)
-                showEditDialogFor = updated
+                showEditDialogFor = null
             },
             onDelete = {
                 viewModel.deleteTodo(todo.id)

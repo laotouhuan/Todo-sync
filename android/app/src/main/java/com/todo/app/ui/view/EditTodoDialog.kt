@@ -85,21 +85,6 @@ import org.burnoutcrew.reorderable.reorderable
 import org.burnoutcrew.reorderable.ReorderableItem
 import org.burnoutcrew.reorderable.detectReorderAfterLongPress
 
-// ====== Public utility composable ======
-
-@Composable
-fun rememberDebouncedAutoSave(delayMs: Long = 300, onSave: (Todo) -> Unit): (Todo) -> Unit {
-    val scope = rememberCoroutineScope()
-    var job by remember { mutableStateOf<Job?>(null) }
-    return { todo ->
-        job?.cancel()
-        job = scope.launch {
-            delay(delayMs)
-            onSave(todo)
-        }
-    }
-}
-
 // ====== buildUpdatedTodo (top-level private) ======
 
 private fun buildUpdatedTodo(
@@ -202,7 +187,7 @@ private fun copyToClipboard(context: Context, text: String) {
 fun EditTodoDialog(
     todo: Todo,
     onDismiss: () -> Unit,
-    onAutoSave: (Todo) -> Unit,
+    onConfirm: (Todo) -> Unit,
     onDelete: () -> Unit
 ) {
     val parsedContent = remember(todo.content) { todo.extractCollaboratorContent() }
@@ -229,31 +214,40 @@ fun EditTodoDialog(
     }
 
     var hasReminder by remember(todo.id, todo.reminder) { mutableStateOf(todo.reminder != null) }
+    var reminderDate by remember(todo.id, todo.reminder, todo.date) {
+        mutableStateOf(todo.reminder?.reminderDate ?: (if (date.isNotBlank() && !isWeekDate(date) && !isMonthDate(date)) date else ""))
+    }
     var reminderTime by remember(todo.id, todo.reminder) { mutableStateOf(todo.reminder?.reminderTime ?: "09:00") }
     var reminderRepeatDaily by remember(todo.id, todo.reminder) { mutableStateOf(todo.reminder?.repeatDaily ?: false) }
 
     val currentReminder = if (hasReminder) {
         com.todo.app.data.model.Reminder(
-            reminderDate = date.takeIf { it.isNotBlank() },
+            reminderDate = reminderDate.takeIf { it.isNotBlank() } ?: date.takeIf { it.isNotBlank() },
             reminderTime = validateAndNormalizeTime(reminderTime, "09:00").second.takeIf { it != "--:--" } ?: "09:00",
             repeatDaily = reminderRepeatDaily
         )
     } else null
 
-    val performAutoSave = rememberDebouncedAutoSave(delayMs = 300) { t ->
-        onAutoSave(t)
-    }
-
-    val buildAndSave: () -> Unit = {
-        val updated = buildUpdatedTodo(todo, content, date, time, selectedTypeUi, targetCount, parentCompleted, parentCompletedAt, completedDates, subtasks, currentReminder)
-        performAutoSave(updated)
+    val onSave: () -> Unit = {
+        val updated = buildUpdatedTodo(
+            todo = todo,
+            content = content,
+            date = date,
+            time = time,
+            selectedTypeUi = selectedTypeUi,
+            targetCount = targetCount,
+            parentCompleted = parentCompleted,
+            parentCompletedAt = parentCompletedAt,
+            completedDates = completedDates,
+            subtasks = subtasks,
+            reminder = currentReminder
+        )
+        onConfirm(updated)
+        onDismiss()
     }
 
     val onUpdateCompletedDates = { newDates: List<String> ->
-        val sorted = newDates.sorted()
-        completedDates = sorted
-        val updated = buildUpdatedTodo(todo, content, date, time, selectedTypeUi, targetCount, parentCompleted, parentCompletedAt, sorted, subtasks, currentReminder)
-        performAutoSave(updated)
+        completedDates = newDates.sorted()
     }
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -279,10 +273,7 @@ fun EditTodoDialog(
         )
     }
 
-    Dialog(onDismissRequest = {
-        buildAndSave()
-        onDismiss()
-    }) {
+    Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = MaterialTheme.shapes.medium,
             color = MaterialTheme.colorScheme.surface,
@@ -290,11 +281,9 @@ fun EditTodoDialog(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 EditTodoHeader(
-                    onBack = {
-                        buildAndSave()
-                        onDismiss()
-                    },
-                    onDelete = { showDeleteConfirm = true }
+                    onBack = onDismiss,
+                    onDelete = { showDeleteConfirm = true },
+                    onSave = onSave
                 )
 
                 EditTodoContentSection(
@@ -311,27 +300,26 @@ fun EditTodoDialog(
                             date = ""
                         }
                         hasDateEnabled = checked
-                        buildAndSave()
                     },
-                    selectedTypeUi = selectedTypeUi,
-                    performAutoSave = buildAndSave
+                    selectedTypeUi = selectedTypeUi
                 )
 
                 EditTodoTypeSection(
                     selectedTypeUi = selectedTypeUi,
                     onTypeChange = { type ->
                         selectedTypeUi = type
-                        buildAndSave()
                     }
                 )
 
                 EditTodoReminderSection(
                     hasReminder = hasReminder,
-                    onHasReminderChange = { hasReminder = it; buildAndSave() },
+                    onHasReminderChange = { hasReminder = it },
+                    reminderDate = reminderDate,
+                    onReminderDateChange = { reminderDate = it },
                     reminderTime = reminderTime,
-                    onReminderTimeChange = { reminderTime = it; buildAndSave() },
+                    onReminderTimeChange = { reminderTime = it },
                     reminderRepeatDaily = reminderRepeatDaily,
-                    onReminderRepeatDailyChange = { reminderRepeatDaily = it; buildAndSave() },
+                    onReminderRepeatDailyChange = { reminderRepeatDaily = it },
                     isRecurring = selectedTypeUi != TaskType.NORMAL
                 )
 
@@ -340,7 +328,7 @@ fun EditTodoDialog(
                         selectedTypeUi = selectedTypeUi,
                         todo = todo,
                         targetCount = targetCount,
-                        onTargetCountChange = { targetCount = it; buildAndSave() },
+                        onTargetCountChange = { targetCount = it },
                         completedDates = completedDates,
                         onUpdateCompletedDates = onUpdateCompletedDates,
                         date = date
@@ -357,7 +345,6 @@ fun EditTodoDialog(
                     onParentCompletedChange = { parentCompleted = it },
                     parentCompletedAt = parentCompletedAt,
                     onParentCompletedAtChange = { parentCompletedAt = it },
-                    performAutoSave = buildAndSave,
                     context = LocalContext.current
                 )
             }
@@ -368,7 +355,11 @@ fun EditTodoDialog(
 // ====== Extracted Sections ======
 
 @Composable
-private fun EditTodoHeader(onBack: () -> Unit, onDelete: () -> Unit) {
+private fun EditTodoHeader(
+    onBack: () -> Unit,
+    onDelete: () -> Unit,
+    onSave: () -> Unit
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -380,8 +371,14 @@ private fun EditTodoHeader(onBack: () -> Unit, onDelete: () -> Unit) {
             }
             Text("编辑待办", style = MaterialTheme.typography.titleLarge)
         }
-        IconButton(onClick = onDelete) {
-            Icon(Icons.Filled.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.error)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Filled.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.error)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(onClick = onSave) {
+                Icon(Icons.Filled.Check, contentDescription = "保存", tint = MaterialTheme.colorScheme.primary)
+            }
         }
     }
     Spacer(Modifier.height(16.dp))
@@ -395,19 +392,13 @@ private fun EditTodoContentSection(
     onDateChange: (String) -> Unit,
     hasDateEnabled: Boolean,
     onHasDateEnabledChange: (Boolean) -> Unit,
-    selectedTypeUi: String,
-    performAutoSave: () -> Unit
+    selectedTypeUi: String
 ) {
     OutlinedTextField(
         value = content,
         onValueChange = onContentChange,
-        modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused) performAutoSave() },
-        label = { Text("待办内容") },
-        trailingIcon = {
-            IconButton(onClick = performAutoSave) {
-                Icon(Icons.Filled.Check, contentDescription = "确认保存")
-            }
-        }
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text("待办内容") }
     )
 
     if (selectedTypeUi == TaskType.NORMAL) {
@@ -426,29 +417,24 @@ private fun EditTodoContentSection(
 
         if (hasDateEnabled) {
             Spacer(Modifier.height(8.dp))
-            Row(
+            AppDateInput(
+                value = date,
+                onValueChange = onDateChange,
+                label = "截止日期 (YYYY-MM-DD)",
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = date,
-                    onValueChange = onDateChange,
-                    label = { Text("截止日期 (YYYY-MM-DD)") },
-                    modifier = Modifier.weight(1f).onFocusChanged { if (!it.isFocused) performAutoSave() }
-                )
-                Button(
-                    onClick = {
-                        onDateChange(LocalDate.now().plusDays(1).toString())
-                        performAutoSave()
-                    },
-                    modifier = Modifier.height(56.dp).padding(top = 6.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp)
-                ) {
-                    Text("明天")
+                trailingAction = {
+                    Button(
+                        onClick = {
+                            onDateChange(LocalDate.now().plusDays(1).toString())
+                        },
+                        modifier = Modifier.height(56.dp).padding(top = 6.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp)
+                    ) {
+                        Text("明天")
+                    }
                 }
-            }
+            )
         }
     }
 
@@ -475,6 +461,8 @@ private fun EditTodoTypeSection(
 private fun EditTodoReminderSection(
     hasReminder: Boolean,
     onHasReminderChange: (Boolean) -> Unit,
+    reminderDate: String,
+    onReminderDateChange: (String) -> Unit,
     reminderTime: String,
     onReminderTimeChange: (String) -> Unit,
     reminderRepeatDaily: Boolean,
@@ -496,13 +484,23 @@ private fun EditTodoReminderSection(
 
     if (hasReminder) {
         Spacer(Modifier.height(6.dp))
-        OutlinedTextField(
-            value = reminderTime,
-            onValueChange = onReminderTimeChange,
-            label = { Text("提醒时间 (HH:mm)") },
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AppDateInput(
+                value = reminderDate,
+                onValueChange = onReminderDateChange,
+                label = "提醒日期",
+                modifier = Modifier.weight(1f)
+            )
+            SegmentedTimeInput(
+                value = reminderTime,
+                onValueChange = onReminderTimeChange,
+                label = "提醒时间"
+            )
+        }
         if (isRecurring) {
             Spacer(Modifier.height(6.dp))
             Row(
@@ -565,7 +563,6 @@ private fun EditTodoSubtasksSection(
     onParentCompletedChange: (Boolean) -> Unit,
     parentCompletedAt: String?,
     onParentCompletedAtChange: (String?) -> Unit,
-    performAutoSave: () -> Unit,
     context: Context
 ) {
     Spacer(Modifier.height(16.dp))
@@ -617,68 +614,27 @@ private fun EditTodoSubtasksSection(
                 if (dateVal.isNotEmpty()) {
                     val checkinStr = formatCheckinDateTime(d, t)
                     onParentCompletedAtChange(checkinStr)
-                    performAutoSave()
                 }
             }
 
-            var lastValidTime by remember(todo.id) { mutableStateOf(timeText) }
-            val context = LocalContext.current
-
-            OutlinedTextField(
+            AppDateInput(
                 value = dateText,
                 onValueChange = {
                     dateText = it
                     updateCompletedAt(it, timeText)
                 },
-                label = { Text("完成日期") },
-                modifier = Modifier.weight(1f),
-                singleLine = true
+                label = "完成日期",
+                modifier = Modifier.weight(1f)
             )
 
-            OutlinedTextField(
+            SegmentedTimeInput(
                 value = timeText,
-                onValueChange = { input ->
-                    var formatted = input
-                    val parts = formatted.split(":")
-                    if (parts.size >= 2) {
-                        val hPart = parts[0]
-                        val mPart = parts.subList(1, parts.size).joinToString("")
-                        if (hPart.length > 2) {
-                            val extra = hPart.substring(2)
-                            val hClean = hPart.substring(0, 2)
-                            val mClean = extra + mPart
-                            formatted = "$hClean:$mClean"
-                        }
-                    } else if (timeText.contains(':') && !formatted.contains(':') && formatted.length >= 3) {
-                        formatted = formatted.substring(0, 1) + ":" + formatted.substring(2)
-                    } else if (!formatted.contains(':') && formatted.length >= 2) {
-                        formatted = formatted.substring(0, 2) + ":" + formatted.substring(2)
-                    }
-                    if (formatted.length > 5) {
-                        formatted = formatted.substring(0, 5)
-                    }
-                    timeText = formatted
-                    val (isValid, _) = validateAndNormalizeTime(formatted, lastValidTime)
-                    if (isValid) {
-                        updateCompletedAt(dateText, formatted)
-                    }
+                onValueChange = { newTime ->
+                    timeText = newTime
+                    updateCompletedAt(dateText, newTime)
                 },
-                label = { Text("完成时间") },
-                modifier = Modifier.weight(1f).onFocusChanged { focusState ->
-                    if (!focusState.isFocused) {
-                        val (isValid, normalized) = validateAndNormalizeTime(timeText, lastValidTime)
-                        if (!isValid) {
-                            Toast.makeText(context, "时间格式有误，已还原", Toast.LENGTH_SHORT).show()
-                            timeText = normalized
-                            updateCompletedAt(dateText, normalized)
-                        } else {
-                            timeText = normalized
-                            lastValidTime = normalized
-                            updateCompletedAt(dateText, normalized)
-                        }
-                    }
-                },
-                singleLine = true
+                label = "完成时间",
+                allowEmpty = true
             )
         }
     }
@@ -750,7 +706,6 @@ private fun EditTodoSubtasksSection(
                             }
                     )
                 )
-                performAutoSave()
             }) { Text("排序") }
 
             TextButton(onClick = { showCopyDialog = true }) { Text("复制") }
@@ -762,9 +717,6 @@ private fun EditTodoSubtasksSection(
             onSubtasksChange(subtasks.toMutableList().apply {
                 add(to.index, removeAt(from.index))
             })
-        },
-        onDragEnd = { startIndex, endIndex ->
-            if (startIndex != endIndex) performAutoSave()
         }
     )
 
@@ -794,10 +746,8 @@ private fun EditTodoSubtasksSection(
                             val allCompleted = updatedSubtasks.isNotEmpty() && updatedSubtasks.all { it.completed }
                             if (allCompleted) {
                                 onParentCompletedChange(true)
-                                onParentCompletedChange(true)
                                 onParentCompletedAtChange(nowInstant())
                             }
-                            performAutoSave()
                         })
                         if (editingSubtaskId == sub.id) {
                             var editContent by remember(sub.content) { mutableStateOf(sub.content) }
@@ -810,7 +760,6 @@ private fun EditTodoSubtasksSection(
                             )
                             IconButton(onClick = {
                                 onSubtasksChange(subtasks.map { s -> if (s.id == sub.id) s.copy(content = editContent) else s })
-                                performAutoSave()
                                 onEditingSubtaskIdChange(null)
                             }) {
                                 Icon(Icons.Filled.Check, contentDescription = "保存", modifier = Modifier.size(20.dp))
@@ -827,7 +776,6 @@ private fun EditTodoSubtasksSection(
                             }
                             IconButton(onClick = {
                                 onSubtasksChange(subtasks.filter { it.id != sub.id })
-                                performAutoSave()
                             }) {
                                 Icon(Icons.Filled.Close, contentDescription = "删除子任务", modifier = Modifier.size(20.dp))
                             }
@@ -851,7 +799,6 @@ private fun EditTodoSubtasksSection(
             if (newSubtaskContent.isNotBlank()) {
                 onSubtasksChange(listOf(Subtask(UUID.randomUUID().toString(), newSubtaskContent, false)) + subtasks)
                 newSubtaskContent = ""
-                performAutoSave()
             }
         }) {
             Icon(Icons.Filled.Add, contentDescription = "添加")
@@ -1039,18 +986,18 @@ fun EditWeekCheckinGrid(
                                     mutableStateOf(if (initialTime.isEmpty()) "--:--" else initialTime)
                                 }
 
-                                OutlinedTextField(
+                                AppDateInput(
                                     value = inputDate,
                                     onValueChange = { inputDate = it },
-                                    label = { Text("完成日期") },
-                                    singleLine = true
+                                    label = "完成日期",
+                                    modifier = Modifier.fillMaxWidth()
                                 )
 
-                                OutlinedTextField(
+                                SegmentedTimeInput(
                                     value = inputTime,
                                     onValueChange = { inputTime = it },
-                                    label = { Text("完成时间") },
-                                    singleLine = true
+                                    label = "完成时间",
+                                    allowEmpty = true
                                 )
 
                                 Row(
@@ -1266,18 +1213,18 @@ fun EditMonthCheckinGrid(
                                             mutableStateOf(if (initialTime.isEmpty()) "--:--" else initialTime)
                                         }
 
-                                        OutlinedTextField(
+                                        AppDateInput(
                                             value = inputDate,
                                             onValueChange = { inputDate = it },
-                                            label = { Text("完成日期") },
-                                            singleLine = true
+                                            label = "完成日期",
+                                            modifier = Modifier.fillMaxWidth()
                                         )
 
-                                        OutlinedTextField(
+                                        SegmentedTimeInput(
                                             value = inputTime,
                                             onValueChange = { inputTime = it },
-                                            label = { Text("完成时间") },
-                                            singleLine = true
+                                            label = "完成时间",
+                                            allowEmpty = true
                                         )
 
                                         Row(

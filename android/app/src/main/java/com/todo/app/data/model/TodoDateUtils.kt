@@ -144,6 +144,8 @@ fun Todo.isOverdue(todayStr: String): Boolean {
     if (completed) return false
     // Exclude week and month tasks -- they don't have a specific due date
     if (isWeekDate(d) || isMonthDate(d)) return false
+    // Exclude recurring and checkin tasks -- habit tasks do not have overdue status
+    if (recurring == RecurringType.DAILY_REPEAT || taskType == TaskType.WEEKLY_CHECKIN || taskType == TaskType.MONTHLY_CHECKIN) return false
     return d < todayStr
 }
 

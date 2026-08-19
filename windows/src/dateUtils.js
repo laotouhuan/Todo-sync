@@ -53,6 +53,8 @@ export function isOverdue(todo, todayStr) {
     if (!todo.date || todo.completed) return false;
     // Exclude week and month tasks — they don't have a specific due date
     if (isWeekDate(todo.date) || isMonthDate(todo.date)) return false;
+    // Exclude recurring and checkin tasks — habit tasks do not have overdue status
+    if (todo.recurring === 'daily_repeat' || todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin') return false;
     return todo.date < todayStr;
 }
 

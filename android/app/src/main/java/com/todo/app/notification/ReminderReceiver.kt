@@ -117,10 +117,16 @@ class ReminderReceiver : BroadcastReceiver() {
         val thisMonthStr = com.todo.app.data.model.monthStringOf(today)
 
         val activeTodos = todoData.todos.filter { !it.deleted }
-        val isRecurringTask = { t: Todo ->
+        val isCheckinOrRecurring = { t: Todo ->
+            t.recurring == RecurringType.DAILY_REPEAT ||
+            t.taskType == TaskType.WEEKLY_CHECKIN ||
+            t.taskType == TaskType.MONTHLY_CHECKIN
+        }
+
+        val isRecurringForToday = { t: Todo ->
             if (t.recurring == RecurringType.DAILY_REPEAT) {
                 val d = t.date
-                d == null || d == todayStr
+                d == null || d == todayStr || (!t.completed && d < todayStr)
             } else if (t.taskType == TaskType.WEEKLY_CHECKIN) {
                 t.date == thisWeekStr || t.date == null
             } else if (t.taskType == TaskType.MONTHLY_CHECKIN) {
@@ -132,9 +138,9 @@ class ReminderReceiver : BroadcastReceiver() {
 
         val scopedTodos = activeTodos.filter {
             when (rule.taskScope) {
-                "today_only" -> !isRecurringTask(it) && (it.date == todayStr || it.isOverdue(todayStr))
-                "recurring_only" -> isRecurringTask(it)
-                else -> it.date == todayStr || it.isOverdue(todayStr) || isRecurringTask(it)
+                "today_only" -> !isCheckinOrRecurring(it) && (it.date == todayStr || it.isOverdue(todayStr))
+                "recurring_only" -> isRecurringForToday(it)
+                else -> (!isCheckinOrRecurring(it) && (it.date == todayStr || it.isOverdue(todayStr))) || isRecurringForToday(it)
             }
         }
 
