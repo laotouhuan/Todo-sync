@@ -789,7 +789,7 @@ function renderGlobalRules(rules = []) {
             <div class="rule-detail" style="display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color);">
                 <div class="input-group" style="margin-bottom: 8px;">
                     <label>提醒时间</label>
-                    <input type="text" class="rule-time-input" value="${escapeHtml(rule.time || '12:00')}" placeholder="HH:mm" maxlength="5" />
+                    <input type="time" class="rule-time-input" value="${escapeHtml(rule.time || '12:00')}" />
                 </div>
                 <div class="input-group" style="margin-bottom: 8px;">
                     <label>触发判定条件</label>
@@ -895,9 +895,15 @@ function renderGlobalRules(rules = []) {
             const activeTodos = getActiveTodos().filter(t => !t.deleted);
             const scopeVal = scopeSelect.value;
 
-            const isRecurringTask = (t) => {
+            const isCheckinOrRecurring = (t) => {
+                return t.recurring === 'daily_repeat' ||
+                       t.task_type === 'weekly_checkin' ||
+                       t.task_type === 'monthly_checkin';
+            };
+
+            const isRecurringForToday = (t) => {
                 if (t.recurring === 'daily_repeat') {
-                    return !t.date || t.date === todayStr;
+                    return !t.date || t.date === todayStr || (!t.completed && t.date < todayStr);
                 }
                 if (t.task_type === 'weekly_checkin') {
                     return t.date === thisWeekStr || !t.date;
@@ -910,12 +916,12 @@ function renderGlobalRules(rules = []) {
 
             const scopedTodos = activeTodos.filter(t => {
                 if (scopeVal === 'today_only') {
-                    return !isRecurringTask(t) && (t.date === todayStr || isOverdue(t, todayStr));
+                    return !isCheckinOrRecurring(t) && (t.date === todayStr || isOverdue(t, todayStr));
                 } else if (scopeVal === 'recurring_only') {
-                    return isRecurringTask(t);
+                    return isRecurringForToday(t);
                 }
                 // 'all'
-                return (t.date === todayStr || isOverdue(t, todayStr) || isRecurringTask(t));
+                return (!isCheckinOrRecurring(t) && (t.date === todayStr || isOverdue(t, todayStr))) || isRecurringForToday(t);
             });
 
             const isTaskCompletedToday = (t) => {
@@ -1622,41 +1628,11 @@ function showCheckinDropdown(cellEl, todo, dateStr) {
             if (idx > -1) {
                 todo.completed_dates.splice(idx, 1);
             }
+        if (onCustomUpdate) {
+            await onCustomUpdate(todo);
+        } else {
             await onDropdownCheckinUpdate(todo);
-            dropdown.remove();
-            activeCheckinDropdown = null;
-        });
-    }
-
-    saveBtn.addEventListener('click', async () => {
-        const inputDate = dropdown.querySelector('#dropdown-date').value;
-        const inputTime = dropdown.querySelector('#dropdown-time').value;
-        if (!inputDate) return;
-
-        let newIso;
-        if (inputTime) {
-            const [yyyy, mm, dd] = inputDate.split('-').map(Number);
-            const [hh, min] = inputTime.split(':').map(Number);
-            const d = new Date(yyyy, mm - 1, dd, hh, min, 0, 0);
-            newIso = d.toISOString();
-        } else {
-            newIso = inputDate;
         }
-
-        if (isChecked) {
-            // Edit existing checkin: remove old, push new
-            const idx = todo.completed_dates.findIndex(d => d.startsWith(dateStr));
-            if (idx > -1) {
-                todo.completed_dates.splice(idx, 1);
-            }
-            todo.completed_dates.push(newIso);
-        } else {
-            // New checkin
-            todo.completed_dates.push(newIso);
-        }
-        todo.completed_dates.sort();
-
-        await onDropdownCheckinUpdate(todo);
         dropdown.remove();
         activeCheckinDropdown = null;
     });
@@ -1700,7 +1676,7 @@ async function onDropdownCheckinUpdate(todo) {
     await saveData();
 }
 
-function renderMonthCalendar(container, todo, isInteractive, todayStr) {
+function renderMonthCalendar(container, todo, isInteractive, todayStr, onCustomUpdate = null) {
     container.innerHTML = '';
     
     // Add weekday headers
@@ -1752,7 +1728,7 @@ function renderMonthCalendar(container, todo, isInteractive, todayStr) {
         if (isInteractive) {
             cell.className = `checkin-grid-cell${isChecked ? ' checked' : ''}${isToday ? ' today-cell' : ''}`;
             cell.addEventListener('click', (e) => {
-                showCheckinDropdown(cell, todo, dateStr);
+                showCheckinDropdown(cell, todo, dateStr, onCustomUpdate);
             });
         } else {
             cell.className = `checkin-grid-cell compact-cell${isChecked ? ' checked' : ''}${isToday ? ' today-cell' : ''}`;
@@ -1809,7 +1785,13 @@ function renderEditCheckinGrid(todo) {
     gridEl.className = 'checkin-grid-container';
 
     const todayStr = getTodayString();
-    const completedDates = todo.completed_dates || [];
+    const completedDates = appState.currentEditingCompletedDates || todo.completed_dates || [];
+    const draftTodo = { ...todo, completed_dates: [...completedDates] };
+
+    const handleDraftUpdate = async (updatedDraft) => {
+        appState.currentEditingCompletedDates = [...updatedDraft.completed_dates];
+        renderEditCheckinGrid(draftTodo);
+    };
 
     if (todo.task_type === 'weekly_checkin') {
         // 周打卡：周一到周日这 7 天
@@ -1856,13 +1838,13 @@ function renderEditCheckinGrid(todo) {
             }
 
             cell.addEventListener('click', (e) => {
-                showCheckinDropdown(cell, todo, dateStr);
+                showCheckinDropdown(cell, draftTodo, dateStr, handleDraftUpdate);
             });
             gridEl.appendChild(cell);
         }
     } else if (todo.task_type === 'monthly_checkin') {
         // 月打卡：调用统一渲染方法
-        renderMonthCalendar(gridEl, todo, true, todayStr);
+        renderMonthCalendar(gridEl, draftTodo, true, todayStr, handleDraftUpdate);
     }
 }
 
@@ -1906,7 +1888,6 @@ function renderEditSubtasks() {
         const textarea = li.querySelector('.subtask-inline-edit');
         const editBtn = li.querySelector('.edit-subtask');
         const deleteBtn = li.querySelector('.delete-subtask');
-        const actions = li.querySelector('.subtask-actions');
 
         checkbox.addEventListener('click', () => {
             sub.completed = !sub.completed;
@@ -1926,7 +1907,6 @@ function renderEditSubtasks() {
                 span.style.color = 'var(--text-primary)';
                 span.style.textDecoration = 'none';
             }
-            autoSaveEdit();
         });
 
         const resizeTextarea = () => {
@@ -1954,7 +1934,6 @@ function renderEditSubtasks() {
                 }
                 textarea.style.display = 'none';
                 span.style.display = 'block';
-                autoSaveEdit();
             }
         };
 
@@ -1969,7 +1948,6 @@ function renderEditSubtasks() {
         deleteBtn.addEventListener('click', () => {
             appState.currentEditingSubtasks.splice(idx, 1);
             renderEditSubtasks();
-            autoSaveEdit();
         });
 
         listEl.appendChild(li);
@@ -2003,7 +1981,6 @@ function renderEditSubtasks() {
                         const moved = appState.currentEditingSubtasks.splice(oldIndex, 1)[0];
                         appState.currentEditingSubtasks.splice(newIndex, 0, moved);
                         renderEditSubtasks();
-                        autoSaveEdit();
                     }
                 }
             });
@@ -2011,22 +1988,25 @@ function renderEditSubtasks() {
     }
 }
 
-let _autoSaveTimer = null;
-
-async function _doAutoSave() {
+async function saveEditModal() {
     if (!appState.currentEditingTodo) return;
     const contentEl = document.getElementById('edit-content');
     const newContent = contentEl ? contentEl.value.trim() : '';
-    const hasContent = !!newContent;
+    if (!newContent) {
+        showToast('待办内容不能为空');
+        if (contentEl) contentEl.focus();
+        return;
+    }
 
     const index = appState.todoData.todos.findIndex(t => t.id === appState.currentEditingTodo.id);
-    if (index === -1) return;
+    if (index === -1) {
+        closeEditModal();
+        return;
+    }
 
     try {
-        if (hasContent) {
-            const { nickname } = extractCollaborator(appState.currentEditingTodo.content);
-            appState.todoData.todos[index].content = nickname ? `${newContent} (由 [${nickname}] 添加)` : newContent;
-        }
+        const { nickname } = extractCollaborator(appState.currentEditingTodo.content);
+        appState.todoData.todos[index].content = nickname ? `${newContent} (由 [${nickname}] 添加)` : newContent;
 
         const taskTypeSelect = document.getElementById('edit-task-type');
         if (taskTypeSelect) {
@@ -2058,12 +2038,8 @@ async function _doAutoSave() {
                                 dateInput.value = dateVal || '';
                             } else if (isWeek) {
                                 appState.todoData.todos[index].task_type = 'weekly_checkin';
-                                if (taskTypeSelect) taskTypeSelect.value = 'weekly_checkin';
-                                updateEditModalFields('weekly_checkin');
                             } else if (isMonth) {
                                 appState.todoData.todos[index].task_type = 'monthly_checkin';
-                                if (taskTypeSelect) taskTypeSelect.value = 'monthly_checkin';
-                                updateEditModalFields('monthly_checkin');
                             }
                         }
                         appState.todoData.todos[index].date = dateVal;
@@ -2098,11 +2074,9 @@ async function _doAutoSave() {
         if (completedAtRow && completedAtRow.style.display !== 'none' && appState.todoData.todos[index].completed && compDateInput && compTimeInput) {
             const compDateVal = compDateInput.value;
             const compTimeVal = compTimeInput.value;
-            const normalizedTimeRes = validateAndNormalizeTime(compTimeVal, '--:--');
-            const validTimeStr = normalizedTimeRes.value;
-            if (compDateVal && validTimeStr !== '--:--') {
+            if (compDateVal && compTimeVal) {
                 const [yyyy, mm, dd] = compDateVal.split('-').map(Number);
-                const [hh, min] = validTimeStr.split(':').map(Number);
+                const [hh, min] = compTimeVal.split(':').map(Number);
                 const d = new Date(yyyy, mm - 1, dd, hh, min, 0, 0);
                 appState.todoData.todos[index].completed_at = d.toISOString();
             } else if (compDateVal) {
@@ -2116,12 +2090,11 @@ async function _doAutoSave() {
             const rTimeEl = document.getElementById('edit-reminder-time');
             const rRepeatEl = document.getElementById('edit-reminder-repeat-daily');
             const rDate = rDateEl ? (rDateEl.value || null) : null;
-            const rTimeRaw = rTimeEl ? rTimeEl.value.trim() : '09:00';
+            const rTime = rTimeEl && rTimeEl.value ? rTimeEl.value : '09:00';
             const rRepeat = rRepeatEl ? rRepeatEl.checked : false;
-            const normalizedTime = validateAndNormalizeTime(rTimeRaw, '09:00').value;
             appState.todoData.todos[index].reminder = {
                 reminder_date: rDate,
-                reminder_time: normalizedTime !== '--:--' ? normalizedTime : '09:00',
+                reminder_time: rTime,
                 repeat_daily: rRepeat
             };
         } else {
@@ -2129,7 +2102,17 @@ async function _doAutoSave() {
         }
 
         appState.todoData.todos[index].subtasks = deepClone(appState.currentEditingSubtasks);
-        appState.todoData.todos[index].updated_at = new Date().toISOString();
+
+        if (appState.currentEditingCompletedDates) {
+            appState.todoData.todos[index].completed_dates = [...appState.currentEditingCompletedDates];
+            if (appState.todoData.todos[index].target_count) {
+                const currentPeriodCount = appState.todoData.todos[index].task_type === 'weekly_checkin'
+                    ? getWeeklyCompletedCount(appState.todoData.todos[index])
+                    : getMonthlyCompletedCount(appState.todoData.todos[index]);
+                appState.todoData.todos[index].completed = currentPeriodCount >= appState.todoData.todos[index].target_count;
+                appState.todoData.todos[index].completed_at = appState.todoData.todos[index].completed ? new Date().toISOString() : null;
+            }
+        }
 
         const allCompleted = appState.todoData.todos[index].subtasks.length > 0 && appState.todoData.todos[index].subtasks.every(s => s.completed);
         if (allCompleted && !appState.todoData.todos[index].completed) {
@@ -2137,23 +2120,14 @@ async function _doAutoSave() {
             appState.todoData.todos[index].completed_at = new Date().toISOString();
         }
 
+        appState.todoData.todos[index].updated_at = new Date().toISOString();
+
+        closeEditModal();
         render();
         await saveData();
     } catch (e) {
-        console.error("Auto save edit failed:", e);
+        console.error("Save edit modal failed:", e);
     }
-}
-
-/** Debounced auto-save (300ms). Coalesces rapid edits into a single save. */
-function autoSaveEdit() {
-    if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
-    _autoSaveTimer = setTimeout(() => { _doAutoSave(); _autoSaveTimer = null; }, 300);
-}
-
-/** Immediate auto-save — used by closeEditModal to ensure data is persisted before the modal closes. */
-async function autoSaveEditImmediate() {
-    if (_autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
-    await _doAutoSave();
 }
 
 function updateEditModalFields(taskTypeVal) {
@@ -2251,16 +2225,15 @@ function openEditModal(todo) {
                         if (compTimeInput) compTimeInput.value = `${hh}:${min}`;
                     } else {
                         if (compDateInput) compDateInput.value = todo.completed_at.substring(0, 10);
-                        if (compTimeInput) compTimeInput.value = '--:--';
+                        if (compTimeInput) compTimeInput.value = '';
                     }
                 } else if (todo.completed_at) {
                     if (compDateInput) compDateInput.value = todo.completed_at.substring(0, 10);
-                    if (compTimeInput) compTimeInput.value = '--:--';
+                    if (compTimeInput) compTimeInput.value = '';
                 } else {
                     if (compDateInput) compDateInput.value = '';
-                    if (compTimeInput) compTimeInput.value = '--:--';
+                    if (compTimeInput) compTimeInput.value = '';
                 }
-                if (compTimeInput) compTimeInput.dataset.lastValue = compTimeInput.value;
             } else {
                 completedAtRow.style.display = 'none';
             }
@@ -2292,6 +2265,7 @@ function openEditModal(todo) {
         if (reminderRepeatRow) reminderRepeatRow.style.display = isRecurring ? 'block' : 'none';
 
         appState.currentEditingSubtasks = todo.subtasks ? deepClone(todo.subtasks) : [];
+        appState.currentEditingCompletedDates = todo.completed_dates ? [...todo.completed_dates] : [];
         renderEditSubtasks();
         renderEditCheckinGrid(todo);
     } catch (e) {
@@ -2308,14 +2282,15 @@ function closeEditModal() {
         activeCheckinDropdown.remove();
         activeCheckinDropdown = null;
     }
-    autoSaveEditImmediate().finally(() => {
-        document.getElementById('edit-modal').classList.remove('active');
-        appState.currentEditingTodo = null;
-        if (_pendingMidnightRefresh) {
-            _pendingMidnightRefresh = false;
-            render();
-        }
-    });
+    const modal = document.getElementById('edit-modal');
+    if (modal) modal.classList.remove('active');
+    appState.currentEditingTodo = null;
+    appState.currentEditingSubtasks = [];
+    appState.currentEditingCompletedDates = null;
+    if (_pendingMidnightRefresh) {
+        _pendingMidnightRefresh = false;
+    }
+    render();
 }
 
 // ====== Render Stats ======
@@ -4811,7 +4786,6 @@ function initApp() {
                 appState.currentEditingSubtasks.unshift({ id: generateUUID(), content, completed: false });
                 input.value = '';
                 renderEditSubtasks();
-                autoSaveEdit();
             }
         });
     }
@@ -4865,71 +4839,11 @@ function initApp() {
         closeImportModal();
     });
 
-    // 绑定编辑模态框自动保存
-    ['edit-content', 'edit-date', 'edit-has-date-switch', 'edit-task-type', 'edit-target-count', 'edit-completed-date', 'edit-completed-time', 'edit-reminder-switch', 'edit-reminder-date', 'edit-reminder-time', 'edit-reminder-repeat-daily'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-            el.addEventListener('change', autoSaveEdit);
-            el.addEventListener('blur', autoSaveEdit);
-            el.addEventListener('input', autoSaveEdit); // input 事件能在输入时实时进行 debounced 保存
-        }
-    });
-
     const reminderSwitchEl = document.getElementById('edit-reminder-switch');
     if (reminderSwitchEl) {
         reminderSwitchEl.addEventListener('change', () => {
             const detailEl = document.getElementById('edit-reminder-detail');
             if (detailEl) detailEl.style.display = reminderSwitchEl.checked ? 'block' : 'none';
-        });
-    }
-
-    const compTimeEl = document.getElementById('edit-completed-time');
-    if (compTimeEl) {
-        compTimeEl.addEventListener('focus', () => {
-            compTimeEl.dataset.lastValue = compTimeEl.value;
-        });
-        compTimeEl.addEventListener('keydown', (e) => {
-            if (e.key === 'Backspace') {
-                const start = compTimeEl.selectionStart;
-                const end = compTimeEl.selectionEnd;
-                if (start === 3 && end === 3) {
-                    e.preventDefault();
-                    const val = compTimeEl.value;
-                    if (val.length >= 3) {
-                        const newVal = val.slice(0, 1) + val.slice(2);
-                        compTimeEl.value = newVal;
-                        compTimeEl.setSelectionRange(1, 1);
-                    }
-                }
-            }
-        });
-        compTimeEl.addEventListener('input', () => {
-            let val = compTimeEl.value;
-            const parts = val.split(':');
-            if (parts.length >= 2) {
-                let hPart = parts[0];
-                let mPart = parts.slice(1).join('');
-                if (hPart.length > 2) {
-                    const extra = hPart.slice(2);
-                    hPart = hPart.slice(0, 2);
-                    mPart = extra + mPart;
-                    compTimeEl.value = hPart + ':' + mPart;
-                    compTimeEl.setSelectionRange(4, 4);
-                    return;
-                }
-            } else if (!val.includes(':') && val.length >= 2) {
-                compTimeEl.value = val.slice(0, 2) + ':' + val.slice(2);
-            }
-        });
-        compTimeEl.addEventListener('blur', () => {
-            const lastVal = compTimeEl.dataset.lastValue || '--:--';
-            const res = validateAndNormalizeTime(compTimeEl.value, lastVal);
-            if (!res.valid) {
-                showToast('时间格式有误，已还原');
-                compTimeEl.value = res.value;
-            } else {
-                compTimeEl.value = res.value;
-            }
         });
     }
 
@@ -4979,7 +4893,6 @@ function initApp() {
                 dateContainer.style.display = 'none';
                 dateInput.value = '';
             }
-            autoSaveEdit();
         });
 
         dateInput.addEventListener('input', () => {
@@ -5043,10 +4956,22 @@ function initApp() {
     if (modalTomorrowBtn) {
         modalTomorrowBtn.addEventListener('click', async () => {
             if (!appState.currentEditingTodo) return;
-            const editDateEl = document.getElementById('edit-date');
-            if (editDateEl) editDateEl.value = getTomorrowString();
-            await autoSaveEdit();
+            const index = appState.todoData.todos.findIndex(t => t.id === appState.currentEditingTodo.id);
+            if (index !== -1) {
+                appState.todoData.todos[index].date = getTomorrowString();
+                appState.todoData.todos[index].updated_at = new Date().toISOString();
+                render();
+                await saveData();
+            }
             closeEditModal();
+        });
+    }
+
+    // Save button
+    const modalSaveBtn = document.getElementById('modal-save-btn');
+    if (modalSaveBtn) {
+        modalSaveBtn.addEventListener('click', () => {
+            saveEditModal();
         });
     }
 
@@ -5076,7 +5001,6 @@ function initApp() {
                 return 0;
             });
             renderEditSubtasks();
-            autoSaveEdit();
         });
     }
 
@@ -5294,6 +5218,7 @@ async function createAndAddTodo(raw) {
             invoke('start_drag').catch(err => console.error('Failed to drag:', err));
         }
     });
+}
 
 if (document.readyState === 'loading') {
     window.addEventListener('DOMContentLoaded', initApp);

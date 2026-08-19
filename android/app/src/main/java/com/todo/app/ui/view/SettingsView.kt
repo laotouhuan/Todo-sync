@@ -1176,10 +1176,10 @@ private fun GlobalRuleCard(
 
             if (expanded) {
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
+                SegmentedTimeInput(
                     value = localTime,
                     onValueChange = { localTime = it },
-                    label = { Text("提醒时间 (HH:mm)") },
+                    label = "提醒时间",
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(6.dp))
@@ -1296,10 +1296,16 @@ private fun GlobalRuleCard(
                     val thisMonthStr = com.todo.app.data.model.monthStringOf(today)
 
                     val activeTodos = allTodos.filter { !it.deleted }
-                    val isRecurringTask = { t: com.todo.app.data.model.Todo ->
+                    val isCheckinOrRecurring = { t: com.todo.app.data.model.Todo ->
+                        t.recurring == com.todo.app.data.model.RecurringType.DAILY_REPEAT ||
+                        t.taskType == com.todo.app.data.model.TaskType.WEEKLY_CHECKIN ||
+                        t.taskType == com.todo.app.data.model.TaskType.MONTHLY_CHECKIN
+                    }
+
+                    val isRecurringForToday = { t: com.todo.app.data.model.Todo ->
                         if (t.recurring == com.todo.app.data.model.RecurringType.DAILY_REPEAT) {
                             val d = t.date
-                            d == null || d == todayStr
+                            d == null || d == todayStr || (!t.completed && d < todayStr)
                         } else if (t.taskType == com.todo.app.data.model.TaskType.WEEKLY_CHECKIN) {
                             t.date == thisWeekStr || t.date == null
                         } else if (t.taskType == com.todo.app.data.model.TaskType.MONTHLY_CHECKIN) {
@@ -1311,9 +1317,9 @@ private fun GlobalRuleCard(
 
                     val scopedTodos = activeTodos.filter {
                         when (localTaskScope) {
-                            "today_only" -> !isRecurringTask(it) && (it.date == todayStr || it.isOverdue(todayStr))
-                            "recurring_only" -> isRecurringTask(it)
-                            else -> it.date == todayStr || it.isOverdue(todayStr) || isRecurringTask(it)
+                            "today_only" -> !isCheckinOrRecurring(it) && (it.date == todayStr || it.isOverdue(todayStr))
+                            "recurring_only" -> isRecurringForToday(it)
+                            else -> (!isCheckinOrRecurring(it) && (it.date == todayStr || it.isOverdue(todayStr))) || isRecurringForToday(it)
                         }
                     }
 

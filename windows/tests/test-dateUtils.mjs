@@ -193,6 +193,18 @@ describe('isOverdue', () => {
         const todo = { date: '2030-01-01', completed: false };
         assert.equal(isOverdue(todo, '2026-06-28'), false);
     });
+
+    it('每日重复任务日期早于今天且未完成 → 不逾期', () => {
+        const todo = { date: '2020-01-01', completed: false, recurring: 'daily_repeat' };
+        assert.equal(isOverdue(todo, '2026-06-28'), false);
+    });
+
+    it('周打卡任务/月打卡任务 → 不逾期', () => {
+        const weeklyTodo = { date: '2020-01-01', completed: false, task_type: 'weekly_checkin' };
+        const monthlyTodo = { date: '2020-01-01', completed: false, task_type: 'monthly_checkin' };
+        assert.equal(isOverdue(weeklyTodo, '2026-06-28'), false);
+        assert.equal(isOverdue(monthlyTodo, '2026-06-28'), false);
+    });
 });
 
 // ====== getDateLabel ======
