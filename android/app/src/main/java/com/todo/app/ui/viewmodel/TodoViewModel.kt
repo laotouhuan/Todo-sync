@@ -339,48 +339,6 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         }
     }
 
-    private fun buildBaseTodo(
-        parsed: com.todo.app.data.model.ParsedSyntax,
-        content: String,
-        currentList: List<Todo>,
-        defaultDueDatePref: String,
-        defaultInsertion: String
-    ): Todo {
-        val finalDate = when {
-            parsed.hasExplicitDateSyntax -> parsed.date
-            parsed.taskType == com.todo.app.data.model.TaskType.NORMAL -> when (defaultDueDatePref) {
-                "today" -> LocalDate.now().toString()
-                "tomorrow" -> LocalDate.now().plusDays(1).toString()
-                else -> null
-            }
-            else -> parsed.date
-        }
-
-        val activeTasks = currentList.filter { !it.completed }
-        val orderVal = if (defaultInsertion == "bottom") {
-            (activeTasks.maxOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) + 1.0
-        } else {
-            (activeTasks.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) - 1.0
-        }
-
-        val subtaskList = parsed.subtasks.map {
-            com.todo.app.data.model.Subtask(
-                id = UUID.randomUUID().toString(),
-                content = it,
-                completed = false,
-                completedAt = null
-            )
-        }
-
-        return Todo.create(content, finalDate).copy(
-            taskType = parsed.taskType,
-            targetCount = parsed.targetCount,
-            recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
-            order = orderVal,
-            subtasks = subtaskList
-        )
-    }
-
     fun addTodoSmart(rawContent: String) {
         if (rawContent.isBlank()) return
 
@@ -392,7 +350,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
 
         viewModelScope.launch {
             try {
-                val todo = buildBaseTodo(parsed, parsed.content, todos.value, defaultPref, defaultInsertion)
+                val todo = Todo.createFromParsed(parsed, parsed.content, todos.value, defaultPref, defaultInsertion)
                 repository.addTodo(todo)
             } catch (e: Exception) {
                 _uiEvent.emit("添加失败: ${e.message}")
@@ -414,7 +372,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         viewModelScope.launch {
             try {
                 val currentList = _collabData.value ?: emptyList()
-                val todo = buildBaseTodo(parsed, signedContent, currentList, defaultPref, defaultInsertion)
+                val todo = Todo.createFromParsed(parsed, signedContent, currentList, defaultPref, defaultInsertion)
                 
                 val res = repository.writeCollaborationTodo(collab, todo)
                 if (res.isSuccess) {

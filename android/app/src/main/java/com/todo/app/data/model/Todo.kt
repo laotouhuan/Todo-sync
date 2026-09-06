@@ -3,6 +3,7 @@ package com.todo.app.data.model
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.util.UUID
+import java.time.LocalDate
 
 @Serializable
 data class Subtask(
@@ -53,6 +54,57 @@ data class Todo(
                 createdAt = now,
                 order = System.currentTimeMillis().toDouble(),
                 updatedAt = now
+            )
+        }
+
+        /**
+         * 基于语法解析结果创建待办事项，统一处理默认截止日期偏好、插入位置权重及子任务列表。
+         *
+         * @param parsed 语法解析后的结果
+         * @param content 待办内容（若传入签名文本则优先使用，默认取 parsed.content）
+         * @param currentList 当前待办列表，用于根据插入偏好计算 order
+         * @param defaultDueDatePref 默认截止日期偏好（"today" / "tomorrow" / "none"）
+         * @param defaultInsertion 默认插入位置偏好（"top" / "bottom"）
+         */
+        fun createFromParsed(
+            parsed: ParsedSyntax,
+            content: String = parsed.content,
+            currentList: List<Todo>,
+            defaultDueDatePref: String = "none",
+            defaultInsertion: String = "top"
+        ): Todo {
+            val finalDate = when {
+                parsed.hasExplicitDateSyntax -> parsed.date
+                parsed.taskType == TaskType.NORMAL -> when (defaultDueDatePref) {
+                    "today" -> LocalDate.now().toString()
+                    "tomorrow" -> LocalDate.now().plusDays(1).toString()
+                    else -> null
+                }
+                else -> parsed.date
+            }
+
+            val activeTasks = currentList.filter { !it.deleted && !it.completed }
+            val orderVal = if (defaultInsertion == "bottom") {
+                (activeTasks.maxOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) + 1.0
+            } else {
+                (activeTasks.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()) - 1.0
+            }
+
+            val subtaskList = parsed.subtasks.map {
+                Subtask(
+                    id = UUID.randomUUID().toString(),
+                    content = it,
+                    completed = false,
+                    completedAt = null
+                )
+            }
+
+            return create(content, finalDate).copy(
+                taskType = parsed.taskType,
+                targetCount = parsed.targetCount,
+                recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
+                order = orderVal,
+                subtasks = subtaskList
             )
         }
     }

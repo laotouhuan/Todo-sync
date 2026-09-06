@@ -9,6 +9,25 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
   <script src="Sortable.min.js"></script>
+  <script>
+    // 全局错误捕获：将 JS 运行时错误显示为页面顶部红色横幅（用于诊断静默崩溃）
+    window.onerror = function(msg, src, line, col, err) {
+      var d = document.createElement('div');
+      d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;padding:8px 12px;background:#e74c3c;color:#fff;font:12px/1.4 monospace;word-break:break-all;cursor:pointer;';
+      d.textContent = '[JS Error] ' + msg + ' (' + (src||'').split('/').pop() + ':' + line + ':' + col + ')';
+      d.onclick = function() { d.remove(); };
+      document.body ? document.body.prepend(d) : document.addEventListener('DOMContentLoaded', function() { document.body.prepend(d); });
+      console.error('[GlobalErrorHandler]', msg, src, line, col, err);
+    };
+    window.addEventListener('unhandledrejection', function(e) {
+      var d = document.createElement('div');
+      d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;padding:8px 12px;background:#e67e22;color:#fff;font:12px/1.4 monospace;word-break:break-all;cursor:pointer;';
+      d.textContent = '[Promise Error] ' + (e.reason ? (e.reason.message || e.reason) : 'unknown');
+      d.onclick = function() { d.remove(); };
+      document.body ? document.body.prepend(d) : document.addEventListener('DOMContentLoaded', function() { document.body.prepend(d); });
+      console.error('[UnhandledRejection]', e.reason);
+    });
+  </script>
 </head>
 <body>
   <div class="glass-panel" id="app-panel">

@@ -137,4 +137,69 @@ class TodoDateUtilsTest {
         assertEquals("2026-08-02", formatCheckinDateTime("2026-08-02", "14:"))
         assertEquals("2026-08-02", formatCheckinDateTime("2026-08-02", "14:60"))
     }
+
+    @Test
+    fun testCreateFromParsed_DefaultDueDate() {
+        val parsedWithoutDate = parseDateSyntax("买菜")
+        
+        // 1. defaultDueDate = "today"
+        val todoToday = Todo.createFromParsed(
+            parsed = parsedWithoutDate,
+            currentList = emptyList(),
+            defaultDueDatePref = "today"
+        )
+        assertEquals(LocalDate.now().toString(), todoToday.date)
+
+        // 2. defaultDueDate = "tomorrow"
+        val todoTomorrow = Todo.createFromParsed(
+            parsed = parsedWithoutDate,
+            currentList = emptyList(),
+            defaultDueDatePref = "tomorrow"
+        )
+        assertEquals(LocalDate.now().plusDays(1).toString(), todoTomorrow.date)
+
+        // 3. defaultDueDate = "none"
+        val todoNone = Todo.createFromParsed(
+            parsed = parsedWithoutDate,
+            currentList = emptyList(),
+            defaultDueDatePref = "none"
+        )
+        assertEquals(null, todoNone.date)
+
+        // 4. 显式指定 @none 时，不受 defaultDueDate = "today" 覆盖
+        val parsedExplicitNone = parseDateSyntax("买菜 @none")
+        val todoExplicitNone = Todo.createFromParsed(
+            parsed = parsedExplicitNone,
+            currentList = emptyList(),
+            defaultDueDatePref = "today"
+        )
+        assertEquals(null, todoExplicitNone.date)
+    }
+
+    @Test
+    fun testCreateFromParsed_SubtasksAndInsertionOrder() {
+        val parsedWithSubtasks = parseDateSyntax("大任务 #子步骤1 #子步骤2")
+        val existingTodo1 = Todo.create("Existing 1").apply { order = 100.0 }
+        val existingTodo2 = Todo.create("Existing 2").apply { order = 200.0 }
+        val currentList = listOf(existingTodo1, existingTodo2)
+
+        // 置顶插入
+        val todoTop = Todo.createFromParsed(
+            parsed = parsedWithSubtasks,
+            currentList = currentList,
+            defaultInsertion = "top"
+        )
+        assertEquals(2, todoTop.subtasks.size)
+        assertEquals("子步骤1", todoTop.subtasks[0].content)
+        assertEquals("子步骤2", todoTop.subtasks[1].content)
+        assertTrue(todoTop.order < 100.0)
+
+        // 置底插入
+        val todoBottom = Todo.createFromParsed(
+            parsed = parsedWithSubtasks,
+            currentList = currentList,
+            defaultInsertion = "bottom"
+        )
+        assertTrue(todoBottom.order > 200.0)
+    }
 }
