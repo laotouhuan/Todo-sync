@@ -207,6 +207,68 @@ try {
 } catch (e) {
     fail(`todo_data.schema.json 解析失败: ${e.message}`);
 }
+// ====== 检查 6: 关键函数作用域检查（防止花括号 {} 不匹配导致函数被嵌套吞噬）======
+console.log('\n🔍 检查 6: 关键函数作用域检查');
+
+// 这些函数必须在 main.js 的模块顶层作用域，如果它们被意外嵌套到其他函数中，
+// 说明某处花括号 {} 不匹配（血泪教训：showCheckinDropdown 曾因缺少 } 吞掉了 initApp）
+const CRITICAL_TOP_LEVEL_FUNCTIONS = [
+    'initApp',
+    'render',
+    'loadData',
+    'saveData',
+    'createTodoItemElement',
+    'showCheckinDropdown',
+    'onDropdownCheckinUpdate',
+    'openEditModal',
+    'saveEditModal',
+    'createAndAddTodo',
+    'scheduleMidnightRefresh',
+];
+
+// 单个函数的最大行数阈值，超过此值发出警告（可能是花括号吞噬）
+const MAX_FUNCTION_LINES = 800;
+
+const mainJsPath = join(SRC_DIR, 'main.js');
+try {
+    const mainCode = readFileSync(mainJsPath, 'utf-8');
+    const mainAst = parse(mainCode, { ecmaVersion: 2022, sourceType: 'module', locations: true });
+
+    // 收集顶层函数声明
+    const topLevelFuncs = new Map();
+    for (const node of mainAst.body) {
+        if (node.type === 'FunctionDeclaration' && node.id) {
+            const startLine = node.loc.start.line;
+            const endLine = node.loc.end.line;
+            topLevelFuncs.set(node.id.name, { startLine, endLine, lines: endLine - startLine + 1 });
+        }
+    }
+
+    // 检查关键函数是否都在顶层
+    let scopeErrors = 0;
+    for (const funcName of CRITICAL_TOP_LEVEL_FUNCTIONS) {
+        if (!topLevelFuncs.has(funcName)) {
+            fail(`main.js: 关键函数 '${funcName}' 不在模块顶层作用域！可能被其他函数的花括号 {} 意外嵌套吞噬`);
+            scopeErrors++;
+        }
+    }
+
+    if (scopeErrors === 0) {
+        pass(`所有 ${CRITICAL_TOP_LEVEL_FUNCTIONS.length} 个关键函数均在模块顶层作用域`);
+    }
+
+    // 检查是否有超大函数（花括号吞噬的预警信号）
+    for (const [name, info] of topLevelFuncs) {
+        if (info.lines > MAX_FUNCTION_LINES) {
+            warn(`main.js: 函数 '${name}' 过大（${info.lines} 行，L${info.startLine}-${info.endLine}），超过 ${MAX_FUNCTION_LINES} 行阈值，可能存在花括号不匹配问题`);
+        }
+    }
+} catch (e) {
+    // 语法错误已在检查 1 中报告
+    if (e.code !== 'ENOENT') {
+        fail(`main.js 函数作用域检查失败: ${e.message}`);
+    }
+}
 
 // ====== 结果汇总 ======
 console.log('\n' + '='.repeat(50));

@@ -104,15 +104,16 @@ class WidgetAddActivity : ComponentActivity() {
         }
 
         val repository = TodoApplication.instance.repository
+        val configManager = TodoApplication.instance.configManager
         lifecycleScope.launch {
             try {
                 val currentData = repository.getTodoData().first()
-                val minOrder = currentData.todos.filter { !it.deleted && !it.completed }.minOfOrNull { it.order } ?: System.currentTimeMillis().toDouble()
-                val newTodo = Todo.create(parsed.content, parsed.date).copy(
-                    taskType = parsed.taskType,
-                    targetCount = parsed.targetCount,
-                    recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
-                    order = minOrder - 1.0
+                val newTodo = Todo.createFromParsed(
+                    parsed = parsed,
+                    content = parsed.content,
+                    currentList = currentData.todos,
+                    defaultDueDatePref = configManager.defaultDueDate,
+                    defaultInsertion = configManager.defaultInsertion
                 )
                 repository.addTodo(newTodo)
 

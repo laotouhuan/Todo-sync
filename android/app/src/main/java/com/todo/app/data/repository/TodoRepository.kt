@@ -51,6 +51,7 @@ sealed class UiEvent {
  */
 class TodoRepository(private val context: Context) {
     private val TAG = "TodoRepository"
+    private val PURGE_DELETED_AFTER_DAYS = 7
 
     private val jsonFormat = Json {
         ignoreUnknownKeys = true
@@ -424,16 +425,41 @@ class TodoRepository(private val context: Context) {
         return _todoData.value
     }
 
+    /** 物理清理已删除超过 PURGE_DELETED_AFTER_DAYS 天的旧记录，防止 JSON 无限膨胀。
+     *  与 Windows 端 purgeOldDeletedTodos() 逻辑完全对齐。 */
+    private fun purgeOldDeletedTodos(todos: List<Todo>): List<Todo> {
+        val cutoff = System.currentTimeMillis() - PURGE_DELETED_AFTER_DAYS * 24L * 60 * 60 * 1000
+        val result = todos.filter { todo ->
+            if (!todo.deleted) return@filter true
+            val ts = todo.updatedAt.ifEmpty { todo.createdAt }
+            val millis = try {
+                java.time.OffsetDateTime.parse(ts).toInstant().toEpochMilli()
+            } catch (_: Exception) {
+                try { java.time.Instant.parse(ts).toEpochMilli() } catch (_: Exception) {
+                    Long.MAX_VALUE // 解析失败时保守保留，避免误删
+                }
+            }
+            millis >= cutoff // 保留未超期的
+        }
+        val purgedCount = todos.size - result.size
+        if (purgedCount > 0) {
+            Log.d(TAG, "[Purge] 自动物理清理了 $purgedCount 个已删除超过 ${PURGE_DELETED_AFTER_DAYS} 天的旧任务记录。")
+        }
+        return result
+    }
+
     /**
      * Save the given list of todos to disk and trigger a background upload.
      * Callers must hold [mutex] before invoking this method.
      */
     private suspend fun saveTodos(todos: List<Todo>) = withContext(Dispatchers.IO) {
         val previous = _todoData.value
+        // 物理清理：删除超过 7 天的软删除记录，与 Windows 端 purgeOldDeletedTodos() 对齐
+        val purged = purgeOldDeletedTodos(todos)
         val updated = TodoData(
             version = previous.version,
             last_updated = nowIso(),
-            todos = todos,
+            todos = purged,
             reminderSettings = previous.reminderSettings
         )
         _todoData.value = updated

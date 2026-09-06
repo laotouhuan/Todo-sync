@@ -459,6 +459,14 @@ async function loadData() {
         let localJsonStr = await invoke("read_todo_data").catch(() => "{}");
         let localData = null;
         try { localData = JSON.parse(localJsonStr); } catch (e) {}
+        // 乐观渲染：无论何种同步模式，先用本地缓存立即呈现界面，避免等待网络时白屏
+        if (localData && localData.todos) {
+            appState.todoData = localData;
+            appState.todoData.todos.forEach(migrateAndNormalize);
+        } else if (!appState.todoData || !appState.todoData.todos) {
+            appState.todoData = { version: 1, last_updated: new Date().toISOString(), todos: [] };
+        }
+        render(); // ★ 立即渲染，保证用户打开即可看到内容并交互
 
         if (appState.appConfig.sync_mode === 'webdav') {
             try {
@@ -467,32 +475,18 @@ async function loadData() {
 
                 let { data: mergedData, changed } = mergeTodoData(localData, cloudData);
                 appState.todoData = mergedData;
-                // migrateAndNormalize 已在 mergeTodoData 内部对所有 todo 调用，无需重复
                 render();
 
-                if (changed || JSON.stringify(mergedData.todos) !== JSON.stringify(localData.todos)) {
+                if (changed || JSON.stringify(mergedData.todos) !== JSON.stringify(localData?.todos)) {
                     await saveData();
                     showToast('检测到云端更新，已自动同步完成');
                 }
             } catch (e) {
                 if (e === "FILE_NOT_FOUND") {
                     console.log("Cloud file not found, but parent folder exists. Initializing cloud database with local data...");
-                    if (localData && localData.todos) {
-                        appState.todoData = localData;
-                        appState.todoData.todos.forEach(migrateAndNormalize);
-                        render();
-                    } else {
-                        appState.todoData = { version: 1, last_updated: new Date().toISOString(), todos: [] };
-                        render();
-                    }
                     await saveData();
                 } else {
                     console.error("WebDAV pull failed, using local cache:", e);
-                    if (localData && localData.todos) {
-                        appState.todoData = localData;
-                        appState.todoData.todos.forEach(migrateAndNormalize);
-                        render();
-                    }
                     setSyncStatus(SyncState.ERROR);
                     if (typeof e === 'string' && e.includes("云端同步目录不存在")) {
                         showToast(e);
@@ -500,12 +494,6 @@ async function loadData() {
                         showToast("云端同步失败，请检查网络或配置");
                     }
                 }
-            }
-        } else {
-            if (localData && localData.todos) {
-                appState.todoData = localData;
-                appState.todoData.todos.forEach(migrateAndNormalize);
-                render();
             }
         }
 
@@ -1648,6 +1636,7 @@ function showCheckinDropdown(cellEl, todo, dateStr) {
         };
         document.addEventListener('click', outsideClickListener);
     }, 50);
+}
 }
 
 async function onDropdownCheckinUpdate(todo) {
@@ -5218,7 +5207,6 @@ async function createAndAddTodo(raw) {
             invoke('start_drag').catch(err => console.error('Failed to drag:', err));
         }
     });
-}
 
 if (document.readyState === 'loading') {
     window.addEventListener('DOMContentLoaded', initApp);
