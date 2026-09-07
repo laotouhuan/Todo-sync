@@ -84,6 +84,66 @@ export function getLocalDateStringFromISO(isoStr) {
     return `${year}-${month}-${day}`;
 }
 
+/** 将 Date 转换为本地 HH:mm；无效日期返回空字符串。 */
+export function formatLocalTime(date = new Date()) {
+    const value = date instanceof Date ? date : new Date(date);
+    if (isNaN(value.getTime())) return '';
+    const hour = String(value.getHours()).padStart(2, '0');
+    const minute = String(value.getMinutes()).padStart(2, '0');
+    return `${hour}:${minute}`;
+}
+
+/**
+ * 将 ISO 时间或纯日期拆成本地表单可用的日期和时间。
+ * 纯日期不会被当作 UTC 转换，避免跨时区后日期偏移。
+ */
+export function parseIsoToLocalDateTime(value, fallbackDate = '') {
+    if (!value) return { date: fallbackDate, time: '' };
+    const text = String(value);
+    const datePrefix = text.substring(0, 10);
+    const safeDatePrefix = /^\d{4}-\d{2}-\d{2}$/.test(datePrefix) ? datePrefix : fallbackDate;
+    if (text.length <= 10 || !text.includes('T')) {
+        return { date: safeDatePrefix, time: '' };
+    }
+
+    const date = new Date(text);
+    if (isNaN(date.getTime())) {
+        return { date: safeDatePrefix, time: '' };
+    }
+    return { date: formatDate(date), time: formatLocalTime(date) };
+}
+
+/** 将本地日期和时间合成为 ISO；未填写时间时保留纯日期。 */
+export function combineLocalDateAndTimeToISO(dateValue, timeValue = '') {
+    const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateValue || ''));
+    if (!dateMatch) return null;
+    if (!timeValue) return dateValue;
+
+    const normalizedTime = validateAndNormalizeTime(timeValue, '');
+    if (!normalizedTime.valid || normalizedTime.value === '--:--') return dateValue;
+
+    const [, yearText, monthText, dayText] = dateMatch;
+    const [hourText, minuteText] = normalizedTime.value.split(':');
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+    const hour = Number(hourText);
+    const minute = Number(minuteText);
+    const date = new Date(year, month - 1, day, hour, minute, 0, 0);
+    const isSameLocalValue = date.getFullYear() === year &&
+        date.getMonth() === month - 1 &&
+        date.getDate() === day &&
+        date.getHours() === hour &&
+        date.getMinutes() === minute;
+    return isSameLocalValue ? date.toISOString() : null;
+}
+
+/** 格式化打卡日历悬浮提示。 */
+export function formatCheckinDateTimeTooltip(value, fallbackDate = '') {
+    const local = parseIsoToLocalDateTime(value, fallbackDate);
+    return `日期: ${local.date || fallbackDate}\n时间: ${local.time || '--:--'}`;
+}
+
 /**
  * Validate and normalize a time input string (e.g. '14:30' or '--:--').
  * Returns { valid: true, value: 'HH:mm'|'--:--' } if valid,

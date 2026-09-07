@@ -3,7 +3,8 @@ import {
     getTodayString, getTomorrowString, getThisWeekString, getLastWeekString,
     getThisMonthString, getLastMonthString,
     isWeekDate, isMonthDate, isOverdue, getDateLabel, getCompletionStatusLabel,
-    getLocalDateStringFromISO, validateAndNormalizeTime,
+    getLocalDateStringFromISO, validateAndNormalizeTime, formatLocalTime,
+    parseIsoToLocalDateTime, combineLocalDateAndTimeToISO, formatCheckinDateTimeTooltip,
     sortFunc, parseInputSyntax, createTodo, groupTodosByDate,
     categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade, generateUUID
 } from './dateUtils.js';
@@ -1505,7 +1506,7 @@ function getMonthlyCompletedCount(todo) {
 // ====== Month Calendar Grid Rendering (Week-aligned, with previous/next month tails) ======
 let activeCheckinDropdown = null;
 
-function showCheckinDropdown(cellEl, todo, dateStr) {
+function showCheckinDropdown(cellEl, todo, dateStr, onCustomUpdate = null) {
     // 1. Remove existing dropdown
     if (activeCheckinDropdown) {
         const isSame = activeCheckinDropdown.dataset.cellId === dateStr;
@@ -1523,31 +1524,11 @@ function showCheckinDropdown(cellEl, todo, dateStr) {
     dropdown.className = 'checkin-dropdown';
     dropdown.dataset.cellId = dateStr;
 
-    // Prefill date and time
-    let initialDate = dateStr;
-    let initialTime = '';
-    
-    if (isChecked) {
-        if (matchedDate.length > 10) {
-            const d = new Date(matchedDate);
-            if (!isNaN(d.getTime())) {
-                const yyyy = d.getFullYear();
-                const mm = String(d.getMonth() + 1).padStart(2, '0');
-                const dd = String(d.getDate()).padStart(2, '0');
-                initialDate = `${yyyy}-${mm}-${dd}`;
-                const hh = String(d.getHours()).padStart(2, '0');
-                const min = String(d.getMinutes()).padStart(2, '0');
-                initialTime = `${hh}:${min}`;
-            }
-        }
-    } else {
-        const now = new Date();
-        const hh = String(now.getHours()).padStart(2, '0');
-        const min = String(now.getMinutes()).padStart(2, '0');
-        initialTime = `${hh}:${min}`;
-    }
-
-
+    const initialDateTime = isChecked
+        ? parseIsoToLocalDateTime(matchedDate, dateStr)
+        : { date: dateStr, time: formatLocalTime() };
+    const initialDate = initialDateTime.date;
+    const initialTime = initialDateTime.time;
 
     dropdown.innerHTML = `
         <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 4px; color: var(--accent-color);">
@@ -1602,6 +1583,16 @@ function showCheckinDropdown(cellEl, todo, dateStr) {
     const closeBtn = dropdown.querySelector('#dropdown-close');
     const cancelCheckBtn = dropdown.querySelector('#dropdown-cancel-check');
 
+    const commitUpdate = async () => {
+        if (onCustomUpdate) {
+            await onCustomUpdate(todo);
+        } else {
+            await onDropdownCheckinUpdate(todo);
+        }
+        dropdown.remove();
+        activeCheckinDropdown = null;
+    };
+
     if (closeBtn) {
         closeBtn.addEventListener('click', () => {
             dropdown.remove();
@@ -1616,14 +1607,28 @@ function showCheckinDropdown(cellEl, todo, dateStr) {
             if (idx > -1) {
                 todo.completed_dates.splice(idx, 1);
             }
-        if (onCustomUpdate) {
-            await onCustomUpdate(todo);
-        } else {
-            await onDropdownCheckinUpdate(todo);
-        }
-        dropdown.remove();
-        activeCheckinDropdown = null;
-    });
+            await commitUpdate();
+        });
+    }
+
+    if (saveBtn) {
+        saveBtn.addEventListener('click', async () => {
+            const inputDate = dropdown.querySelector('#dropdown-date').value;
+            const inputTime = dropdown.querySelector('#dropdown-time').value;
+            const newValue = combineLocalDateAndTimeToISO(inputDate, inputTime);
+            if (!newValue) return;
+
+            if (isChecked) {
+                const idx = todo.completed_dates.findIndex(d => d.startsWith(dateStr));
+                if (idx > -1) {
+                    todo.completed_dates.splice(idx, 1);
+                }
+            }
+            todo.completed_dates.push(newValue);
+            todo.completed_dates.sort();
+            await commitUpdate();
+        });
+    }
 
     // Close on click outside
     setTimeout(() => {
@@ -1636,7 +1641,6 @@ function showCheckinDropdown(cellEl, todo, dateStr) {
         };
         document.addEventListener('click', outsideClickListener);
     }, 50);
-}
 }
 
 async function onDropdownCheckinUpdate(todo) {
@@ -1725,21 +1729,7 @@ function renderMonthCalendar(container, todo, isInteractive, todayStr, onCustomU
         cell.textContent = d;
         
         if (isChecked) {
-            if (matchedDate.length > 10) {
-                const dateObj = new Date(matchedDate);
-                if (!isNaN(dateObj.getTime())) {
-                    const yyyy = dateObj.getFullYear();
-                    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-                    const dd = String(dateObj.getDate()).padStart(2, '0');
-                    const hh = String(dateObj.getHours()).padStart(2, '0');
-                    const min = String(dateObj.getMinutes()).padStart(2, '0');
-                    cell.title = `日期: ${yyyy}-${mm}-${dd}\n时间: ${hh}:${min}`;
-                } else {
-                    cell.title = `日期: ${dateStr}\n时间: --:--`;
-                }
-            } else {
-                cell.title = `日期: ${dateStr}\n时间: --:--`;
-            }
+            cell.title = formatCheckinDateTimeTooltip(matchedDate, dateStr);
         } else {
             cell.title = dateStr;
         }
@@ -1807,21 +1797,7 @@ function renderEditCheckinGrid(todo) {
             cell.textContent = labels[i];
             
             if (isChecked) {
-                if (matchedDate.length > 10) {
-                    const dateObj = new Date(matchedDate);
-                    if (!isNaN(dateObj.getTime())) {
-                        const yyyy = dateObj.getFullYear();
-                        const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-                        const dd = String(dateObj.getDate()).padStart(2, '0');
-                        const hh = String(dateObj.getHours()).padStart(2, '0');
-                        const min = String(dateObj.getMinutes()).padStart(2, '0');
-                        cell.title = `日期: ${yyyy}-${mm}-${dd}\n时间: ${hh}:${min}`;
-                    } else {
-                        cell.title = `日期: ${dateStr}\n时间: --:--`;
-                    }
-                } else {
-                    cell.title = `日期: ${dateStr}\n时间: --:--`;
-                }
+                cell.title = formatCheckinDateTimeTooltip(matchedDate, dateStr);
             } else {
                 cell.title = dateStr;
             }
@@ -2063,13 +2039,11 @@ async function saveEditModal() {
         if (completedAtRow && completedAtRow.style.display !== 'none' && appState.todoData.todos[index].completed && compDateInput && compTimeInput) {
             const compDateVal = compDateInput.value;
             const compTimeVal = compTimeInput.value;
-            if (compDateVal && compTimeVal) {
-                const [yyyy, mm, dd] = compDateVal.split('-').map(Number);
-                const [hh, min] = compTimeVal.split(':').map(Number);
-                const d = new Date(yyyy, mm - 1, dd, hh, min, 0, 0);
-                appState.todoData.todos[index].completed_at = d.toISOString();
-            } else if (compDateVal) {
-                appState.todoData.todos[index].completed_at = compDateVal;
+            if (compDateVal) {
+                const completedAt = combineLocalDateAndTimeToISO(compDateVal, compTimeVal);
+                if (completedAt) {
+                    appState.todoData.todos[index].completed_at = completedAt;
+                }
             }
         }
 
@@ -2202,27 +2176,9 @@ function openEditModal(todo) {
                 completedAtRow.style.display = 'flex';
                 const compDateInput = document.getElementById('edit-completed-date');
                 const compTimeInput = document.getElementById('edit-completed-time');
-                if (todo.completed_at && todo.completed_at.includes('T')) {
-                    const d = new Date(todo.completed_at);
-                    if (!isNaN(d.getTime())) {
-                        const yyyy = d.getFullYear();
-                        const mm = String(d.getMonth() + 1).padStart(2, '0');
-                        const dd = String(d.getDate()).padStart(2, '0');
-                        if (compDateInput) compDateInput.value = `${yyyy}-${mm}-${dd}`;
-                        const hh = String(d.getHours()).padStart(2, '0');
-                        const min = String(d.getMinutes()).padStart(2, '0');
-                        if (compTimeInput) compTimeInput.value = `${hh}:${min}`;
-                    } else {
-                        if (compDateInput) compDateInput.value = todo.completed_at.substring(0, 10);
-                        if (compTimeInput) compTimeInput.value = '';
-                    }
-                } else if (todo.completed_at) {
-                    if (compDateInput) compDateInput.value = todo.completed_at.substring(0, 10);
-                    if (compTimeInput) compTimeInput.value = '';
-                } else {
-                    if (compDateInput) compDateInput.value = '';
-                    if (compTimeInput) compTimeInput.value = '';
-                }
+                const completedAt = parseIsoToLocalDateTime(todo.completed_at);
+                if (compDateInput) compDateInput.value = completedAt.date;
+                if (compTimeInput) compTimeInput.value = completedAt.time;
             } else {
                 completedAtRow.style.display = 'none';
             }

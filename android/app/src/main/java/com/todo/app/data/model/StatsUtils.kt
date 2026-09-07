@@ -2,8 +2,10 @@ package com.todo.app.data.model
 
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
+import java.time.temporal.IsoFields
 
 // ====== Stats Helpers ======
 
@@ -65,6 +67,127 @@ fun calculateCompletionStats(todos: List<Todo>, todayStr: String): Pair<Int, Int
     val completed = todayTodos.count { it.completed }
     return completed to todayTodos.size
 }
+
+/** 判断日期或 ISO 时间戳是否落在统计页指定的日、周或月内。 */
+fun isDateInStatsPeriod(dateValue: String?, period: String, targetDate: LocalDate): Boolean {
+    if (dateValue.isNullOrBlank()) return false
+    val dateText = dateValue.take(10)
+    return when (period) {
+        "day" -> dateText == targetDate.toString()
+        "week" -> try {
+            val date = LocalDate.parse(dateText)
+            date.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) &&
+                date.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
+        } catch (_: Exception) {
+            false
+        }
+        else -> dateText.startsWith(monthStringOf(targetDate))
+    }
+}
+
+private fun isCompletionTimeInStatsPeriod(
+    completedAt: String?,
+    period: String,
+    targetDate: LocalDate
+): Boolean = isDateInStatsPeriod(getLocalDateStringFromISO(completedAt), period, targetDate)
+
+/** 判断待办是否应出现在指定统计周期中。 */
+fun Todo.isIncludedInStatsPeriod(period: String, targetDate: LocalDate): Boolean {
+    val isCheckin = taskType == TaskType.WEEKLY_CHECKIN || taskType == TaskType.MONTHLY_CHECKIN
+    if (isCheckin) {
+        val hasCheckin = completedDates.any { isDateInStatsPeriod(it, period, targetDate) }
+        return when (period) {
+            "week" -> (
+                taskType == TaskType.WEEKLY_CHECKIN &&
+                    date == weekStringOf(targetDate) && targetCount != null
+                ) || hasCheckin
+            "month" -> (
+                taskType == TaskType.MONTHLY_CHECKIN &&
+                    date == monthStringOf(targetDate) && targetCount != null
+                ) || hasCheckin
+            else -> hasCheckin
+        }
+    }
+
+    if (completed && !completedAt.isNullOrBlank()) {
+        return isCompletionTimeInStatsPeriod(completedAt, period, targetDate)
+    }
+
+    val dueDate = date ?: return false
+    return when (period) {
+        "day" -> dueDate == targetDate.toString()
+        "week" -> dueDate == weekStringOf(targetDate) ||
+            (dueDate.length == 10 && isDateInStatsPeriod(dueDate, period, targetDate))
+        else -> dueDate == monthStringOf(targetDate) ||
+            (dueDate.length == 10 && isDateInStatsPeriod(dueDate, period, targetDate))
+    }
+}
+
+/** 计算指定周期内的打卡次数。 */
+fun Todo.getStatsPeriodCheckinCount(period: String, targetDate: LocalDate): Int =
+    completedDates.count { isDateInStatsPeriod(it, period, targetDate) }
+
+data class StatsPeriodProgress(val completed: Double, val total: Double) {
+    val fraction: Float
+        get() = if (total == 0.0) 0f else (completed / total).toFloat()
+}
+
+/** 计算统计页进度；有目标次数的打卡任务按目标作为分母。 */
+fun calculateStatsPeriodProgress(
+    todos: List<Todo>,
+    period: String,
+    targetDate: LocalDate
+): StatsPeriodProgress {
+    var completedValue = 0.0
+    var totalValue = 0.0
+
+    todos.forEach { todo ->
+        if (todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) {
+            val checkinCount = todo.getStatsPeriodCheckinCount(period, targetDate)
+            val target = todo.targetCount
+            if (target != null) {
+                completedValue += minOf(target, checkinCount).toDouble()
+                totalValue += target.toDouble()
+            } else {
+                completedValue += checkinCount.toDouble()
+                totalValue += checkinCount.toDouble()
+            }
+        } else {
+            totalValue += 1.0
+            if (todo.completed) completedValue += 1.0
+        }
+    }
+
+    return StatsPeriodProgress(completed = completedValue, total = totalValue)
+}
+
+data class StatsCompletionEvent(val todo: Todo, val completedAt: String) {
+    val hasExplicitTime: Boolean
+        get() = completedAt.length > 10 && completedAt.contains('T')
+}
+
+/** 收集指定周期内普通任务和打卡任务的所有完成事件。 */
+fun collectStatsCompletionEvents(
+    todos: List<Todo>,
+    period: String,
+    targetDate: LocalDate
+): List<StatsCompletionEvent> = buildList {
+    todos.forEach { todo ->
+        if (todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) {
+            todo.completedDates
+                .filter { isDateInStatsPeriod(it, period, targetDate) }
+                .forEach { add(StatsCompletionEvent(todo, it)) }
+        } else if (todo.completed && !todo.completedAt.isNullOrBlank() &&
+            isCompletionTimeInStatsPeriod(todo.completedAt, period, targetDate)
+        ) {
+            add(StatsCompletionEvent(todo, todo.completedAt!!))
+        }
+    }
+}
+
+/** 返回打卡任务在指定统计周期中最新的一次打卡记录。 */
+fun Todo.latestCheckinInStatsPeriod(period: String, targetDate: LocalDate): String? =
+    completedDates.filter { isDateInStatsPeriod(it, period, targetDate) }.maxOrNull()
 
 /**
  * Calculate current streak of consecutive days with at least one completed task.

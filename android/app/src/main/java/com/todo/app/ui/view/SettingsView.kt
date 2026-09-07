@@ -51,7 +51,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import com.todo.app.data.model.ShareCodePayload
 import com.todo.app.data.model.CollaborationSource
-import com.todo.app.data.model.isOverdue
+import com.todo.app.data.model.evaluateReminderRule
+import com.todo.app.data.model.renderReminderTemplate
 import java.util.UUID
 
 @Composable
@@ -1291,72 +1292,17 @@ private fun GlobalRuleCard(
                 if (localBody.contains("{") && localBody.contains("}")) {
                     Spacer(Modifier.height(4.dp))
                     val today = java.time.LocalDate.now()
-                    val todayStr = today.toString()
-                    val thisWeekStr = com.todo.app.data.model.weekStringOf(today)
-                    val thisMonthStr = com.todo.app.data.model.monthStringOf(today)
-
-                    val activeTodos = allTodos.filter { !it.deleted }
-                    val isCheckinOrRecurring = { t: com.todo.app.data.model.Todo ->
-                        t.recurring == com.todo.app.data.model.RecurringType.DAILY_REPEAT ||
-                        t.taskType == com.todo.app.data.model.TaskType.WEEKLY_CHECKIN ||
-                        t.taskType == com.todo.app.data.model.TaskType.MONTHLY_CHECKIN
-                    }
-
-                    val isRecurringForToday = { t: com.todo.app.data.model.Todo ->
-                        if (t.recurring == com.todo.app.data.model.RecurringType.DAILY_REPEAT) {
-                            val d = t.date
-                            d == null || d == todayStr || (!t.completed && d < todayStr)
-                        } else if (t.taskType == com.todo.app.data.model.TaskType.WEEKLY_CHECKIN) {
-                            t.date == thisWeekStr || t.date == null
-                        } else if (t.taskType == com.todo.app.data.model.TaskType.MONTHLY_CHECKIN) {
-                            t.date == thisMonthStr || t.date == null
-                        } else {
-                            false
-                        }
-                    }
-
-                    val scopedTodos = activeTodos.filter {
-                        when (localTaskScope) {
-                            "today_only" -> !isCheckinOrRecurring(it) && (it.date == todayStr || it.isOverdue(todayStr))
-                            "recurring_only" -> isRecurringForToday(it)
-                            else -> (!isCheckinOrRecurring(it) && (it.date == todayStr || it.isOverdue(todayStr))) || isRecurringForToday(it)
-                        }
-                    }
-
-                    val isTaskCompletedToday = { t: com.todo.app.data.model.Todo ->
-                        if (t.completed) {
-                            true
-                        } else if (t.taskType == com.todo.app.data.model.TaskType.WEEKLY_CHECKIN || t.taskType == com.todo.app.data.model.TaskType.MONTHLY_CHECKIN) {
-                            t.completedDates.any { it.startsWith(todayStr) }
-                        } else {
-                            false
-                        }
-                    }
-
-                    val realOverdue = if (localTaskScope == "recurring_only") 0 else scopedTodos.count { it.isOverdue(todayStr) }
-                    val realRemaining = scopedTodos.count { !isTaskCompletedToday(it) }
-                    val realCompleted = scopedTodos.count { isTaskCompletedToday(it) }
-                    val realTotal = scopedTodos.size
-                    val realRate = if (realTotal > 0) Math.round((realCompleted.toDouble() / realTotal) * 100).toInt() else 0
-
-                    val now = java.time.LocalTime.now()
-                    val nowTimeStr = String.format("%02d:%02d", now.hour, now.minute)
-                    val todayDate = java.time.LocalDate.now()
-                    val todayDateStr = String.format("%02d月%02d日", todayDate.monthValue, todayDate.dayOfMonth)
-                    val weekdays = arrayOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")
-                    val weekdayStr = weekdays[todayDate.dayOfWeek.value % 7]
-
-                    val previewText = localBody
-                        .replace("{remaining_count}", realRemaining.toString())
-                        .replace("{completed_count}", realCompleted.toString())
-                        .replace("{total_count}", realTotal.toString())
-                        .replace("{overdue_count}", realOverdue.toString())
-                        .replace("{completion_rate}", "$realRate%")
-                        .replace("{time}", nowTimeStr)
-                        .replace("{now_time}", nowTimeStr)
-                        .replace("{date}", todayDateStr)
-                        .replace("{today_date}", todayDateStr)
-                        .replace("{weekday}", weekdayStr)
+                    val previewRule = rule.copy(
+                        condition = localCondition,
+                        taskScope = localTaskScope,
+                        body = localBody
+                    )
+                    val evaluation = evaluateReminderRule(previewRule, allTodos, today)
+                    val previewText = renderReminderTemplate(
+                        localBody,
+                        evaluation,
+                        java.time.LocalTime.now()
+                    )
 
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),

@@ -15,7 +15,8 @@ import {
     getTodayString, getTomorrowString, getThisWeekString,
     getThisMonthString, getLastWeekString, getLastMonthString,
     isWeekDate, isMonthDate, isOverdue, getDateLabel, getCompletionStatusLabel,
-    validateAndNormalizeTime,
+    validateAndNormalizeTime, formatLocalTime, parseIsoToLocalDateTime,
+    combineLocalDateAndTimeToISO, formatCheckinDateTimeTooltip,
     sortFunc, parseInputSyntax, createTodo, groupTodosByDate,
     categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade, generateUUID
 } from '../src/dateUtils.js';
@@ -45,6 +46,42 @@ describe('validateAndNormalizeTime', () => {
         assert.deepStrictEqual(validateAndNormalizeTime('25:00', '14:30'), { valid: false, value: '14:30' });
         assert.deepStrictEqual(validateAndNormalizeTime('12:60', '14:30'), { valid: false, value: '14:30' });
         assert.deepStrictEqual(validateAndNormalizeTime('12:--', '14:30'), { valid: false, value: '14:30' });
+    });
+});
+
+describe('本地日期时间转换', () => {
+    it('ISO 时间可还原为创建它的本地日期和时间', () => {
+        const localDate = new Date(2026, 8, 6, 8, 5, 0, 0);
+        assert.deepEqual(parseIsoToLocalDateTime(localDate.toISOString()), {
+            date: '2026-09-06',
+            time: '08:05'
+        });
+        assert.equal(formatLocalTime(localDate), '08:05');
+    });
+
+    it('纯日期保持纯日期，不做时区换算', () => {
+        assert.deepEqual(parseIsoToLocalDateTime('2026-09-06'), {
+            date: '2026-09-06',
+            time: ''
+        });
+        assert.equal(combineLocalDateAndTimeToISO('2026-09-06', ''), '2026-09-06');
+    });
+
+    it('本地日期时间可合成为同一时刻的 ISO', () => {
+        const expected = new Date(2026, 8, 6, 8, 5, 0, 0).toISOString();
+        assert.equal(combineLocalDateAndTimeToISO('2026-09-06', '08:05'), expected);
+    });
+
+    it('无效日期返回 null，提示文本使用回退日期', () => {
+        assert.equal(combineLocalDateAndTimeToISO('2026-02-30', '08:05'), null);
+        assert.equal(
+            formatCheckinDateTimeTooltip('invalid-value', '2026-09-06'),
+            '日期: 2026-09-06\n时间: --:--'
+        );
+        assert.equal(
+            formatCheckinDateTimeTooltip('', '2026-09-06'),
+            '日期: 2026-09-06\n时间: --:--'
+        );
     });
 });
 
