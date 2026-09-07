@@ -50,13 +50,14 @@ import com.todo.app.data.model.Todo
 import com.todo.app.data.model.TodoComparator
 import com.todo.app.data.model.TaskType
 import com.todo.app.data.model.calcTaskAgeDays
+import com.todo.app.data.model.calculateStatsPeriodProgress
 import com.todo.app.data.model.categorizeByTimeSlot
+import com.todo.app.data.model.collectStatsCompletionEvents
 import com.todo.app.data.model.getHealthGrade
-import com.todo.app.data.model.getLocalDateStringFromISO
+import com.todo.app.data.model.isIncludedInStatsPeriod
 import com.todo.app.data.model.isOverdue
-import com.todo.app.data.model.monthStringOf
+import com.todo.app.data.model.latestCheckinInStatsPeriod
 import com.todo.app.data.model.nowIso
-import com.todo.app.data.model.weekStringOf
 import com.todo.app.ui.viewmodel.TodoViewModel
 import java.time.Instant
 import java.time.LocalDate
@@ -69,6 +70,15 @@ import java.util.Locale
 
 private fun formatVal(valDouble: Double): String {
     return if (valDouble % 1.0 == 0.0) valDouble.toInt().toString() else String.format(Locale.US, "%.1f", valDouble)
+}
+
+private data class StatsTaskVisualStyle(val color: Color, val shape: String)
+
+private fun Todo.statsVisualStyle(): StatsTaskVisualStyle = when {
+    recurring == "daily_repeat" -> StatsTaskVisualStyle(Color(0xFFF59E0B), "triangle")
+    taskType == TaskType.WEEKLY_CHECKIN -> StatsTaskVisualStyle(Color(0xFF6366F1), "diamond")
+    taskType == TaskType.MONTHLY_CHECKIN -> StatsTaskVisualStyle(Color(0xFFF43F5E), "star")
+    else -> StatsTaskVisualStyle(Color(0xFF10B981), "circle")
 }
 
 @Composable
@@ -188,87 +198,8 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     var tooltipTime by remember { mutableStateOf("") }
     var tooltipOffset by remember { mutableStateOf(Offset.Zero) }
 
-    val targetWeekStr = weekStringOf(targetDate)
-    val targetMonthStr = monthStringOf(targetDate)
-
     val periodTodos = remember(todos, period, targetDate) {
-        when (period) {
-            "day" -> todos.filter { t ->
-                if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
-                    t.completedDates.any { it.startsWith(targetDate.toString()) }
-                } else {
-                    if (t.completed && !t.completedAt.isNullOrEmpty()) {
-                        getLocalDateStringFromISO(t.completedAt) == targetDate.toString()
-                    } else {
-                        t.date == targetDate.toString()
-                    }
-                }
-            }
-            "week" -> todos.filter { t ->
-                if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
-                    val hasCheckin = t.completedDates.any { dStr ->
-                        try {
-                            val checkDate = LocalDate.parse(dStr.take(10))
-                            checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
-                            checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
-                        } catch (e: Exception) {
-                            false
-                        }
-                    }
-                    if (t.taskType == TaskType.WEEKLY_CHECKIN && t.date == targetWeekStr) {
-                        if (t.targetCount != null) true else hasCheckin
-                    } else {
-                        hasCheckin
-                    }
-                } else {
-                    if (t.completed && !t.completedAt.isNullOrEmpty()) {
-                        getLocalDateStringFromISO(t.completedAt)?.let { completedDateStr ->
-                            try {
-                                val checkDate = LocalDate.parse(completedDateStr)
-                                checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
-                                checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
-                            } catch (e: Exception) {
-                                false
-                            }
-                        } ?: false
-                    } else {
-                        val dateStr = t.date
-                        if (!dateStr.isNullOrEmpty()) {
-                            dateStr == targetWeekStr || (dateStr.length == 10 && dateStr.startsWith(targetWeekStr.substring(0,4)) && 
-                                try {
-                                    val checkDate = LocalDate.parse(dateStr)
-                                    checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) &&
-                                    checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR)
-                                } catch (e: Exception) { false }
-                            )
-                        } else {
-                            false
-                        }
-                    }
-                }
-            }
-            else -> todos.filter { t ->
-                if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
-                    val hasCheckin = t.completedDates.any { dStr -> dStr.startsWith(targetMonthStr) }
-                    if (t.taskType == TaskType.MONTHLY_CHECKIN && t.date == targetMonthStr) {
-                        if (t.targetCount != null) true else hasCheckin
-                    } else {
-                        hasCheckin
-                    }
-                } else {
-                    if (t.completed && !t.completedAt.isNullOrEmpty()) {
-                        getLocalDateStringFromISO(t.completedAt)?.take(7) == targetMonthStr
-                    } else {
-                        val dateStr = t.date
-                        if (!dateStr.isNullOrEmpty()) {
-                            dateStr == targetMonthStr || (dateStr.length == 10 && dateStr.startsWith(targetMonthStr))
-                        } else {
-                            false
-                        }
-                    }
-                }
-            }
-        }
+        todos.filter { it.isIncludedInStatsPeriod(period, targetDate) }
     }
 
     // Apply global category filter to periodTodos
@@ -286,87 +217,36 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
         }
     }
 
-    var totalDouble = 0.0
-    var completedDouble = 0.0
-
-    filteredTodos.forEach { t ->
-        if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
-            var periodCheckinCount = 0
-            t.completedDates.forEach { dStr ->
-                when (period) {
-                    "day" -> {
-                        if (dStr.startsWith(targetDate.toString())) periodCheckinCount++
-                    }
-                    "week" -> {
-                        try {
-                            val checkDate = LocalDate.parse(dStr.take(10))
-                            if (checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
-                                checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)) {
-                                periodCheckinCount++
-                            }
-                        } catch (e: Exception) {}
-                    }
-                    else -> {
-                        if (dStr.startsWith(targetMonthStr)) periodCheckinCount++
-                    }
-                }
-            }
-            if (t.targetCount != null) {
-                completedDouble += Math.min(t.targetCount!!.toDouble(), periodCheckinCount.toDouble())
-                totalDouble += t.targetCount!!.toDouble()
-            } else {
-                completedDouble += periodCheckinCount.toDouble()
-                totalDouble += periodCheckinCount.toDouble()
-            }
-        } else {
-            totalDouble += 1.0
-            if (t.completed) completedDouble += 1.0
-        }
+    val periodProgress = remember(filteredTodos, period, targetDate) {
+        calculateStatsPeriodProgress(filteredTodos, period, targetDate)
     }
-
-    val progress = if (totalDouble == 0.0) 0f else (completedDouble / totalDouble).toFloat()
+    val progress = periodProgress.fraction
 
     val displayTodos = filteredTodos.sortedWith(TodoComparator)
 
     val todayStr = LocalDate.now().toString()
     val tomorrowStr = LocalDate.now().plusDays(1).toString()
 
-    val density = LocalDensity.current
-    val plottedDots = remember(filteredTodos, period, targetDate) {
-        val list = mutableListOf<PlottedDot>()
-        val completionEvents = mutableListOf<Pair<Todo, String>>()
-        filteredTodos.forEach { t ->
-            if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
-                t.completedDates.forEach { dStr ->
-                    val inPeriod = when (period) {
-                        "day" -> dStr.startsWith(targetDate.toString())
-                        "week" -> {
-                            try {
-                                val checkDate = LocalDate.parse(dStr.take(10))
-                                checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
-                                checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
-                            } catch (e: Exception) {
-                                false
-                            }
-                        }
-                        else -> dStr.startsWith(targetMonthStr)
-                    }
-                    if (inPeriod && dStr.length > 10) {
-                        completionEvents.add(Pair(t, dStr))
-                    }
-                }
-            } else {
-                if (t.completed && !t.completedAt.isNullOrEmpty()) {
-                    completionEvents.add(Pair(t, t.completedAt!!))
-                }
-            }
-        }
+    val completionEvents = remember(filteredTodos, period, targetDate) {
+        collectStatsCompletionEvents(filteredTodos, period, targetDate)
+    }
+    val timedCompletionEvents = remember(completionEvents) {
+        completionEvents.filter { it.hasExplicitTime }
+    }
+    val makeupCheckins = remember(completionEvents) {
+        completionEvents.filterNot { it.hasExplicitTime }.map { it.todo to it.completedAt }
+    }
 
+    val density = LocalDensity.current
+    val plottedDots = remember(timedCompletionEvents, period, targetDate, density) {
+        val list = mutableListOf<PlottedDot>()
         val cx = with(density) { 145.dp.toPx() }
         val cy = with(density) { 130.dp.toPx() }
         val r = with(density) { 75.dp.toPx() }
         
-        completionEvents.forEachIndexed { index, (t, timeStr) ->
+        timedCompletionEvents.forEachIndexed { index, event ->
+            val t = event.todo
+            val timeStr = event.completedAt
             val hm = parseTimeToHourMinute(timeStr)
             if (hm != null) {
                 val (hour, minute) = hm
@@ -382,57 +262,10 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                 val px = cx + activeR * Math.sin(thetaRad).toFloat()
                 val py = cy - activeR * Math.cos(thetaRad).toFloat()
                 
-                val color = when {
-                    t.recurring == "daily_repeat" -> Color(0xFFF59E0B)
-                    t.taskType == TaskType.WEEKLY_CHECKIN -> Color(0xFF6366F1)
-                    t.taskType == TaskType.MONTHLY_CHECKIN -> Color(0xFFF43F5E)
-                    else -> Color(0xFF10B981)
-                }
-                
-                val shape = when {
-                    t.recurring == "daily_repeat" -> "triangle"
-                    t.taskType == TaskType.WEEKLY_CHECKIN -> "diamond"
-                    t.taskType == TaskType.MONTHLY_CHECKIN -> "star"
-                    else -> "circle"
-                }
-                
+                val visualStyle = t.statsVisualStyle()
                 val pad = { n: Int -> n.toString().padStart(2, '0') }
                 val dateLabel = timeStr.take(10)
-                list.add(PlottedDot(t, dateLabel, "${pad(hour)}:${pad(minute)}", px, py, color, shape))
-            }
-        }
-        list
-    }
-
-    val makeupCheckins = remember(filteredTodos, period, targetDate) {
-        val list = mutableListOf<Pair<Todo, String>>()
-        filteredTodos.forEach { t ->
-            if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
-                t.completedDates.forEach { dStr ->
-                    val inPeriod = when (period) {
-                        "day" -> dStr.startsWith(targetDate.toString())
-                        "week" -> {
-                            try {
-                                val checkDate = LocalDate.parse(dStr.take(10))
-                                checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
-                                checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
-                            } catch (e: Exception) {
-                                false
-                            }
-                        }
-                        else -> dStr.startsWith(targetMonthStr)
-                    }
-                    if (inPeriod && dStr.length <= 10) {
-                        list.add(Pair(t, dStr))
-                    }
-                }
-            } else {
-                if (t.completed && !t.completedAt.isNullOrEmpty()) {
-                    val ca = t.completedAt!!
-                    if (ca.length <= 10 || !ca.contains("T")) {
-                        list.add(Pair(t, ca.take(10)))
-                    }
-                }
+                list.add(PlottedDot(t, dateLabel, "${pad(hour)}:${pad(minute)}", px, py, visualStyle.color, visualStyle.shape))
             }
         }
         list
@@ -444,42 +277,12 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     var nightCount = 0
     val makeupCheckinCount = makeupCheckins.size
 
-    filteredTodos.forEach { t ->
-        if (t.taskType == TaskType.WEEKLY_CHECKIN || t.taskType == TaskType.MONTHLY_CHECKIN) {
-            t.completedDates.forEach { dStr ->
-                val inPeriod = when (period) {
-                    "day" -> dStr.startsWith(targetDate.toString())
-                    "week" -> {
-                        try {
-                            val checkDate = LocalDate.parse(dStr.take(10))
-                            checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
-                            checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
-                        } catch (e: Exception) {
-                            false
-                        }
-                    }
-                    else -> dStr.startsWith(targetMonthStr)
-                }
-
-                if (inPeriod && dStr.length > 10) {
-                    val slot = categorizeByTimeSlot(dStr)
-                    if (slot == "morning") morningCount++
-                    else if (slot == "afternoon") afternoonCount++
-                    else if (slot == "evening") eveningCount++
-                    else if (slot == "night") nightCount++
-                }
-            }
-        } else {
-            if (t.completed && !t.completedAt.isNullOrEmpty()) {
-                val ca = t.completedAt!!
-                if (ca.length > 10 && ca.contains("T")) {
-                    val slot = categorizeByTimeSlot(ca)
-                    if (slot == "morning") morningCount++
-                    else if (slot == "afternoon") afternoonCount++
-                    else if (slot == "evening") eveningCount++
-                    else if (slot == "night") nightCount++
-                }
-            }
+    timedCompletionEvents.forEach { event ->
+        when (categorizeByTimeSlot(event.completedAt)) {
+            "morning" -> morningCount++
+            "afternoon" -> afternoonCount++
+            "evening" -> eveningCount++
+            "night" -> nightCount++
         }
     }
     val totalSlots = morningCount + afternoonCount + eveningCount + nightCount
@@ -624,7 +427,10 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Text("共 ${formatVal(totalDouble)} 项，已完成 ${formatVal(completedDouble)} 项，进度 ${(progress * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "共 ${formatVal(periodProgress.total)} 项，已完成 ${formatVal(periodProgress.completed)} 项，进度 ${(progress * 100).toInt()}%",
+                        style = MaterialTheme.typography.titleSmall
+                    )
                     Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         LinearProgressIndicator(
@@ -957,18 +763,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             makeupCheckins.filterIndexed { idx, _ -> idx % 2 == 0 }.forEach { (todo, dateStr) ->
-                                val color = when {
-                                    todo.recurring == "daily_repeat" -> Color(0xFFF59E0B)
-                                    todo.taskType == TaskType.WEEKLY_CHECKIN -> Color(0xFF6366F1)
-                                    todo.taskType == TaskType.MONTHLY_CHECKIN -> Color(0xFFF43F5E)
-                                    else -> Color(0xFF10B981)
-                                }
-                                val shape = when {
-                                    todo.recurring == "daily_repeat" -> "triangle"
-                                    todo.taskType == TaskType.WEEKLY_CHECKIN -> "diamond"
-                                    todo.taskType == TaskType.MONTHLY_CHECKIN -> "star"
-                                    else -> "circle"
-                                }
+                                val visualStyle = todo.statsVisualStyle()
                                 var showTooltip by remember { mutableStateOf(false) }
                                 Box(
                                     modifier = Modifier
@@ -981,7 +776,12 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    MakeupIcon(shape = shape, color = color, dotRadius = dotRadiusDp, modifier = Modifier.size(22.dp))
+                                    MakeupIcon(
+                                        shape = visualStyle.shape,
+                                        color = visualStyle.color,
+                                        dotRadius = dotRadiusDp,
+                                        modifier = Modifier.size(22.dp)
+                                    )
                                     
                                     if (showTooltip) {
                                         Popup(
@@ -1014,18 +814,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             makeupCheckins.filterIndexed { idx, _ -> idx % 2 == 1 }.forEach { (todo, dateStr) ->
-                                val color = when {
-                                    todo.recurring == "daily_repeat" -> Color(0xFFF59E0B)
-                                    todo.taskType == TaskType.WEEKLY_CHECKIN -> Color(0xFF6366F1)
-                                    todo.taskType == TaskType.MONTHLY_CHECKIN -> Color(0xFFF43F5E)
-                                    else -> Color(0xFF10B981)
-                                }
-                                val shape = when {
-                                    todo.recurring == "daily_repeat" -> "triangle"
-                                    todo.taskType == TaskType.WEEKLY_CHECKIN -> "diamond"
-                                    todo.taskType == TaskType.MONTHLY_CHECKIN -> "star"
-                                    else -> "circle"
-                                }
+                                val visualStyle = todo.statsVisualStyle()
                                 var showTooltip by remember { mutableStateOf(false) }
                                 Box(
                                     modifier = Modifier
@@ -1038,7 +827,12 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    MakeupIcon(shape = shape, color = color, dotRadius = dotRadiusDp, modifier = Modifier.size(22.dp))
+                                    MakeupIcon(
+                                        shape = visualStyle.shape,
+                                        color = visualStyle.color,
+                                        dotRadius = dotRadiusDp,
+                                        modifier = Modifier.size(22.dp)
+                                    )
                                     
                                     if (showTooltip) {
                                         Popup(
@@ -1110,17 +904,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
         if (showTaskList) {
             items(displayTodos, key = { it.id }) { todo ->
                 val checkinDateForTodo = if (todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) {
-                    when (period) {
-                        "day" -> todo.completedDates.find { it.startsWith(targetDate.toString()) }
-                        "week" -> todo.completedDates.filter { dStr ->
-                            try {
-                                val checkDate = LocalDate.parse(dStr.take(10))
-                                checkDate.get(IsoFields.WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_BASED_YEAR) && 
-                                checkDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR) == targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
-                            } catch (_: Exception) { false }
-                        }.maxOrNull()
-                        else -> todo.completedDates.filter { it.startsWith(targetMonthStr) }.maxOrNull()
-                    }
+                    todo.latestCheckinInStatsPeriod(period, targetDate)
                 } else null
                 TodoItemRow(
                     todo = todo,

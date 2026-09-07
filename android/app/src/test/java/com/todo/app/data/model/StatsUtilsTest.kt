@@ -2,7 +2,9 @@ package com.todo.app.data.model
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.ZoneId
 
 class StatsUtilsTest {
 
@@ -82,5 +84,70 @@ class StatsUtilsTest {
         val stats = calculateCompletionStats(todos, todayStr)
         assertEquals(1, stats.first) // completed
         assertEquals(3, stats.second) // total (Today 1, Today 2, Overdue)
+    }
+
+    @Test
+    fun testStatsPeriodDateMatchingAcrossYearBoundary() {
+        val target = LocalDate.of(2026, 1, 1)
+
+        assertEquals(true, isDateInStatsPeriod("2025-12-29T08:00:00Z", "week", target))
+        assertEquals(true, isDateInStatsPeriod("2026-01-01", "day", target))
+        assertEquals(false, isDateInStatsPeriod("2026-01-08", "week", target))
+        assertEquals(true, isDateInStatsPeriod("2026-01-31", "month", target))
+    }
+
+    @Test
+    fun testTargetedCheckinTaskIsIncludedWithoutCheckin() {
+        val target = LocalDate.of(2026, 9, 6)
+        val weekly = Todo.create("Weekly", weekStringOf(target)).apply {
+            taskType = TaskType.WEEKLY_CHECKIN
+            targetCount = 3
+        }
+
+        assertEquals(true, weekly.isIncludedInStatsPeriod("week", target))
+        assertEquals(false, weekly.isIncludedInStatsPeriod("day", target))
+    }
+
+    @Test
+    fun testCollectCompletionEventsAndProgress() {
+        val target = LocalDate.of(2026, 9, 6)
+        val weekly = Todo.create("Weekly", weekStringOf(target)).apply {
+            taskType = TaskType.WEEKLY_CHECKIN
+            targetCount = 3
+            completedDates = listOf(
+                "2026-09-05",
+                "2026-09-06T08:30:00Z",
+                "2026-08-30T08:30:00Z"
+            )
+        }
+        val normal = Todo.create("Normal", target.toString()).apply {
+            completed = true
+            completedAt = "2026-09-06T10:00:00Z"
+        }
+
+        val events = collectStatsCompletionEvents(listOf(weekly, normal), "week", target)
+        assertEquals(3, events.size)
+        assertEquals(2, events.count { it.hasExplicitTime })
+        val progress = calculateStatsPeriodProgress(listOf(weekly, normal), "week", target)
+        assertEquals(3.0, progress.completed, 0.0001)
+        assertEquals(4.0, progress.total, 0.0001)
+        assertEquals(0.75f, progress.fraction, 0.0001f)
+        assertEquals("2026-09-06T08:30:00Z", weekly.latestCheckinInStatsPeriod("week", target))
+    }
+
+    @Test
+    fun testNormalCompletionUsesLocalDateForPeriod() {
+        val target = LocalDate.of(2026, 9, 6)
+        val localCompletion = target.atTime(0, 30)
+            .atZone(ZoneId.systemDefault())
+            .toInstant()
+            .toString()
+        val normal = Todo.create("Normal", "2026-09-05").apply {
+            completed = true
+            completedAt = localCompletion
+        }
+
+        assertEquals(true, normal.isIncludedInStatsPeriod("day", target))
+        assertEquals(1, collectStatsCompletionEvents(listOf(normal), "day", target).size)
     }
 }
