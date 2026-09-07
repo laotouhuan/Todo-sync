@@ -331,8 +331,8 @@ class TodoRepository(private val context: Context) {
                     val mergedData = com.todo.app.data.model.MergeUtils.mergeTodoData(localData, cloudData)
 
                     val mergedJson = jsonFormat.encodeToString(mergedData)
-                    val localChanged = mergedData != localData
-                    val cloudChanged = mergedData != cloudData
+                    val localChanged = com.todo.app.data.model.MergeUtils.hasContentChanges(mergedData, localData)
+                    val cloudChanged = com.todo.app.data.model.MergeUtils.hasContentChanges(mergedData, cloudData)
                     if (localChanged) {
                         createLocalBackup()
                         _todoData.value = mergedData
@@ -341,7 +341,7 @@ class TodoRepository(private val context: Context) {
                         com.todo.app.notification.ReminderScheduler(context).rescheduleAll(mergedData)
                         _uiEvent.send(UiEvent.ShowMessage("检测到云端更新，已自动同步完成"))
                     }
-                    if (cloudChanged || localChanged) {
+                    if (cloudChanged) {
                         client.uploadFile(configManager.filePath, mergedJson)
                     }
                 } catch (e: Exception) {
@@ -484,9 +484,10 @@ class TodoRepository(private val context: Context) {
     suspend fun updateReminderSettings(settings: com.todo.app.data.model.ReminderSettings) = mutex.withLock {
         withContext(Dispatchers.IO) {
             val previous = _todoData.value
+            val settingsUpdatedAt = nowInstant()
             val updated = previous.copy(
-                last_updated = nowIso(),
-                reminderSettings = settings
+                last_updated = settingsUpdatedAt,
+                reminderSettings = settings.copy(updatedAt = settingsUpdatedAt)
             )
             _todoData.value = updated
             try {

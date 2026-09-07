@@ -69,12 +69,66 @@ function migrateAndNormalize(todo) {
 function mergeReminderSettings(localData, cloudData) {
     const ls = localData?.reminder_settings;
     const cs = cloudData?.reminder_settings;
-    if (!ls && !cs) return { enabled: true, privacy_mode: false, global_rules: [] };
-    if (!ls) return cs;
-    if (!cs) return ls;
-    const lt = localData?.last_updated || '';
-    const ct = cloudData?.last_updated || '';
-    return ct > lt ? cs : ls;
+    if (!ls && !cs) return { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] };
+    if (!ls) return structuredClone(cs);
+    if (!cs) return structuredClone(ls);
+
+    const lSettingsTime = Date.parse(ls.updated_at || '');
+    const cSettingsTime = Date.parse(cs.updated_at || '');
+    const hasLocalSettingsTime = Number.isFinite(lSettingsTime);
+    const hasCloudSettingsTime = Number.isFinite(cSettingsTime);
+    if (hasLocalSettingsTime || hasCloudSettingsTime) {
+        if (!hasLocalSettingsTime) return structuredClone(cs);
+        if (!hasCloudSettingsTime) return structuredClone(ls);
+        return structuredClone(cSettingsTime > lSettingsTime ? cs : ls);
+    }
+
+    if (stableSerialize(ls) === stableSerialize(cs)) return structuredClone(ls);
+    const localRules = Array.isArray(ls.global_rules) ? ls.global_rules : [];
+    const cloudRules = Array.isArray(cs.global_rules) ? cs.global_rules : [];
+    if (localRules.length > 0 && cloudRules.length === 0) return structuredClone(ls);
+    if (cloudRules.length > 0 && localRules.length === 0) return structuredClone(cs);
+
+    const lDataTime = Date.parse(localData?.last_updated || '');
+    const cDataTime = Date.parse(cloudData?.last_updated || '');
+    return structuredClone(
+        Number.isFinite(cDataTime) && (!Number.isFinite(lDataTime) || cDataTime > lDataTime) ? cs : ls
+    );
+}
+
+function todoDataContentSnapshot(data) {
+    return {
+        version: data?.version ?? 1,
+        todos: data?.todos || [],
+        reminder_settings: data?.reminder_settings || {
+            updated_at: null,
+            enabled: true,
+            privacy_mode: false,
+            global_rules: []
+        }
+    };
+}
+
+function canonicalizeForComparison(value) {
+    if (Array.isArray(value)) {
+        return value.map(canonicalizeForComparison);
+    }
+    if (value && typeof value === 'object') {
+        const result = {};
+        Object.keys(value).sort().forEach(key => {
+            result[key] = canonicalizeForComparison(value[key]);
+        });
+        return result;
+    }
+    return value;
+}
+
+function stableSerialize(value) {
+    return JSON.stringify(canonicalizeForComparison(value));
+}
+
+function hasTodoDataContentChanges(first, second) {
+    return stableSerialize(todoDataContentSnapshot(first)) !== stableSerialize(todoDataContentSnapshot(second));
 }
 
 function mergeTodoData(localData, cloudData) {
@@ -84,14 +138,14 @@ function mergeTodoData(localData, cloudData) {
         }
         const data = cloudData || { version: 1, last_updated: new Date().toISOString(), todos: [] };
         if (!data.reminder_settings) {
-            data.reminder_settings = { enabled: true, privacy_mode: false, global_rules: [] };
+            data.reminder_settings = { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] };
         }
         return { data, changed: true };
     }
     if (!cloudData || !cloudData.todos) {
         localData.todos.forEach(migrateAndNormalize);
         if (!localData.reminder_settings) {
-            localData.reminder_settings = { enabled: true, privacy_mode: false, global_rules: [] };
+            localData.reminder_settings = { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] };
         }
         return { data: localData, changed: false };
     }
@@ -188,14 +242,16 @@ function mergeTodoData(localData, cloudData) {
     }
     mergedTodos.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     const mergedReminderSettings = mergeReminderSettings(localData, cloudData);
+    const mergedData = {
+        version: localData.version || 1,
+        last_updated: new Date().toISOString(),
+        todos: mergedTodos,
+        reminder_settings: mergedReminderSettings
+    };
     return {
-        data: {
-            version: localData.version || 1,
-            last_updated: new Date().toISOString(),
-            todos: mergedTodos,
-            reminder_settings: mergedReminderSettings
-        },
-        changed: changed || mergedTodos.length !== localData.todos.length
+        data: mergedData,
+        changed: changed || hasTodoDataContentChanges(mergedData, localData),
+        cloudChanged: hasTodoDataContentChanges(mergedData, cloudData)
     };
 }
 
@@ -221,12 +277,16 @@ function makeTodo(overrides = {}) {
     };
 }
 
-function makeData(todos = []) {
-    return {
+function makeData(todos = [], overrides = {}) {
+    const data = {
         version: 1,
-        last_updated: new Date().toISOString(),
+        last_updated: overrides.last_updated || new Date().toISOString(),
         todos: todos
     };
+    if (Object.hasOwn(overrides, 'reminder_settings')) {
+        data.reminder_settings = overrides.reminder_settings;
+    }
+    return data;
 }
 
 // ====== migrateAndNormalize 测试 ======
@@ -441,6 +501,89 @@ describe('mergeTodoData', () => {
         const result = mergeTodoData(null, null);
         assert.equal(result.changed, true);
     });
+
+    it('普通待办导致根时间较新时不会覆盖更新的提醒设置', () => {
+        const localRule = { id: 'rule-1', time: '09:00', condition: 'unconditional', task_scope: 'all', body: '提醒' };
+        const local = makeData([], {
+            last_updated: '2026-09-07T08:00:00Z',
+            reminder_settings: {
+                updated_at: '2026-09-07T07:00:00Z', enabled: true, privacy_mode: false, global_rules: [localRule]
+            }
+        });
+        const cloud = makeData([], {
+            last_updated: '2026-09-07T12:00:00Z',
+            reminder_settings: {
+                updated_at: '2026-09-07T06:00:00Z', enabled: true, privacy_mode: false, global_rules: []
+            }
+        });
+
+        const result = mergeTodoData(local, cloud);
+        assert.deepEqual(result.data.reminder_settings.global_rules, [localRule]);
+        assert.equal(result.changed, false);
+        assert.equal(result.cloudChanged, true);
+    });
+
+    it('新时间戳的空规则整包可以同步用户主动删除', () => {
+        const local = makeData([], {
+            reminder_settings: {
+                updated_at: '2026-09-07T07:00:00Z', enabled: true, privacy_mode: false,
+                global_rules: [{ id: 'rule-1', time: '09:00' }]
+            }
+        });
+        const cloud = makeData([], {
+            reminder_settings: {
+                updated_at: '2026-09-07T08:00:00Z', enabled: true, privacy_mode: false, global_rules: []
+            }
+        });
+
+        const result = mergeTodoData(local, cloud);
+        assert.deepEqual(result.data.reminder_settings.global_rules, []);
+        assert.equal(result.changed, true);
+    });
+
+    it('旧数据都没有提醒时间戳时优先保留非空规则', () => {
+        const legacyRule = { id: 'legacy-rule', time: '18:00' };
+        const local = makeData([], {
+            last_updated: '2026-09-07T07:00:00Z',
+            reminder_settings: { enabled: true, privacy_mode: false, global_rules: [legacyRule] }
+        });
+        const cloud = makeData([], {
+            last_updated: '2026-09-07T12:00:00Z',
+            reminder_settings: { enabled: true, privacy_mode: false, global_rules: [] }
+        });
+
+        const result = mergeTodoData(local, cloud);
+        assert.deepEqual(result.data.reminder_settings.global_rules, [legacyRule]);
+    });
+
+    it('业务内容比较忽略根级 last_updated，但能识别提醒设置变化', () => {
+        const base = makeData([], {
+            last_updated: '2026-09-07T07:00:00Z',
+            reminder_settings: { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] }
+        });
+        const onlyRootChanged = { ...base, last_updated: '2026-09-07T08:00:00Z' };
+        const reminderChanged = {
+            ...onlyRootChanged,
+            reminder_settings: { ...base.reminder_settings, privacy_mode: true }
+        };
+
+        assert.equal(hasTodoDataContentChanges(base, onlyRootChanged), false);
+        assert.equal(hasTodoDataContentChanges(base, reminderChanged), true);
+    });
+
+    it('业务内容比较忽略跨端 JSON 对象字段顺序差异', () => {
+        const first = makeData([], {
+            reminder_settings: { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] }
+        });
+        const second = {
+            todos: [],
+            reminder_settings: { global_rules: [], privacy_mode: false, enabled: true, updated_at: null },
+            version: 1,
+            last_updated: first.last_updated
+        };
+
+        assert.equal(hasTodoDataContentChanges(first, second), false);
+    });
 });
 
 // ====== Schema 一致性测试 ======
@@ -481,6 +624,13 @@ describe('数据契约 Schema 校验', () => {
     it('Schema 包含 target_count 定义', () => {
         const prop = schema.properties.todos.items.properties.target_count;
         assert.ok(prop);
+    });
+
+    it('Schema 为提醒设置定义了可空的独立更新时间', () => {
+        const prop = schema.properties.reminder_settings.properties.updated_at;
+        assert.deepEqual(prop.type, ['string', 'null']);
+        assert.equal(prop.format, 'date-time');
+        assert.equal(prop.default, null);
     });
 
     it('createTodo() 输出符合 Schema 必填字段要求', async () => {

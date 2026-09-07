@@ -132,6 +132,12 @@
     "reminder_settings": {
       "type": "object",
       "properties": {
+        "updated_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "default": null,
+          "description": "Last reminder settings modification timestamp, independent from todo data changes"
+        },
         "enabled": {
           "type": "boolean",
           "default": true

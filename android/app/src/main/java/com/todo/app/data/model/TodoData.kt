@@ -16,6 +16,7 @@ data class GlobalReminderRule(
 
 @Serializable
 data class ReminderSettings(
+    @SerialName("updated_at") val updatedAt: String? = null,
     val enabled: Boolean = true,
     @SerialName("privacy_mode") val privacyMode: Boolean = false,
     @SerialName("global_rules") val globalRules: List<GlobalReminderRule> = emptyList()
