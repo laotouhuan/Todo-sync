@@ -299,12 +299,70 @@ function resolveCheckinConflict(checkinL, checkinC, lTime, cTime) {
 function mergeReminderSettings(localData, cloudData) {
     const ls = localData?.reminder_settings;
     const cs = cloudData?.reminder_settings;
-    if (!ls && !cs) return { enabled: true, privacy_mode: false, global_rules: [] };
-    if (!ls) return cs;
-    if (!cs) return ls;
-    const lt = localData?.last_updated || '';
-    const ct = cloudData?.last_updated || '';
-    return ct > lt ? cs : ls;
+    if (!ls && !cs) return { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] };
+    if (!ls) return deepClone(cs);
+    if (!cs) return deepClone(ls);
+
+    const lSettingsTime = Date.parse(ls.updated_at || '');
+    const cSettingsTime = Date.parse(cs.updated_at || '');
+    const hasLocalSettingsTime = Number.isFinite(lSettingsTime);
+    const hasCloudSettingsTime = Number.isFinite(cSettingsTime);
+
+    // 新格式仅比较提醒设置自己的时间戳，普通待办的 last_updated 不参与判断。
+    if (hasLocalSettingsTime || hasCloudSettingsTime) {
+        if (!hasLocalSettingsTime) return deepClone(cs);
+        if (!hasCloudSettingsTime) return deepClone(ls);
+        return deepClone(cSettingsTime > lSettingsTime ? cs : ls);
+    }
+
+    // 兼容旧数据：空规则与非空规则冲突时优先保住非空规则。
+    if (stableSerialize(ls) === stableSerialize(cs)) return deepClone(ls);
+    const localRules = Array.isArray(ls.global_rules) ? ls.global_rules : [];
+    const cloudRules = Array.isArray(cs.global_rules) ? cs.global_rules : [];
+    if (localRules.length > 0 && cloudRules.length === 0) return deepClone(ls);
+    if (cloudRules.length > 0 && localRules.length === 0) return deepClone(cs);
+
+    // 两端旧配置均非空且不同，只能回退旧版文件时间。
+    const lDataTime = Date.parse(localData?.last_updated || '');
+    const cDataTime = Date.parse(cloudData?.last_updated || '');
+    return deepClone(
+        Number.isFinite(cDataTime) && (!Number.isFinite(lDataTime) || cDataTime > lDataTime) ? cs : ls
+    );
+}
+
+function todoDataContentSnapshot(data) {
+    return {
+        version: data?.version ?? 1,
+        todos: data?.todos || [],
+        reminder_settings: data?.reminder_settings || {
+            updated_at: null,
+            enabled: true,
+            privacy_mode: false,
+            global_rules: []
+        }
+    };
+}
+
+function canonicalizeForComparison(value) {
+    if (Array.isArray(value)) {
+        return value.map(canonicalizeForComparison);
+    }
+    if (value && typeof value === 'object') {
+        const result = {};
+        Object.keys(value).sort().forEach(key => {
+            result[key] = canonicalizeForComparison(value[key]);
+        });
+        return result;
+    }
+    return value;
+}
+
+function stableSerialize(value) {
+    return JSON.stringify(canonicalizeForComparison(value));
+}
+
+function hasTodoDataContentChanges(first, second) {
+    return stableSerialize(todoDataContentSnapshot(first)) !== stableSerialize(todoDataContentSnapshot(second));
 }
 
 function mergeTodoData(localData, cloudData) {
@@ -314,14 +372,14 @@ function mergeTodoData(localData, cloudData) {
         }
         const data = cloudData || { version: 1, last_updated: new Date().toISOString(), todos: [] };
         if (!data.reminder_settings) {
-            data.reminder_settings = { enabled: true, privacy_mode: false, global_rules: [] };
+            data.reminder_settings = { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] };
         }
         return { data, changed: true };
     }
     if (!cloudData || !cloudData.todos) {
         localData.todos.forEach(migrateAndNormalize);
         if (!localData.reminder_settings) {
-            localData.reminder_settings = { enabled: true, privacy_mode: false, global_rules: [] };
+            localData.reminder_settings = { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] };
         }
         return { data: localData, changed: false };
     }
@@ -399,14 +457,16 @@ function mergeTodoData(localData, cloudData) {
 
     const mergedReminderSettings = mergeReminderSettings(localData, cloudData);
 
+    const mergedData = {
+        version: localData.version || 1,
+        last_updated: new Date().toISOString(),
+        todos: mergedTodos,
+        reminder_settings: mergedReminderSettings
+    };
     return {
-        data: {
-            version: localData.version || 1,
-            last_updated: new Date().toISOString(),
-            todos: mergedTodos,
-            reminder_settings: mergedReminderSettings
-        },
-        changed: changed || mergedTodos.length !== localData.todos.length
+        data: mergedData,
+        changed: changed || hasTodoDataContentChanges(mergedData, localData),
+        cloudChanged: hasTodoDataContentChanges(mergedData, cloudData)
     };
 }
 
@@ -474,11 +534,11 @@ async function loadData() {
                 let cloudJsonStr = await invoke("fetch_from_cloud");
                 let cloudData = JSON.parse(cloudJsonStr);
 
-                let { data: mergedData, changed } = mergeTodoData(localData, cloudData);
+                let { data: mergedData, changed, cloudChanged } = mergeTodoData(localData, cloudData);
                 appState.todoData = mergedData;
                 render();
 
-                if (changed || JSON.stringify(mergedData.todos) !== JSON.stringify(localData?.todos)) {
+                if (changed || cloudChanged) {
                     await saveData();
                     showToast('检测到云端更新，已自动同步完成');
                 }
@@ -3937,7 +3997,7 @@ function initApp() {
             if (firstPanel) firstPanel.classList.add('active');
 
             // 恢复真实的提醒设置并更新 UI
-            const rs = appState.todoData?.reminder_settings || { enabled: true, privacy_mode: false, global_rules: [] };
+            const rs = appState.todoData?.reminder_settings || { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] };
             const isEnabled = rs.enabled !== false;
             applyReminderToggleVisual(isEnabled);
 
@@ -4060,6 +4120,7 @@ function initApp() {
             // 保存提醒配置到 todoData
             const privacySelect = document.getElementById('setting-privacy-mode');
             appState.todoData.reminder_settings = {
+                updated_at: new Date().toISOString(),
                 enabled: reminderHiddenInput ? (reminderHiddenInput.value === 'true') : true,
                 privacy_mode: privacySelect ? (privacySelect.value === 'true') : false,
                 global_rules: collectGlobalRulesFromUI()

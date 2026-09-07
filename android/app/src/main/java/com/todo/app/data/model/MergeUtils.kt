@@ -139,13 +139,41 @@ object MergeUtils {
         )
     }
 
+    /** 比较 TodoData 的实际业务内容，忽略仅用于文件级标记的 last_updated。 */
+    fun hasContentChanges(first: TodoData, second: TodoData): Boolean =
+        first.copy(last_updated = "") != second.copy(last_updated = "")
+
     private fun mergeReminderSettings(local: TodoData, cloud: TodoData): ReminderSettings {
         val ls = local.reminderSettings
         val cs = cloud.reminderSettings
-        val lTime = try { OffsetDateTime.parse(local.last_updated) } catch (_: Exception) { OffsetDateTime.MIN }
-        val cTime = try { OffsetDateTime.parse(cloud.last_updated) } catch (_: Exception) { OffsetDateTime.MIN }
-        return if (cTime.isAfter(lTime)) cs else ls
+        val lSettingsTime = parseTimestamp(ls.updatedAt)
+        val cSettingsTime = parseTimestamp(cs.updatedAt)
+
+        // 新格式以提醒设置自己的时间戳为准，普通待办的 last_updated 不再参与判断。
+        if (lSettingsTime != null || cSettingsTime != null) {
+            return when {
+                lSettingsTime == null -> cs
+                cSettingsTime == null -> ls
+                cSettingsTime.isAfter(lSettingsTime) -> cs
+                else -> ls
+            }
+        }
+
+        // 兼容两端都没有独立时间戳的旧数据：优先保住非空规则，避免升级同步清空。
+        if (ls == cs) return ls
+        if (ls.globalRules.isNotEmpty() && cs.globalRules.isEmpty()) return ls
+        if (cs.globalRules.isNotEmpty() && ls.globalRules.isEmpty()) return cs
+
+        // 两端旧配置均非空且内容不同，已无法精确判断修改先后，只能回退旧版文件时间。
+        val lDataTime = parseTimestamp(local.last_updated) ?: OffsetDateTime.MIN
+        val cDataTime = parseTimestamp(cloud.last_updated) ?: OffsetDateTime.MIN
+        return if (cDataTime.isAfter(lDataTime)) cs else ls
     }
+
+    private fun parseTimestamp(value: String?): OffsetDateTime? =
+        value?.takeIf { it.isNotBlank() }?.let {
+            try { OffsetDateTime.parse(it) } catch (_: Exception) { null }
+        }
 
     private fun mergeCompletedDates(
         lDates: List<String>,

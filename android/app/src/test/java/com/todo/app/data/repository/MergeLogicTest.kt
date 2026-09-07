@@ -1,6 +1,8 @@
 package com.todo.app.data.repository
 
 import com.todo.app.data.model.MergeUtils
+import com.todo.app.data.model.GlobalReminderRule
+import com.todo.app.data.model.ReminderSettings
 import com.todo.app.data.model.TaskType
 import com.todo.app.data.model.Todo
 import com.todo.app.data.model.TodoData
@@ -184,5 +186,93 @@ class MergeLogicTest {
         val migrated = normalized.todos[0]
         assertEquals("none", migrated.recurring)
         assertEquals(TaskType.WEEKLY_CHECKIN, migrated.taskType)
+    }
+
+    @Test
+    fun testMergeReminderSettings_IgnoresNewerRootTimestampFromTodoChanges() {
+        val localRule = GlobalReminderRule(
+            id = "rule-1",
+            time = "09:00",
+            body = "提醒"
+        )
+        val localData = TodoData(
+            version = 1,
+            last_updated = "2026-09-07T08:00:00Z",
+            todos = emptyList(),
+            reminderSettings = ReminderSettings(
+                updatedAt = "2026-09-07T07:00:00Z",
+                globalRules = listOf(localRule)
+            )
+        )
+        val cloudData = TodoData(
+            version = 1,
+            last_updated = "2026-09-07T12:00:00Z",
+            todos = emptyList(),
+            reminderSettings = ReminderSettings(updatedAt = "2026-09-07T06:00:00Z")
+        )
+
+        val merged = MergeUtils.mergeTodoData(localData, cloudData)
+
+        assertEquals(listOf(localRule), merged.reminderSettings.globalRules)
+    }
+
+    @Test
+    fun testMergeReminderSettings_NewerEmptySettingsPropagateDeletion() {
+        val localData = TodoData(
+            version = 1,
+            last_updated = "2026-09-07T07:00:00Z",
+            todos = emptyList(),
+            reminderSettings = ReminderSettings(
+                updatedAt = "2026-09-07T07:00:00Z",
+                globalRules = listOf(GlobalReminderRule(id = "rule-1", time = "09:00"))
+            )
+        )
+        val cloudData = TodoData(
+            version = 1,
+            last_updated = "2026-09-07T08:00:00Z",
+            todos = emptyList(),
+            reminderSettings = ReminderSettings(updatedAt = "2026-09-07T08:00:00Z")
+        )
+
+        val merged = MergeUtils.mergeTodoData(localData, cloudData)
+
+        assertTrue(merged.reminderSettings.globalRules.isEmpty())
+    }
+
+    @Test
+    fun testMergeReminderSettings_LegacyConflictPreservesNonEmptyRules() {
+        val legacyRule = GlobalReminderRule(id = "legacy-rule", time = "18:00")
+        val localData = TodoData(
+            version = 1,
+            last_updated = "2026-09-07T07:00:00Z",
+            todos = emptyList(),
+            reminderSettings = ReminderSettings(globalRules = listOf(legacyRule))
+        )
+        val cloudData = TodoData(
+            version = 1,
+            last_updated = "2026-09-07T12:00:00Z",
+            todos = emptyList(),
+            reminderSettings = ReminderSettings()
+        )
+
+        val merged = MergeUtils.mergeTodoData(localData, cloudData)
+
+        assertEquals(listOf(legacyRule), merged.reminderSettings.globalRules)
+    }
+
+    @Test
+    fun testHasContentChanges_IgnoresRootTimestampAndDetectsReminderChanges() {
+        val base = TodoData(
+            version = 1,
+            last_updated = "2026-09-07T07:00:00Z",
+            todos = emptyList()
+        )
+        val onlyRootChanged = base.copy(last_updated = "2026-09-07T08:00:00Z")
+        val reminderChanged = onlyRootChanged.copy(
+            reminderSettings = onlyRootChanged.reminderSettings.copy(privacyMode = true)
+        )
+
+        assertEquals(false, MergeUtils.hasContentChanges(base, onlyRootChanged))
+        assertEquals(true, MergeUtils.hasContentChanges(base, reminderChanged))
     }
 }

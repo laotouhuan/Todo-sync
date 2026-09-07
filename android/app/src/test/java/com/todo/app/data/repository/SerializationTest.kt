@@ -2,6 +2,7 @@ package com.todo.app.data.repository
 
 import com.todo.app.data.model.Todo
 import com.todo.app.data.model.TodoData
+import com.todo.app.data.model.ReminderSettings
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -48,6 +49,7 @@ class SerializationTest {
         assertEquals("normal", todo.taskType)
         assertEquals("none", todo.recurring)
         assertEquals(0.0, todo.order, 0.0)
+        assertEquals(null, parsed.reminderSettings.updatedAt)
     }
 
     @Test
@@ -85,7 +87,8 @@ class SerializationTest {
                     completedDates = listOf("2026-06-15"),
                     targetCount = 5
                 )
-            )
+            ),
+            reminderSettings = ReminderSettings(updatedAt = "2026-06-15T12:30:00Z")
         )
 
         val jsonString = jsonFormat.encodeToString(original)
@@ -96,6 +99,28 @@ class SerializationTest {
         // Verify specific field
         assertEquals(5, parsed.todos[0].targetCount)
         assertTrue(parsed.todos[0].deleted)
+        assertEquals("2026-06-15T12:30:00Z", parsed.reminderSettings.updatedAt)
+    }
+
+    @Test
+    fun testDeserializeLegacyReminderSettingsWithoutUpdatedAt() {
+        val legacyJson = """
+        {
+            "version": 1,
+            "last_updated": "2026-06-15T12:00:00Z",
+            "todos": [],
+            "reminder_settings": {
+                "enabled": true,
+                "privacy_mode": false,
+                "global_rules": []
+            }
+        }
+        """.trimIndent()
+
+        val parsed = jsonFormat.decodeFromString<TodoData>(legacyJson)
+
+        assertEquals(null, parsed.reminderSettings.updatedAt)
+        assertTrue(parsed.reminderSettings.enabled)
     }
 
     @Test
