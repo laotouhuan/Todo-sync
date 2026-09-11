@@ -26,13 +26,22 @@
             "type": "string"
           },
           "date": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "time": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "completed_at": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time"
           },
           "order": {
@@ -58,12 +67,19 @@
           },
           "recurring": {
             "type": "string",
-            "enum": ["none", "daily_repeat"],
+            "enum": [
+              "none",
+              "daily_repeat"
+            ],
             "default": "none"
           },
           "task_type": {
             "type": "string",
-            "enum": ["normal", "weekly_checkin", "monthly_checkin"],
+            "enum": [
+              "normal",
+              "weekly_checkin",
+              "monthly_checkin"
+            ],
             "default": "normal"
           },
           "completed_dates": {
@@ -74,16 +90,25 @@
             "default": []
           },
           "target_count": {
-            "type": ["integer", "null"],
+            "type": [
+              "integer",
+              "null"
+            ],
             "default": null
           },
           "reminder": {
-            "type": ["object", "null"],
+            "type": [
+              "object",
+              "null"
+            ],
             "default": null,
             "description": "Single task reminder configuration",
             "properties": {
               "reminder_date": {
-                "type": ["string", "null"]
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "reminder_time": {
                 "type": "string"
@@ -93,7 +118,9 @@
                 "default": false
               }
             },
-            "required": ["reminder_time"]
+            "required": [
+              "reminder_time"
+            ]
           },
           "subtasks": {
             "type": "array",
@@ -111,14 +138,29 @@
                   "type": "boolean"
                 },
                 "completed_at": {
-                  "type": ["string", "null"],
+                  "type": [
+                    "string",
+                    "null"
+                  ],
                   "format": "date-time",
                   "default": null
                 }
               },
-              "required": ["id", "content", "completed"]
+              "required": [
+                "id",
+                "content",
+                "completed"
+              ]
             },
             "default": []
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "description": "任务的唯一标签；空值为未分类"
           }
         },
         "required": [
@@ -133,7 +175,10 @@
       "type": "object",
       "properties": {
         "updated_at": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "format": "date-time",
           "default": null,
           "description": "Last reminder settings modification timestamp, independent from todo data changes"
@@ -164,12 +209,20 @@
               },
               "condition": {
                 "type": "string",
-                "enum": ["none_completed", "any_remaining", "unconditional"],
+                "enum": [
+                  "none_completed",
+                  "any_remaining",
+                  "unconditional"
+                ],
                 "default": "unconditional"
               },
               "task_scope": {
                 "type": "string",
-                "enum": ["all", "today_only", "recurring_only"],
+                "enum": [
+                  "all",
+                  "today_only",
+                  "recurring_only"
+                ],
                 "default": "all"
               },
               "title": {
@@ -181,12 +234,155 @@
                 "default": ""
               }
             },
-            "required": ["id", "time", "condition", "task_scope", "body"]
+            "required": [
+              "id",
+              "time",
+              "condition",
+              "task_scope",
+              "body"
+            ]
           },
           "default": []
         }
       }
+    },
+    "time_entries": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted": {
+            "type": "boolean",
+            "default": false
+          },
+          "task_ref": {
+            "type": "object",
+            "properties": {
+              "source_type": {
+                "type": "string",
+                "enum": [
+                  "personal",
+                  "collaboration"
+                ],
+                "default": "personal"
+              },
+              "source_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "default": null
+              },
+              "todo_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "todo_id"
+            ]
+          },
+          "task_content_snapshot": {
+            "type": "string",
+            "default": ""
+          },
+          "label_snapshot": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "task_ref",
+          "started_at",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    "daily_reviews": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted": {
+            "type": "boolean",
+            "default": false
+          },
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "fact": {
+            "type": "string",
+            "default": ""
+          },
+          "obstacle": {
+            "type": "string",
+            "default": ""
+          },
+          "effective_action": {
+            "type": "string",
+            "default": ""
+          },
+          "next_step": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "id",
+          "date",
+          "created_at",
+          "updated_at"
+        ]
+      }
     }
   },
-  "required": ["version", "last_updated", "todos"]
+  "required": [
+    "version",
+    "last_updated",
+    "todos"
+  ]
 }

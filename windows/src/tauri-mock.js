@@ -4,6 +4,12 @@ if (!window.__TAURI__) {
     core: {
       invoke: async (cmd, args) => {
         console.log(`[Tauri Mock Invoke] ${cmd}`, args);
+        if (cmd === 'export_review_markdown') {
+          const url = URL.createObjectURL(new Blob([args.content], {type: 'text/markdown;charset=utf-8'}));
+          const link = document.createElement('a'); link.href = url; link.download = args.filename;
+          document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+          return false; // 浏览器只能确认发起下载，不能声称落盘成功。
+        }
         if (cmd === 'get_app_config') {
           return JSON.parse(localStorage.getItem('todo_app_config') || '{"sync_mode":"local","local_sync_path":""}');
         }

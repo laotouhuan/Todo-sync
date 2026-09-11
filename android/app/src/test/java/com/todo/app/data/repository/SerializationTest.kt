@@ -136,4 +136,16 @@ class SerializationTest {
         assertTrue(jsonString.contains("\"task_type\""))
         assertTrue(jsonString.contains("\"completed_dates\""))
     }
+
+    @Test fun oldDataDefaultsAndLabelRoundTrip() {
+        val old = jsonFormat.decodeFromString<TodoData>("""{"version":1,"last_updated":"2026-09-10T00:00:00Z","todos":[]}""")
+        assertTrue(old.timeEntries.isEmpty())
+        assertTrue(old.dailyReviews.isEmpty())
+        val updated = old.copy(todos = listOf(Todo.create("证明").copy(label = "数学")))
+        val encoded = jsonFormat.encodeToString(updated)
+        assertTrue(encoded.contains("time_entries"))
+        assertTrue(encoded.contains("daily_reviews"))
+        assertEquals("数学", jsonFormat.decodeFromString<TodoData>(encoded).todos.single().label)
+    }
+
 }

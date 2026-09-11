@@ -187,9 +187,13 @@ private fun copyToClipboard(context: Context, text: String) {
 fun EditTodoDialog(
     todo: Todo,
     onDismiss: () -> Unit,
-    onConfirm: (Todo) -> Unit,
-    onDelete: () -> Unit
+    onConfirm: suspend (Todo) -> Unit,
+    onDelete: () -> Unit,
+    viewModel: com.todo.app.ui.viewmodel.TodoViewModel
 ) {
+    var learningLabel by remember(todo.id, todo.label) { mutableStateOf(todo.label ?: "") }
+
+    val learningTasks by viewModel.learningTasks.collectAsState()
     val parsedContent = remember(todo.content) { todo.extractCollaboratorContent() }
     var content by remember(todo.content) { mutableStateOf(parsedContent.cleanContent) }
     var date by remember(todo.id, todo.date) { mutableStateOf(todo.date ?: "") }
@@ -228,6 +232,9 @@ fun EditTodoDialog(
         )
     } else null
 
+    val saveScope = rememberCoroutineScope()
+    val saveContext = LocalContext.current
+    var saving by remember { mutableStateOf(false) }
     val onSave: () -> Unit = {
         val updated = buildUpdatedTodo(
             todo = todo,
@@ -242,8 +249,15 @@ fun EditTodoDialog(
             subtasks = subtasks,
             reminder = currentReminder
         )
-        onConfirm(updated)
-        onDismiss()
+        if (!saving) saveScope.launch {
+            saving = true
+            try { onConfirm(updated.copy(label = com.todo.app.data.model.Learning.label(learningLabel))); onDismiss() }
+            catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Toast.makeText(saveContext, "保存失败：" + e.message, Toast.LENGTH_LONG).show()
+            }
+            finally { saving = false }
+        }
     }
 
     val onUpdateCompletedDates = { newDates: List<String> ->
@@ -273,80 +287,94 @@ fun EditTodoDialog(
         )
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(onDismissRequest = { if (!saving) onDismiss() }) {
         Surface(
             shape = MaterialTheme.shapes.medium,
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.padding(16.dp).heightIn(max = 650.dp)) {
                 EditTodoHeader(
-                    onBack = onDismiss,
-                    onDelete = { showDeleteConfirm = true },
+                    onBack = { if (!saving) onDismiss() },
+                    onDelete = { if (!saving) showDeleteConfirm = true },
                     onSave = onSave
                 )
 
-                EditTodoContentSection(
-                    content = content,
-                    onContentChange = { content = it },
-                    date = date,
-                    onDateChange = { date = it },
-                    hasDateEnabled = hasDateEnabled,
-                    onHasDateEnabledChange = { checked ->
-                        if (checked) {
-                            val targetDate = if (cachedDate.isNotBlank()) cachedDate else LocalDate.now().toString()
-                            date = targetDate
-                        } else {
-                            date = ""
-                        }
-                        hasDateEnabled = checked
-                    },
-                    selectedTypeUi = selectedTypeUi
-                )
-
-                EditTodoTypeSection(
-                    selectedTypeUi = selectedTypeUi,
-                    onTypeChange = { type ->
-                        selectedTypeUi = type
-                    }
-                )
-
-                EditTodoReminderSection(
-                    hasReminder = hasReminder,
-                    onHasReminderChange = { hasReminder = it },
-                    reminderDate = reminderDate,
-                    onReminderDateChange = { reminderDate = it },
-                    reminderTime = reminderTime,
-                    onReminderTimeChange = { reminderTime = it },
-                    reminderRepeatDaily = reminderRepeatDaily,
-                    onReminderRepeatDailyChange = { reminderRepeatDaily = it },
-                    isRecurring = selectedTypeUi != TaskType.NORMAL
-                )
-
-                if (selectedTypeUi == TaskType.WEEKLY_CHECKIN || selectedTypeUi == TaskType.MONTHLY_CHECKIN) {
-                    EditTodoCheckinSection(
-                        selectedTypeUi = selectedTypeUi,
-                        todo = todo,
-                        targetCount = targetCount,
-                        onTargetCountChange = { targetCount = it },
-                        completedDates = completedDates,
-                        onUpdateCompletedDates = onUpdateCompletedDates,
-                        date = date
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                    EditTodoContentSection(
+                        content = content,
+                        onContentChange = { content = it },
+                        date = date,
+                        onDateChange = { date = it },
+                        hasDateEnabled = hasDateEnabled,
+                        onHasDateEnabledChange = { checked ->
+                            if (checked) {
+                                val targetDate = if (cachedDate.isNotBlank()) cachedDate else LocalDate.now().toString()
+                                date = targetDate
+                            } else {
+                                date = ""
+                            }
+                            hasDateEnabled = checked
+                        },
+                        selectedTypeUi = selectedTypeUi
                     )
-                }
 
-                EditTodoSubtasksSection(
-                    todo = todo,
-                    subtasks = subtasks,
-                    onSubtasksChange = { subtasks = it },
-                    editingSubtaskId = editingSubtaskId,
-                    onEditingSubtaskIdChange = { editingSubtaskId = it },
-                    parentCompleted = parentCompleted,
-                    onParentCompletedChange = { parentCompleted = it },
-                    parentCompletedAt = parentCompletedAt,
-                    onParentCompletedAtChange = { parentCompletedAt = it },
-                    context = LocalContext.current
-                )
+                    EditDetailSection("任务类型", when (selectedTypeUi) { TaskType.DAILY_REPEAT -> "每天重复"; TaskType.WEEKLY_CHECKIN -> "周打卡"; TaskType.MONTHLY_CHECKIN -> "月打卡"; else -> "普通待办" }) {
+                        EditTodoTypeSection(
+                            selectedTypeUi = selectedTypeUi,
+                            onTypeChange = { type ->
+                                selectedTypeUi = type
+                            }
+                        )
+
+                    }
+                    EditDetailSection("提醒", if (hasReminder) listOf(reminderDate, reminderTime).filter { it.isNotBlank() }.joinToString(" ") else "未设置") {
+                        EditTodoReminderSection(
+                            hasReminder = hasReminder,
+                            onHasReminderChange = { hasReminder = it },
+                            reminderDate = reminderDate,
+                            onReminderDateChange = { reminderDate = it },
+                            reminderTime = reminderTime,
+                            onReminderTimeChange = { reminderTime = it },
+                            reminderRepeatDaily = reminderRepeatDaily,
+                            onReminderRepeatDailyChange = { reminderRepeatDaily = it },
+                            isRecurring = selectedTypeUi != TaskType.NORMAL
+                        )
+
+                    }
+                    if (selectedTypeUi == TaskType.WEEKLY_CHECKIN || selectedTypeUi == TaskType.MONTHLY_CHECKIN) {
+                        EditDetailSection("打卡记录", "${completedDates.size} 次" + (targetCount?.let { " · 目标 $it 次" } ?: "")) {
+                            EditTodoCheckinSection(
+                                selectedTypeUi = selectedTypeUi,
+                                todo = todo,
+                                targetCount = targetCount,
+                                onTargetCountChange = { targetCount = it },
+                                completedDates = completedDates,
+                                onUpdateCompletedDates = onUpdateCompletedDates,
+                                date = date
+                            )
+                        }
+
+                    }
+                    EditDetailSection(if (subtasks.isEmpty()) "添加子步骤／备注" else "子步骤／备注", if (subtasks.isEmpty()) "" else "${subtasks.count { it.completed }}/${subtasks.size}", initiallyExpanded = subtasks.isNotEmpty()) {
+                        EditTodoSubtasksSection(
+                            todo = todo,
+                            subtasks = subtasks,
+                            onSubtasksChange = { subtasks = it },
+                            editingSubtaskId = editingSubtaskId,
+                            onEditingSubtaskIdChange = { editingSubtaskId = it },
+                            parentCompleted = parentCompleted,
+                            onParentCompletedChange = { parentCompleted = it },
+                            parentCompletedAt = parentCompletedAt,
+                            onParentCompletedAtChange = { parentCompletedAt = it },
+                            context = LocalContext.current
+                        )
+                    }
+                    LearningTaskRecords(viewModel, todo)
+                    EditDetailSection("标签", com.todo.app.data.model.Learning.label(learningLabel) ?: "未分类") {
+                        LearningLabelPicker(learningLabel, com.todo.app.data.model.Learning.availableLabels(learningTasks.values.toList())) { learningLabel = it }
+                    }
+                }
             }
         }
     }
@@ -360,28 +388,27 @@ private fun EditTodoHeader(
     onDelete: () -> Unit,
     onSave: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
-            }
-            Text("编辑待办", style = MaterialTheme.typography.titleLarge)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Filled.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.error)
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            IconButton(onClick = onSave) {
-                Icon(Icons.Filled.Check, contentDescription = "保存", tint = MaterialTheme.colorScheme.primary)
-            }
-        }
+    Text("编辑待办", style = MaterialTheme.typography.titleLarge, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(onClick = onBack, modifier = Modifier.weight(1f)) { Text("返回") }
+        TextButton(onClick = onDelete, modifier = Modifier.weight(1f)) { Text("删除", color = MaterialTheme.colorScheme.error) }
+        Button(onClick = onSave, modifier = Modifier.weight(1f)) { Text("保存") }
     }
-    Spacer(Modifier.height(16.dp))
+    androidx.compose.material3.HorizontalDivider()
+}
+
+@Composable
+internal fun EditDetailSection(title: String, summary: String, initiallyExpanded: Boolean = false, content: @Composable () -> Unit) {
+    var expanded by remember { mutableStateOf(initiallyExpanded) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Text(summary, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(if (expanded) "⌄" else "›", modifier = Modifier.padding(start = 8.dp))
+        }
+        if (expanded) { content(); Spacer(Modifier.height(10.dp)) }
+        androidx.compose.material3.HorizontalDivider()
+    }
 }
 
 @Composable
@@ -402,39 +429,29 @@ private fun EditTodoContentSection(
     )
 
     if (selectedTypeUi == TaskType.NORMAL) {
-        Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("设置截止日期", style = MaterialTheme.typography.bodyLarge)
-            Switch(
-                checked = hasDateEnabled,
-                onCheckedChange = onHasDateEnabledChange
-            )
-        }
-
-        if (hasDateEnabled) {
+        EditDetailSection("截止日期", if (hasDateEnabled) date.ifBlank { "待设置" } else "未设置") {
             Spacer(Modifier.height(8.dp))
-            AppDateInput(
-                value = date,
-                onValueChange = onDateChange,
-                label = "截止日期 (YYYY-MM-DD)",
-                modifier = Modifier.fillMaxWidth(),
-                trailingAction = {
-                    Button(
-                        onClick = {
-                            onDateChange(LocalDate.now().plusDays(1).toString())
-                        },
-                        modifier = Modifier.height(56.dp).padding(top = 6.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp)
-                    ) {
-                        Text("明天")
-                    }
-                }
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("设置截止日期", style = MaterialTheme.typography.bodyLarge)
+                Switch(
+                    checked = hasDateEnabled,
+                    onCheckedChange = onHasDateEnabledChange
+                )
+            }
+
+            if (hasDateEnabled) {
+                Spacer(Modifier.height(8.dp))
+                AppDateInput(
+                    value = date,
+                    onValueChange = onDateChange,
+                    label = "截止日期 (YYYY-MM-DD)",
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 
@@ -484,21 +501,21 @@ private fun EditTodoReminderSection(
 
     if (hasReminder) {
         Spacer(Modifier.height(6.dp))
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             AppDateInput(
                 value = reminderDate,
                 onValueChange = onReminderDateChange,
                 label = "提醒日期",
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.fillMaxWidth()
             )
             SegmentedTimeInput(
                 value = reminderTime,
                 onValueChange = onReminderTimeChange,
-                label = "提醒时间"
+                label = "提醒时间",
+                modifier = Modifier.fillMaxWidth()
             )
         }
         if (isRecurring) {
@@ -568,9 +585,9 @@ private fun EditTodoSubtasksSection(
     Spacer(Modifier.height(16.dp))
 
     if (parentCompleted && (todo.taskType == TaskType.NORMAL || todo.recurring == RecurringType.DAILY_REPEAT)) {
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             var dateText by remember(todo.id, parentCompleted, parentCompletedAt != null) {
                 if (parentCompletedAt != null) {
@@ -624,7 +641,7 @@ private fun EditTodoSubtasksSection(
                     updateCompletedAt(it, timeText)
                 },
                 label = "完成日期",
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.fillMaxWidth()
             )
 
             SegmentedTimeInput(
@@ -634,6 +651,7 @@ private fun EditTodoSubtasksSection(
                     updateCompletedAt(dateText, newTime)
                 },
                 label = "完成时间",
+                modifier = Modifier.fillMaxWidth(),
                 allowEmpty = true
             )
         }
@@ -687,29 +705,13 @@ private fun EditTodoSubtasksSection(
         )
     }
 
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text("子步骤/备注", style = MaterialTheme.typography.titleMedium)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = {
-                if (subtasks.isEmpty()) return@TextButton
-                onSubtasksChange(
-                    subtasks.sortedWith(
-                        compareBy<Subtask> { it.completed }
-                            .thenComparator { a, b ->
-                                if (a.completed && b.completed) {
-                                    val timeA = a.completedAt ?: ""
-                                    val timeB = b.completedAt ?: ""
-                                    timeB.compareTo(timeA)
-                                } else {
-                                    0
-                                }
-                            }
-                    )
-                )
-            }) { Text("排序") }
-
-            TextButton(onClick = { showCopyDialog = true }) { Text("复制") }
-        }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        TextButton(enabled = subtasks.isNotEmpty(), onClick = {
+            onSubtasksChange(subtasks.sortedWith(compareBy<Subtask> { it.completed }.thenComparator { a, b ->
+                if (a.completed && b.completed) (b.completedAt ?: "").compareTo(a.completedAt ?: "") else 0
+            }))
+        }) { Text("整理排序") }
+        TextButton(enabled = subtasks.isNotEmpty(), onClick = { showCopyDialog = true }) { Text("复制内容") }
     }
 
     val reorderState = rememberReorderableLazyListState(

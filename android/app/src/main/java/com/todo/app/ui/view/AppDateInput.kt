@@ -3,12 +3,13 @@ package com.todo.app.ui.view
 import android.app.DatePickerDialog
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import java.time.LocalDate
 
 /**
@@ -67,7 +68,7 @@ fun AppDateInput(
                 modifier = Modifier.weight(1f),
                 trailingIcon = {
                     IconButton(onClick = { showSystemDatePicker() }) {
-                        Text("📅", fontSize = 18.sp)
+                        Icon(Icons.Filled.DateRange, contentDescription = "选择${label ?: "日期"}", modifier = Modifier.size(22.dp))
                     }
                 }
             )
@@ -83,7 +84,7 @@ fun AppDateInput(
             modifier = modifier,
             trailingIcon = {
                 IconButton(onClick = { showSystemDatePicker() }) {
-                    Text("📅", fontSize = 18.sp)
+                    Icon(Icons.Filled.DateRange, contentDescription = "选择${label ?: "日期"}", modifier = Modifier.size(22.dp))
                 }
             }
         )

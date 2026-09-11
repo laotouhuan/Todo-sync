@@ -7,6 +7,9 @@ import androidx.security.crypto.MasterKey
 
 import kotlinx.serialization.encodeToString
 class ConfigManager(val context: Context) {
+    var statsShowTiming: Boolean
+        get() = prefs.getBoolean("stats_show_timing", false)
+        set(value) = prefs.edit().putBoolean("stats_show_timing", value).apply()
 
     companion object {
         const val DEFAULT_WEBDAV_URL = "https://dav.jianguoyun.com/dav/"

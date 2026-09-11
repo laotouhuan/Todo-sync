@@ -73,7 +73,7 @@ object MergeUtils {
             }
         }
 
-        return data.copy(todos = deduplicatedTodos)
+        return data.copy(todos = deduplicatedTodos.map { it.copy(label = Learning.label(it.label)) }, timeEntries = Learning.mergeTimes(data.timeEntries), dailyReviews = Learning.mergeReviews(data.dailyReviews))
     }
 
     private fun deduplicateDates(dates: List<String>): List<String> {
@@ -135,7 +135,9 @@ object MergeUtils {
             version = local.version,
             last_updated = nowIso(),
             todos = merged.values.sortedByDescending { it.createdAt },
-            reminderSettings = mergedSettings
+            reminderSettings = mergedSettings,
+            timeEntries = Learning.mergeTimes(local.timeEntries, cloud.timeEntries),
+            dailyReviews = Learning.mergeReviews(local.dailyReviews, cloud.dailyReviews)
         )
     }
 

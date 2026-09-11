@@ -1,3 +1,6 @@
+import { renderTimeline, bindClockTooltip } from './statsTimelineView.js';
+import { clockMinute, clockTooltipDateTime } from './statsTimeline.js';
+import { prepareClockEntry, playClockEntry } from './clockAnimation.js';
 import {
     formatDate, getISOWeekString,
     getTodayString, getTomorrowString, getThisWeekString, getLastWeekString,
@@ -9,6 +12,9 @@ import {
     categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade, generateUUID
 } from './dateUtils.js';
 
+import { normalizeLearningData, mergeLearningRecords, normalizeLabel } from './timeTracking.js';
+import { createLearningView } from './learningView.js';
+
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
@@ -16,7 +22,7 @@ let pendingAnimations = 0;
 
 // ====== State ======
 const appState = {
-    todoData: { version: 1, last_updated: new Date().toISOString(), todos: [] },
+    todoData: { version: 1, last_updated: new Date().toISOString(), todos: [], time_entries: [], daily_reviews: [] },
     saveVersion: 0, // 递增版本号，防止自身写入触发的文件变更重载
     currentView: 'list', // 'list' | 'stats'
     appConfig: {},
@@ -57,6 +63,28 @@ const appState = {
     collabLoading: false,                 // 是否正在拉取协作清单中
     collabError: null                     // 协作异常信息
 };
+
+const learningUI = createLearningView({ state: appState, commit: commitLearning,
+    redraw: () => render(), sync: async () => { await _saveQueue; await loadData(); }, toast: message => showToast(message),
+    exportFile: ({ filename, content }) => invoke('export_review_markdown', { filename, content }) });
+
+function commitLearning(change) {
+    const operation = _saveQueue.then(async () => {
+        normalizeLearningData(appState.todoData);
+        const previous = { time_entries: appState.todoData.time_entries, daily_reviews: appState.todoData.daily_reviews };
+        const next = structuredClone(appState.todoData);
+        change(next);
+        appState.todoData.time_entries = next.time_entries;
+        appState.todoData.daily_reviews = next.daily_reviews;
+        if (!await _doSaveData()) {
+            Object.assign(appState.todoData, previous);
+            throw new Error('保存失败，请重试');
+        }
+        _lastRenderedHash = ''; render(); learningUI.refresh();
+    });
+    _saveQueue = operation.catch(() => {});
+    return operation;
+}
 
 // 模块级拖拽状态（替代 window 全局属性）
 let _currentlyDraggedTodoId = null;
@@ -247,6 +275,7 @@ function applyTaskType(todo, taskType, targetCount) {
 }
 
 function migrateAndNormalize(todo) {
+    todo.label = normalizeLabel(todo.label);
     if (!todo) return todo;
     // 1. 旧版 recurring 迁移
     if (todo.recurring === 'daily') {
@@ -334,6 +363,8 @@ function todoDataContentSnapshot(data) {
     return {
         version: data?.version ?? 1,
         todos: data?.todos || [],
+        time_entries: data?.time_entries || [],
+        daily_reviews: data?.daily_reviews || [],
         reminder_settings: data?.reminder_settings || {
             updated_at: null,
             enabled: true,
@@ -366,6 +397,8 @@ function hasTodoDataContentChanges(first, second) {
 }
 
 function mergeTodoData(localData, cloudData) {
+    if (localData) normalizeLearningData(localData);
+    if (cloudData) normalizeLearningData(cloudData);
     if (!localData || !localData.todos) {
         if (cloudData && cloudData.todos) {
             cloudData.todos.forEach(migrateAndNormalize);
@@ -461,7 +494,9 @@ function mergeTodoData(localData, cloudData) {
         version: localData.version || 1,
         last_updated: new Date().toISOString(),
         todos: mergedTodos,
-        reminder_settings: mergedReminderSettings
+        reminder_settings: mergedReminderSettings,
+        time_entries: mergeLearningRecords(localData.time_entries, cloudData.time_entries),
+        daily_reviews: mergeLearningRecords(localData.daily_reviews, cloudData.daily_reviews, 'date')
     };
     return {
         data: mergedData,
@@ -522,7 +557,7 @@ async function loadData() {
         try { localData = JSON.parse(localJsonStr); } catch (e) {}
         // 乐观渲染：无论何种同步模式，先用本地缓存立即呈现界面，避免等待网络时白屏
         if (localData && localData.todos) {
-            appState.todoData = localData;
+            appState.todoData = normalizeLearningData(localData);
             appState.todoData.todos.forEach(migrateAndNormalize);
         } else if (!appState.todoData || !appState.todoData.todos) {
             appState.todoData = { version: 1, last_updated: new Date().toISOString(), todos: [] };
@@ -592,6 +627,7 @@ async function loadData() {
 
         if (statusEl && !statusEl.classList.contains('error')) {
             setTimeout(() => setSyncStatus(SyncState.IDLE), 500);
+        return true;
         }
     } catch (e) {
         console.error("Failed to load data:", e);
@@ -1153,6 +1189,12 @@ async function _doSaveData() {
     try {
         setSyncStatus(SyncState.SYNCING);
         // 执行物理清理，将删除超 7 天的旧任务彻底抹除，维持 JSON 大小
+        normalizeLearningData(appState.todoData);
+        const deletionTime = new Date().toISOString();
+        for (const entry of appState.todoData.time_entries) {
+            if (!entry.deleted && !entry.ended_at && entry.task_ref.source_type === 'personal' && appState.todoData.todos.some(t => t.id === entry.task_ref.todo_id && t.deleted))
+                entry.ended_at = entry.updated_at = deletionTime;
+        }
         purgeOldDeletedTodos();
         
         appState.todoData.last_updated = new Date().toISOString();
@@ -1167,14 +1209,16 @@ async function _doSaveData() {
                 console.error("WebDAV push failed:", e);
                 showToast("推送至云端失败: " + e);
                 setSyncStatus(SyncState.ERROR);
-                return;
+                return true;
             }
         }
 
         setTimeout(() => setSyncStatus(SyncState.IDLE), 500);
+        return true;
     } catch (e) {
         console.error("Failed to save data:", e);
         setSyncStatus(SyncState.ERROR);
+        return false;
     }
 }
 
@@ -1529,6 +1573,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
         li.dataset.id = todo.id;
     }
 
+    learningUI.attachTimer(li, todo);
     return li;
 }
 
@@ -2023,30 +2068,34 @@ async function saveEditModal() {
         return;
     }
 
-    const index = appState.todoData.todos.findIndex(t => t.id === appState.currentEditingTodo.id);
+    const source = { ...appState.activeSource };
+    const sourceData = source.type === 'personal' ? appState.todoData : appState.collabData;
+    const index = sourceData.todos.findIndex(t => t.id === appState.currentEditingTodo.id);
     if (index === -1) {
         closeEditModal();
         return;
     }
 
+    const draft = structuredClone(sourceData.todos[index]);
     try {
         const { nickname } = extractCollaborator(appState.currentEditingTodo.content);
-        appState.todoData.todos[index].content = nickname ? `${newContent} (由 [${nickname}] 添加)` : newContent;
+        draft.content = nickname ? `${newContent} (由 [${nickname}] 添加)` : newContent;
 
+        draft.label = normalizeLabel(document.getElementById('edit-learning-label')?.value);
         const taskTypeSelect = document.getElementById('edit-task-type');
         if (taskTypeSelect) {
             const taskTypeVal = taskTypeSelect.value;
             if (taskTypeVal === 'daily_repeat') {
-                appState.todoData.todos[index].task_type = 'normal';
-                appState.todoData.todos[index].recurring = 'daily_repeat';
-                appState.todoData.todos[index].time = null;
-                const existingDate = appState.todoData.todos[index].date;
+                draft.task_type = 'normal';
+                draft.recurring = 'daily_repeat';
+                draft.time = null;
+                const existingDate = draft.date;
                 if (!existingDate || isWeekDate(existingDate) || isMonthDate(existingDate)) {
-                    appState.todoData.todos[index].date = getTodayString();
+                    draft.date = getTodayString();
                 }
             } else {
-                appState.todoData.todos[index].task_type = taskTypeVal;
-                appState.todoData.todos[index].recurring = 'none';
+                draft.task_type = taskTypeVal;
+                draft.recurring = 'none';
 
                 if (taskTypeVal === 'normal') {
                     const hasDateSwitch = document.getElementById('edit-has-date-switch');
@@ -2062,25 +2111,25 @@ async function saveEditModal() {
                                 dateVal = appState.currentEditingTodo.date || null;
                                 dateInput.value = dateVal || '';
                             } else if (isWeek) {
-                                appState.todoData.todos[index].task_type = 'weekly_checkin';
+                                draft.task_type = 'weekly_checkin';
                             } else if (isMonth) {
-                                appState.todoData.todos[index].task_type = 'monthly_checkin';
+                                draft.task_type = 'monthly_checkin';
                             }
                         }
-                        appState.todoData.todos[index].date = dateVal;
+                        draft.date = dateVal;
                     } else {
-                        appState.todoData.todos[index].date = null;
+                        draft.date = null;
                     }
-                    appState.todoData.todos[index].time = null;
+                    draft.time = null;
                 } else {
-                    appState.todoData.todos[index].time = null;
+                    draft.time = null;
                     if (taskTypeVal === 'weekly_checkin') {
-                        if (!isWeekDate(appState.todoData.todos[index].date)) {
-                            appState.todoData.todos[index].date = getThisWeekString();
+                        if (!isWeekDate(draft.date)) {
+                            draft.date = getThisWeekString();
                         }
                     } else if (taskTypeVal === 'monthly_checkin') {
-                        if (!isMonthDate(appState.todoData.todos[index].date)) {
-                            appState.todoData.todos[index].date = getThisMonthString();
+                        if (!isMonthDate(draft.date)) {
+                            draft.date = getThisMonthString();
                         }
                     }
                 }
@@ -2090,19 +2139,19 @@ async function saveEditModal() {
         const targetCountInput = document.getElementById('edit-target-count');
         if (targetCountInput) {
             const val = parseInt(targetCountInput.value, 10);
-            appState.todoData.todos[index].target_count = (isNaN(val) || val <= 0) ? null : val;
+            draft.target_count = (isNaN(val) || val <= 0) ? null : val;
         }
 
         const completedAtRow = document.getElementById('edit-completed-at-row');
         const compDateInput = document.getElementById('edit-completed-date');
         const compTimeInput = document.getElementById('edit-completed-time');
-        if (completedAtRow && completedAtRow.style.display !== 'none' && appState.todoData.todos[index].completed && compDateInput && compTimeInput) {
+        if (completedAtRow && completedAtRow.style.display !== 'none' && draft.completed && compDateInput && compTimeInput) {
             const compDateVal = compDateInput.value;
             const compTimeVal = compTimeInput.value;
             if (compDateVal) {
                 const completedAt = combineLocalDateAndTimeToISO(compDateVal, compTimeVal);
                 if (completedAt) {
-                    appState.todoData.todos[index].completed_at = completedAt;
+                    draft.completed_at = completedAt;
                 }
             }
         }
@@ -2115,41 +2164,51 @@ async function saveEditModal() {
             const rDate = rDateEl ? (rDateEl.value || null) : null;
             const rTime = rTimeEl && rTimeEl.value ? rTimeEl.value : '09:00';
             const rRepeat = rRepeatEl ? rRepeatEl.checked : false;
-            appState.todoData.todos[index].reminder = {
+            draft.reminder = {
                 reminder_date: rDate,
                 reminder_time: rTime,
                 repeat_daily: rRepeat
             };
         } else {
-            appState.todoData.todos[index].reminder = null;
+            draft.reminder = null;
         }
 
-        appState.todoData.todos[index].subtasks = deepClone(appState.currentEditingSubtasks);
+        draft.subtasks = deepClone(appState.currentEditingSubtasks);
 
         if (appState.currentEditingCompletedDates) {
-            appState.todoData.todos[index].completed_dates = [...appState.currentEditingCompletedDates];
-            if (appState.todoData.todos[index].target_count) {
-                const currentPeriodCount = appState.todoData.todos[index].task_type === 'weekly_checkin'
-                    ? getWeeklyCompletedCount(appState.todoData.todos[index])
-                    : getMonthlyCompletedCount(appState.todoData.todos[index]);
-                appState.todoData.todos[index].completed = currentPeriodCount >= appState.todoData.todos[index].target_count;
-                appState.todoData.todos[index].completed_at = appState.todoData.todos[index].completed ? new Date().toISOString() : null;
+            draft.completed_dates = [...appState.currentEditingCompletedDates];
+            if (draft.target_count) {
+                const currentPeriodCount = draft.task_type === 'weekly_checkin'
+                    ? getWeeklyCompletedCount(draft)
+                    : getMonthlyCompletedCount(draft);
+                draft.completed = currentPeriodCount >= draft.target_count;
+                draft.completed_at = draft.completed ? new Date().toISOString() : null;
             }
         }
 
-        const allCompleted = appState.todoData.todos[index].subtasks.length > 0 && appState.todoData.todos[index].subtasks.every(s => s.completed);
-        if (allCompleted && !appState.todoData.todos[index].completed) {
-            appState.todoData.todos[index].completed = true;
-            appState.todoData.todos[index].completed_at = new Date().toISOString();
+        const allCompleted = draft.subtasks.length > 0 && draft.subtasks.every(s => s.completed);
+        if (allCompleted && !draft.completed) {
+            draft.completed = true;
+            draft.completed_at = new Date().toISOString();
         }
 
-        appState.todoData.todos[index].updated_at = new Date().toISOString();
+        draft.updated_at = new Date().toISOString();
 
-        closeEditModal();
-        render();
-        await saveData();
+        if (source.type === 'collaboration') {
+            await invoke('write_collaboration_todo', { collabId: source.id, todoJson: JSON.stringify(draft) });
+            sourceData.todos[index] = draft;
+        } else {
+            const operation = _saveQueue.then(async () => {
+                const previous = appState.todoData.todos;
+                appState.todoData.todos = previous.map(t => t.id === draft.id ? draft : t);
+                if (!await _doSaveData()) { appState.todoData.todos = previous; throw new Error('保存失败，请重试'); }
+            });
+            _saveQueue = operation.catch(() => {}); await operation;
+        }
+        closeEditModal(); _lastRenderedHash = ''; render();
     } catch (e) {
         console.error("Save edit modal failed:", e);
+        showToast(e.message || String(e));
     }
 }
 
@@ -2180,7 +2239,8 @@ function updateEditModalFields(taskTypeVal) {
 
 function openEditModal(todo) {
     if (!todo) return;
-    appState.currentEditingTodo = todo;
+    appState.currentEditingTodo = structuredClone(todo);
+    learningUI.editTask(todo);
 
     const modal = document.getElementById('edit-modal');
     if (!modal) return;
@@ -2277,6 +2337,7 @@ function openEditModal(todo) {
         console.error("Error populating edit modal:", e);
     }
 
+    learningUI.compactEditor(true);
     modal.classList.add('active');
     const input = document.getElementById('edit-content');
     if (input) setTimeout(() => input.focus(), 80);
@@ -2301,6 +2362,7 @@ function closeEditModal() {
 // ====== Render Stats ======
 // ====== Render Stats ======
 function renderStats(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
+    learningUI.renderStats();
     const insightsEl = document.getElementById('stats-insights');
     const healthEl = document.getElementById('stats-health');
 
@@ -2593,7 +2655,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
                     }
                     if (tooltipEl) {
                         tooltipEl.style.display = 'block';
-                        tooltipEl.innerHTML = `<strong>${item.content}</strong><br/>完成日期: ${item.date}`;
+                        tooltipEl.innerHTML = `<strong>${escapeHtml(item.content)}</strong><br/>完成日期: ${clockTooltipDateTime(item.date).date}`;
                         const cardRect = document.getElementById('time-distribution').getBoundingClientRect();
                         let tooltipX = e.clientX - cardRect.left + 12;
                         if (index % 2 === 1) {
@@ -2843,15 +2905,14 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
             
             const hour = dateObj.getHours();
             const minute = dateObj.getMinutes();
-            const fracHour = hour + minute / 60.0;
+            const fracHour = clockMinute(timeStr) / 60;
             const angle = fracHour * 15.0; // 360 / 24 = 15 deg per hour
             
             const hash = (t.id + index).split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-            const jitterR = ((hash % 5) - 2) * 5.5;
-            const activeR = r + jitterR;
-            const jitterAngle = ((hash % 7) - 3) * 1.5;
+            // 径向分散重叠点，时间角度严格对应原始时间。
+            const activeR = 62 + (hash % 3) * 2;
             
-            const thetaRad = (angle + jitterAngle) * Math.PI / 180;
+            const thetaRad = angle * Math.PI / 180;
             const x = cx + activeR * Math.sin(thetaRad);
             const y = cy - activeR * Math.cos(thetaRad);
             
@@ -2914,50 +2975,12 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
             shapeEl.setAttribute('stroke-width', strokeWidth);
             shapeEl.setAttribute('opacity', opacityVal);
             shapeEl.setAttribute('class', 'task-dot efficiency-dot');
-            shapeEl.style.setProperty('--dot-delay', `${(fracHour / 24) * 0.8}s`);
+            prepareClockEntry(shapeEl, clockMinute(timeStr));
             
             const pad = (n) => String(n).padStart(2, '0');
             const displayTime = `${pad(hour)}:${pad(minute)}`;
             
-            shapeEl.addEventListener('mouseover', (e) => {
-                shapeEl.style.stroke = color;
-                shapeEl.style.strokeWidth = `${(strokeWidth + 2.5).toFixed(1)}px`;
-                shapeEl.style.filter = `drop-shadow(0 0 3px rgba(0,0,0,0.9)) drop-shadow(0 0 6px ${color})`;
-                shapeEl.style.opacity = '1';
-                if (tooltipEl) {
-                    tooltipEl.style.display = 'block';
-                    tooltipEl.innerHTML = `<strong>${t.content}</strong><br/>完成日期: ${timeStr.substring(0, 10)}<br/>打卡时间: ${displayTime}`;
-                    const cardRect = document.getElementById('time-distribution').getBoundingClientRect();
-                    let tooltipX = e.clientX - cardRect.left + 12;
-                    if (tooltipX + tooltipEl.offsetWidth > cardRect.width - 10) {
-                        tooltipX = e.clientX - cardRect.left - tooltipEl.offsetWidth - 12;
-                    }
-                    const tooltipY = e.clientY - cardRect.top + 12;
-                    tooltipEl.style.left = `${Math.max(8, tooltipX)}px`;
-                    tooltipEl.style.top = `${Math.max(8, tooltipY)}px`;
-                }
-            });
-            
-            shapeEl.addEventListener('mousemove', (e) => {
-                if (tooltipEl && tooltipEl.style.display === 'block') {
-                    const cardRect = document.getElementById('time-distribution').getBoundingClientRect();
-                    let tooltipX = e.clientX - cardRect.left + 12;
-                    if (tooltipX + tooltipEl.offsetWidth > cardRect.width - 10) {
-                        tooltipX = e.clientX - cardRect.left - tooltipEl.offsetWidth - 12;
-                    }
-                    const tooltipY = e.clientY - cardRect.top + 12;
-                    tooltipEl.style.left = `${Math.max(8, tooltipX)}px`;
-                    tooltipEl.style.top = `${Math.max(8, tooltipY)}px`;
-                }
-            });
-            
-            shapeEl.addEventListener('mouseout', () => {
-                shapeEl.style.stroke = '#ffffff';
-                shapeEl.style.strokeWidth = `${strokeWidth}px`;
-                shapeEl.style.filter = 'none';
-                shapeEl.style.opacity = opacityVal;
-                if (tooltipEl) tooltipEl.style.display = 'none';
-            });
+            bindClockTooltip(shapeEl, t.content, [`完成日期: ${clockTooltipDateTime(timeStr).date}`, `打卡时间: ${displayTime}`], color, '#ffffff', strokeWidth, opacityVal);
             
             shapeEl.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -2969,20 +2992,12 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         });
 
         svgEl.appendChild(clockGroup);
-        // Request animation frames to guarantee initial state is painted before triggering transition
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                clockGroup.classList.add('play-animation');
-                setTimeout(() => {
-                    if (clockGroup) {
-                        clockGroup.querySelectorAll('.efficiency-dot').forEach(el => {
-                            el.style.removeProperty('--dot-delay');
-                        });
-                    }
-                }, 1200);
-            });
-        });
+        playClockEntry(clockGroup);
     }
+
+    renderTimeline({ svgEl: document.getElementById('efficiency-clock-svg'), todos: activeTodos,
+        entries: learningUI.resolvedEntries(), source: appState.activeSource, period: appState.statsPeriod,
+        target: appState.statsTargetDate, filters: appState.statsFilters, openTodo: openEditModal, openRecords: learningUI.showRecords });
 
     let displayTodos = periodTodos;
     displayTodos.sort(sortFunc);
@@ -3418,7 +3433,8 @@ function render() {
         appState.collabLoading ? 'L' : 'D',
         appState.collabError || ''
     ].join('|');
-    const _hash = getActiveTodos().map(t => `${t.id}:${t.updated_at}:${t.completed}`).join('|') + '|' + uiStateHash;
+    learningUI.refresh();
+    const _hash = getActiveTodos().map(t => `${t.id}:${t.updated_at}:${t.completed}`).join('|') + '|' + uiStateHash + '|' + JSON.stringify([appState.todoData.time_entries, appState.todoData.daily_reviews]);
     if (_hash === _lastRenderedHash) return;
     _lastRenderedHash = _hash;
 
@@ -3835,6 +3851,7 @@ function closeImportModal() {
 }
 
 function initApp() {
+    learningUI.install();
     // 初始化 DOM 元素
     listEl = document.getElementById('todo-list');
     formEl = document.getElementById('add-form');
@@ -4823,6 +4840,7 @@ function initApp() {
                 const newTodo = createTodo(orig.content, targetDateStr);
                 newTodo.task_type = orig.task_type;
                 newTodo.target_count = orig.target_count || null;
+                newTodo.label = orig.label || null;
                 newTodo.time = orig.time || null;
                 newTodo.recurring = orig.recurring || 'none';
                 newTodo.order = nowMs - orderOffset * 1000;
@@ -4954,21 +4972,6 @@ function initApp() {
                 await saveData();
             }
             if (deleteConfirmModalEl) deleteConfirmModalEl.classList.remove('active');
-            closeEditModal();
-        });
-    }
-
-    const modalTomorrowBtn = document.getElementById('modal-tomorrow-btn');
-    if (modalTomorrowBtn) {
-        modalTomorrowBtn.addEventListener('click', async () => {
-            if (!appState.currentEditingTodo) return;
-            const index = appState.todoData.todos.findIndex(t => t.id === appState.currentEditingTodo.id);
-            if (index !== -1) {
-                appState.todoData.todos[index].date = getTomorrowString();
-                appState.todoData.todos[index].updated_at = new Date().toISOString();
-                render();
-                await saveData();
-            }
             closeEditModal();
         });
     }

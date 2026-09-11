@@ -1,10 +1,8 @@
 package com.todo.app.ui.view
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -47,6 +45,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import com.todo.app.data.model.Todo
+import com.todo.app.data.model.Learning
+import com.todo.app.data.model.StatsTimeline
 import com.todo.app.data.model.TodoComparator
 import com.todo.app.data.model.TaskType
 import com.todo.app.data.model.calcTaskAgeDays
@@ -130,7 +130,7 @@ private fun MakeupIcon(shape: String, color: Color, dotRadius: androidx.compose.
                         val py1 = py + Math.sin(rot).toFloat() * outerRadius
                         if (i == 0) moveTo(px1, py1) else lineTo(px1, py1)
                         rot += step
-                        
+
                         val px2 = px + Math.cos(rot).toFloat() * innerRadius
                         val py2 = py + Math.sin(rot).toFloat() * innerRadius
                         lineTo(px2, py2)
@@ -169,10 +169,11 @@ fun StatsView(viewModel: TodoViewModel) {
 
     showEditDialogFor?.let { todo ->
         EditTodoDialog(
+            viewModel = viewModel,
             todo = todo,
             onDismiss = { showEditDialogFor = null },
             onConfirm = { updated -> 
-                viewModel.updateTodo(updated)
+                viewModel.saveEditedTodo(updated)
                 showEditDialogFor = null
             },
             onDelete = {
@@ -190,6 +191,8 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     var period by remember { mutableStateOf("day") }
     var targetDate by remember { mutableStateOf(LocalDate.now()) }
 
+    var showTimingPreference by remember { mutableStateOf(viewModel.configManager.statsShowTiming) }
+    val showTiming = period == "day" || showTimingPreference
     var showTaskList by remember { mutableStateOf(false) }
     var expandedFilterMenu by remember { mutableStateOf(false) }
     var checkedFilters by remember { mutableStateOf(setOf("normal", "daily", "weekly", "monthly")) }
@@ -209,7 +212,21 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
             val isWeekly = t.taskType == TaskType.WEEKLY_CHECKIN
             val isMonthly = t.taskType == TaskType.MONTHLY_CHECKIN
             val isNormal = t.taskType == TaskType.NORMAL && t.recurring != "daily_repeat"
-            
+
+            (isNormal && checkedFilters.contains("normal")) ||
+            (isDaily && checkedFilters.contains("daily")) ||
+            (isWeekly && checkedFilters.contains("weekly")) ||
+            (isMonthly && checkedFilters.contains("monthly"))
+        }
+    }
+
+    val timelineTodos = remember(todos, checkedFilters) {
+        todos.filter { t ->
+            val isDaily = t.recurring == "daily_repeat"
+            val isWeekly = t.taskType == TaskType.WEEKLY_CHECKIN
+            val isMonthly = t.taskType == TaskType.MONTHLY_CHECKIN
+            val isNormal = t.taskType == TaskType.NORMAL && t.recurring != "daily_repeat"
+
             (isNormal && checkedFilters.contains("normal")) ||
             (isDaily && checkedFilters.contains("daily")) ||
             (isWeekly && checkedFilters.contains("weekly")) ||
@@ -242,30 +259,31 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
         val list = mutableListOf<PlottedDot>()
         val cx = with(density) { 145.dp.toPx() }
         val cy = with(density) { 130.dp.toPx() }
-        val r = with(density) { 75.dp.toPx() }
-        
+
         timedCompletionEvents.forEachIndexed { index, event ->
             val t = event.todo
             val timeStr = event.completedAt
             val hm = parseTimeToHourMinute(timeStr)
             if (hm != null) {
                 val (hour, minute) = hm
-                val fracHour = hour + minute / 60.0
+                val preciseMinute = Learning.instant(timeStr)?.let { StatsTimeline.clockMinute(it) }
+                    ?: (hour * 60.0 + minute)
+                val fracHour = preciseMinute / 60.0
                 val angle = fracHour * 15.0
-                
+
                 val hash = (t.id + index.toString()).hashCode()
-                val jitterR = ((hash % 5) - 2) * with(density) { 3.dp.toPx() }
-                val activeR = r + jitterR
-                val jitterAngle = ((hash % 7) - 3) * 1.5
-                
-                val thetaRad = Math.toRadians(angle + jitterAngle)
+                // 只沿半径分散重叠点，不改变时间先后顺序。
+                val activeR = with(density) { (57 + Math.floorMod(hash, 3) * 2).dp.toPx() }
+
+                val thetaRad = Math.toRadians(angle)
                 val px = cx + activeR * Math.sin(thetaRad).toFloat()
                 val py = cy - activeR * Math.cos(thetaRad).toFloat()
-                
+
                 val visualStyle = t.statsVisualStyle()
                 val pad = { n: Int -> n.toString().padStart(2, '0') }
-                val dateLabel = timeStr.take(10)
-                list.add(PlottedDot(t, dateLabel, "${pad(hour)}:${pad(minute)}", px, py, visualStyle.color, visualStyle.shape))
+                val dateLabel = Learning.instant(timeStr)?.atZone(ZoneId.systemDefault())?.toLocalDate()?.toString()?.drop(5)
+                    ?: timeStr.take(10).drop(5)
+                list.add(PlottedDot(t, dateLabel, "${pad(hour)}:${pad(minute)}", px, py, visualStyle.color, visualStyle.shape, preciseMinute))
             }
         }
         list
@@ -402,14 +420,14 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                         else -> targetDate.minusMonths(1)
                     }
                 }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Prev") }
-                
+
                 val label = when (period) {
                     "day" -> targetDate.toString()
                     "week" -> "${targetDate.get(IsoFields.WEEK_BASED_YEAR)}年 第${targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)}周"
                     else -> "${targetDate.year}年 ${targetDate.monthValue}月"
                 }
                 Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
-                
+
                 IconButton(onClick = {
                     targetDate = when (period) {
                         "day" -> targetDate.plusDays(1)
@@ -479,12 +497,15 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                 colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Text(insightText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    val sweepProgress = remember { Animatable(0f) }
-                    LaunchedEffect(period, targetDate, activeSource) {
-                        sweepProgress.snapTo(0f)
-                        sweepProgress.animateTo(1f, animationSpec = tween(durationMillis = 1000, easing = LinearEasing))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("完成时间分布", style = MaterialTheme.typography.titleMedium)
+                        if (period != "day") TextButton(onClick = {
+                            showTimingPreference = !showTimingPreference
+                            viewModel.configManager.statsShowTiming = showTimingPreference
+                        }) { Text(if (showTimingPreference) "隐藏计时" else "显示计时", color = if (showTimingPreference) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
+                    Text(insightText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    val sweepProgress = rememberClockSweep(period, targetDate, activeSource)
 
                     // Clock drawing container
                     Box(
@@ -543,7 +564,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                             val cy = size.height / 2
                             val rPx = 75.dp.toPx()
                             val strokeWidthPx = 10.dp.toPx()
-                            
+
                             // Background track
                             drawCircle(
                                 color = Color.White.copy(alpha = 0.05f),
@@ -551,7 +572,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                 center = Offset(cx, cy),
                                 style = Stroke(width = strokeWidthPx)
                             )
-                            
+
                             val currentSweep = sweepProgress.value * 360f
 
                             // Q1 (Top-Right): 0-6 (Night)
@@ -565,7 +586,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                 style = Stroke(width = strokeWidthPx),
                                 alpha = if (totalSlots > 0) (if (nightCount > 0) 0.95f else 0.2f) else 0.2f
                             )
-                            
+
                             // Q2 (Bottom-Right): 6-12 (Morning)
                             drawArc(
                                 color = Color(0xFFF59E0B),
@@ -577,7 +598,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                 style = Stroke(width = strokeWidthPx),
                                 alpha = if (totalSlots > 0) (if (morningCount > 0) 0.95f else 0.2f) else 0.2f
                             )
-                            
+
                             // Q3 (Bottom-Left): 12-18 (Afternoon)
                             drawArc(
                                 color = Color(0xFF10B981),
@@ -589,7 +610,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                 style = Stroke(width = strokeWidthPx),
                                 alpha = if (totalSlots > 0) (if (afternoonCount > 0) 0.95f else 0.2f) else 0.2f
                             )
-                            
+
                             // Q4 (Top-Left): 18-24 (Evening)
                             drawArc(
                                 color = Color(0xFF6366F1),
@@ -615,25 +636,25 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                 end = Offset(cx, cy + rPx + 15.dp.toPx()),
                                 strokeWidth = 1.dp.toPx()
                             )
-                            
+
                             // Clock text labels
                             val paint = android.graphics.Paint().apply {
                                 textSize = 11.5.sp.toPx()
                                 typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
                             }
-                            
+
                             paint.color = Color(0xFF3B82F6).toArgb()
                             paint.textAlign = android.graphics.Paint.Align.RIGHT
                             drawContext.canvas.nativeCanvas.drawText("深夜 (0-6): $nightPct%", 282.dp.toPx(), 25.dp.toPx(), paint)
-                            
+
                             paint.color = Color(0xFFF59E0B).toArgb()
                             paint.textAlign = android.graphics.Paint.Align.RIGHT
                             drawContext.canvas.nativeCanvas.drawText("上午 (6-12): $morningPct%", 282.dp.toPx(), 245.dp.toPx(), paint)
-                            
+
                             paint.color = Color(0xFF10B981).toArgb()
                             paint.textAlign = android.graphics.Paint.Align.LEFT
                             drawContext.canvas.nativeCanvas.drawText("下午 (12-18): $afternoonPct%", 8.dp.toPx(), 245.dp.toPx(), paint)
-                            
+
                             paint.color = Color(0xFF6366F1).toArgb()
                             paint.textAlign = android.graphics.Paint.Align.LEFT
                             drawContext.canvas.nativeCanvas.drawText("晚上 (18-24): $eveningPct%", 8.dp.toPx(), 25.dp.toPx(), paint)
@@ -651,17 +672,11 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                             }
 
                             plottedDots.forEach { dot ->
-                                val parts = dot.timeLabel.split(":")
-                                val hour = parts.getOrNull(0)?.toIntOrNull() ?: 0
-                                val minute = parts.getOrNull(1)?.toIntOrNull() ?: 0
-                                val dotAngle = (hour + minute / 60f) * 15f
-
-                                val diff = currentSweep - dotAngle
-                                if (diff >= 0f) {
-                                    val dotAlpha = minOf(1f, diff / 15f)
+                                val dotAlpha = clockEntryAlpha(sweepProgress.value, dot.minute)
+                                if (dotAlpha > 0f) {
                                     val px = dot.x
                                     val py = dot.y
-                                    
+
                                     when (dot.shape) {
                                         "circle" -> {
                                             drawCircle(
@@ -711,7 +726,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                                     val py1 = py + Math.sin(rot).toFloat() * outerRadius
                                                     if (i == 0) moveTo(px1, py1) else lineTo(px1, py1)
                                                     rot += step
-                                                    
+
                                                     val px2 = px + Math.cos(rot).toFloat() * innerRadius
                                                     val py2 = py + Math.sin(rot).toFloat() * innerRadius
                                                     lineTo(px2, py2)
@@ -726,7 +741,19 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                 }
                             }
                         }
-                        
+
+                        StatsTimelineLayer(viewModel, timelineTodos, period, targetDate, showTiming, onEditTodo,
+                            sweepProgress = { sweepProgress.value },
+                            fallbackTap = { offset ->
+                                val clicked = plottedDots.minByOrNull { (Offset(it.x, it.y) - offset).getDistance() }
+                                if (clicked != null && (Offset(clicked.x, clicked.y) - offset).getDistance() <= with(density) { 24.dp.toPx() }) onEditTodo(clicked.todo)
+                                else tooltipTodo = null
+                            }, fallbackLongPress = { offset ->
+                                val clicked = plottedDots.minByOrNull { (Offset(it.x, it.y) - offset).getDistance() }
+                                if (clicked != null && (Offset(clicked.x, clicked.y) - offset).getDistance() <= with(density) { 24.dp.toPx() }) {
+                                    tooltipTodo = clicked.todo; tooltipDate = clicked.dateLabel; tooltipTime = clicked.timeLabel; tooltipOffset = offset
+                                }
+                            })
                         // Tooltip Pop-up overlay for Canvas dots
                         tooltipTodo?.let { todo ->
                             Popup(
@@ -782,7 +809,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                         dotRadius = dotRadiusDp,
                                         modifier = Modifier.size(22.dp)
                                     )
-                                    
+
                                     if (showTooltip) {
                                         Popup(
                                             alignment = Alignment.TopStart,
@@ -833,7 +860,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                         dotRadius = dotRadiusDp,
                                         modifier = Modifier.size(22.dp)
                                     )
-                                    
+
                                     if (showTooltip) {
                                         Popup(
                                             alignment = Alignment.TopEnd,
@@ -857,6 +884,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                         }
                     }
 
+                    TimelineLegend(viewModel, timelineTodos, period, targetDate, showTiming, onEditTodo)
                     if (makeupCheckinCount > 0) {
                         val periodText = when (period) {
                             "day" -> "本日"
@@ -875,6 +903,8 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                 }
             }
         }
+
+        item { LearningInsights(viewModel, period, targetDate) }
 
         // Toggle list button
         item {
@@ -956,7 +986,7 @@ fun HealthContent(viewModel: TodoViewModel) {
     val thresholdDate = nowTime.minusDays(throughputDays.toLong())
     var addedCount = 0
     var completedCount = 0
-    
+
     activeTodos.forEach { t ->
         val createdDateTime = try {
             OffsetDateTime.parse(t.createdAt)
@@ -1304,7 +1334,8 @@ private data class PlottedDot(
     val x: Float,
     val y: Float,
     val color: Color,
-    val shape: String
+    val shape: String,
+    val minute: Double
 )
 
 @Composable
@@ -1384,4 +1415,3 @@ private val FilterListIcon: ImageVector
             close()
         }
     }.build()
-

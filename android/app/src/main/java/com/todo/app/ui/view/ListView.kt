@@ -836,10 +836,11 @@ fun ClassicListView(viewModel: TodoViewModel) {
         }
 
         EditTodoDialog(
+            viewModel = viewModel,
             todo = todo,
             onDismiss = { showEditDialogFor = null },
             onConfirm = { updated ->
-                viewModel.updateTodo(updated)
+                viewModel.saveEditedTodo(updated)
                 showEditDialogFor = null
             },
             onDelete = {
@@ -1219,6 +1220,7 @@ fun TodoItemRow(
                             }
                         }
                     }
+                    LearningTimer(todo, viewModel)
                 }
 
                 if (expanded && todo.subtasks.isNotEmpty()) {

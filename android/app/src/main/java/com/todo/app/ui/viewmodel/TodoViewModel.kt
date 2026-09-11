@@ -83,9 +83,11 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         _activeSource.value = ActiveSource.Personal
         _collabData.value = null
         _collabError.value = null
+        _collabLoading.value = false
     }
 
     fun switchToCollaboration(collab: com.todo.app.data.model.CollaborationSource) {
+        _collabData.value = null
         _activeSource.value = ActiveSource.Collaboration(collab)
         loadCollabData(collab)
     }
@@ -95,8 +97,9 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
             _collabLoading.value = true
             _collabError.value = null
             val result = repository.readCollaborationTodos(collab)
+            if ((_activeSource.value as? ActiveSource.Collaboration)?.collab?.id != collab.id) return@launch
             if (result.isSuccess) {
-                _collabData.value = result.getOrNull()?.todos?.filter { !it.deleted }
+                _collabData.value = result.getOrNull()?.todos
             } else {
                 _collabData.value = null
                 val err = result.exceptionOrNull()?.message ?: "未知错误"
@@ -173,7 +176,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     ) { personalList, activeSrc, collabList ->
         when (activeSrc) {
             is ActiveSource.Personal -> personalList
-            is ActiveSource.Collaboration -> collabList ?: emptyList()
+            is ActiveSource.Collaboration -> collabList?.filterNot { it.deleted } ?: emptyList()
         }
     }.stateIn(
         scope = viewModelScope,
@@ -297,6 +300,30 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     init {
         // 启动时自动同步云端
         syncWithCloud()
+    }
+
+    fun learningReference(todo: Todo): com.todo.app.data.model.TaskReference {
+        val source = activeSource.value
+        return if (source is ActiveSource.Collaboration)
+            com.todo.app.data.model.TaskReference(todo.id, "collaboration", source.collab.id)
+        else com.todo.app.data.model.TaskReference(todo.id)
+    }
+    val learningTasks = kotlinx.coroutines.flow.combine(todoData, collabData, activeSource) { data, collab, source ->
+        data.todos.associateBy { com.todo.app.data.model.TaskReference(it.id) } +
+            if (source is ActiveSource.Collaboration) (collab ?: emptyList()).associateBy {
+                com.todo.app.data.model.TaskReference(it.id, "collaboration", source.collab.id)
+            } else emptyMap()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+    suspend fun startLearning(todo: Todo) = repository.startLearning(todo, learningReference(todo))
+    suspend fun stopLearning(id: String) = repository.stopLearning(id)
+    suspend fun saveTimeEntry(entry: com.todo.app.data.model.TimeEntry) = repository.saveTimeEntry(entry)
+    suspend fun saveDailyReview(review: com.todo.app.data.model.DailyReview) = repository.saveDailyReview(review)
+    suspend fun saveEditedTodo(todo: Todo) {
+        val source = activeSource.value
+        if (source is ActiveSource.Collaboration) {
+            repository.writeCollaborationTodo(source.collab, todo.copy(updatedAt = com.todo.app.data.model.nowIso())).getOrThrow()
+            _collabData.value = _collabData.value?.map { if (it.id == todo.id) todo else it }
+        } else repository.updateTodo(todo)
     }
 
     fun toggleTodoStatus(id: String) {

@@ -287,6 +287,7 @@ export function createTodo(content, date = null, subtaskContents = []) {
         task_type: 'normal',
         completed_dates: [],
         target_count: null,
+        label: null,
         reminder: null,
         subtasks: subtaskContents.map(sc => ({
             id: generateUUID(),

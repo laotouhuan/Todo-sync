@@ -9,7 +9,7 @@ $success = $true
 
 # 1. Windows Tests
 Write-Host "`n🔍 Running Windows tests..." -ForegroundColor Yellow
-Push-Location windows
+Push-Location (Join-Path $PSScriptRoot "windows")
 try {
     Write-Host "  -> Running check-build..."
     node tests/check-build.mjs
@@ -18,8 +18,7 @@ try {
         $success = $false
     } else {
         Write-Host "  -> Running unit and logic tests..."
-        node --test tests/test-dateUtils.mjs
-        node --test tests/test-dataLogic.mjs
+        npm run test
         if ($LASTEXITCODE -ne 0) {
             Write-Host "❌ Windows unit/logic tests failed!" -ForegroundColor Red
             $success = $false
@@ -35,13 +34,13 @@ Pop-Location
 
 # 2. Android Tests
 Write-Host "`n🔍 Running Android tests..." -ForegroundColor Yellow
-Push-Location android
+Push-Location (Join-Path $PSScriptRoot "android")
 try {
     if (-not $env:JAVA_HOME) {
         $env:JAVA_HOME = "D:\android studio\jbr"
     }
     Write-Host "  -> Running Android unit tests..."
-    ./gradlew testDebugUnitTest
+    ./gradlew lintDebug testDebugUnitTest
     if ($LASTEXITCODE -ne 0) {
         Write-Host "❌ Android unit tests failed!" -ForegroundColor Red
         $success = $false
