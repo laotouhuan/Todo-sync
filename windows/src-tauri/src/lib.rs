@@ -184,8 +184,14 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 /// 设置全局快捷键
 fn setup_shortcuts() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    // 独立调试实例不抢占正式版快捷键，发布构建始终保留快捷键。
+    let shortcuts = if cfg!(debug_assertions) && std::env::var_os("TODO_UI_TEST").is_some() {
+        Vec::new()
+    } else {
+        SHORTCUTS.to_vec()
+    };
     tauri_plugin_global_shortcut::Builder::new()
-        .with_shortcuts(SHORTCUTS.iter().copied())
+        .with_shortcuts(shortcuts)
         .expect("Failed to register shortcuts")
         .with_handler(|app, shortcut, event| {
             if event.state == ShortcutState::Pressed {
@@ -244,6 +250,7 @@ pub fn run() {
             todo_store::set_sync_path,
             todo_store::read_todo_data,
             todo_store::write_todo_data,
+            todo_store::export_review_markdown,
             todo_store::read_collaborations_data,
             todo_store::write_collaborations_data,
             todo_store::list_backups,

@@ -1,4 +1,7 @@
-#!/usr/bin/env node
+import { parse as parseSource } from 'acorn';
+import { runInNewContext } from 'node:vm';
+import * as learningHelpers from '../src/timeTracking.js';
+import * as dateHelpers from '../src/dateUtils.js';
 /**
  * 数据逻辑测试（合并、迁移、Schema 校验）
  * 测试 mergeTodoData 和 migrateAndNormalize 的核心逻辑
@@ -649,5 +652,102 @@ describe('数据契约 Schema 校验', () => {
         for (const prop of schemaProps) {
             assert.ok(prop in todo, `createTodo() 缺少 Schema 属性: ${prop}`);
         }
+    });
+});
+
+// 直接执行实际源文件中的合并函数，避免只验证测试内的旧副本。
+describe('学习数据实际合并入口', () => {
+    const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+    const names = ['mergeTodoData', 'migrateAndNormalize', 'mergeReminderSettings', 'resolveCheckinConflict', 'todoDataContentSnapshot', 'canonicalizeForComparison', 'stableSerialize', 'hasTodoDataContentChanges', 'deepClone'];
+    const declarations = parseSource(source, {ecmaVersion:'latest', sourceType:'module'}).body.filter(n => n.type === 'FunctionDeclaration' && names.includes(n.id.name)).map(n => source.slice(n.start,n.end)).join('\n');
+    const api = runInNewContext(declarations + ';({mergeTodoData,migrateAndNormalize,hasTodoDataContentChanges})', {...dateHelpers,...learningHelpers,structuredClone,Date});
+    it('旧数据默认值及任务标签迁移', () => {
+        assert.equal(api.migrateAndNormalize({content:'任务',label:' 数学 '}).label,'数学');
+        const out=api.mergeTodoData({version:1,todos:[]},null).data;
+        assert.equal(out.time_entries.length,0); assert.equal(out.daily_reviews.length,0);
+    });
+    it('任务标签冲突沿用实际合并结果，候选不收集被覆盖的版本', () => {
+        const old = { id:'task', content:'任务', created_at:'2026-09-10T00:00:00Z', updated_at:'2026-09-10T01:00:00Z', label:'数学习' };
+        const newer = { ...old, updated_at:'2026-09-10T02:00:00Z', label:'数学' };
+        const local = {version:1,todos:[old]}, remote = {version:1,todos:[newer,{...old,id:'other',label:'阅读'}]};
+        const result = api.mergeTodoData(local,remote).data;
+        assert.deepEqual(learningHelpers.availableLabels(result.todos),['数学','阅读']);
+        assert.equal(api.hasTodoDataContentChanges(local,result),true);
+        assert.deepEqual(learningHelpers.availableLabels(api.mergeTodoData(remote,local).data.todos),['数学','阅读']);
+    });
+    it('异 ID 同日复盘归一，新增计时触发双向同步', () => {
+        const a={version:1,todos:[],daily_reviews:[{id:'a',date:'2026-09-10',fact:'旧',updated_at:'2026-09-10T00:00:00Z'}]};
+        const b={version:1,todos:[],daily_reviews:[{id:'b',date:'2026-09-10',fact:'新',updated_at:'2026-09-10T01:00:00Z'}],time_entries:[{id:'t',task_ref:{todo_id:'x'},started_at:'2026-09-10T00:00:00Z',updated_at:'2026-09-10T00:00:00Z'}]};
+        const out=api.mergeTodoData(a,b);
+        assert.equal(out.data.daily_reviews.length,1);assert.equal(out.data.daily_reviews[0].fact,'新');
+        assert.equal(out.data.time_entries.length,1);assert.equal(out.changed,true);
+        assert.equal(api.hasTodoDataContentChanges(out.data,a),true);
+    });
+});
+
+describe('学习保存失败与串行队列', () => {
+    const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+    const tree = parseSource(source, {ecmaVersion:'latest',sourceType:'module'});
+    const declaration = name => { const n = tree.body.find(n => n.type === 'FunctionDeclaration' && n.id.name === name); return source.slice(n.start,n.end); };
+    it('实际编辑保存失败保留草稿及原标签，重试成功才关闭；协作写入保持来源隔离', async () => {
+        let success = false, closed = 0; const notices = [];
+        const original = {id:'task',content:'旧内容',label:'旧标签',subtasks:[],updated_at:'2026-09-10T00:00:00Z'};
+        const state = {todoData:{todos:[original]},activeSource:{type:'personal'},currentEditingTodo:structuredClone(original),currentEditingSubtasks:[]};
+        const fields = {'edit-content':{value:'新内容'},'edit-learning-label':{value:'数学'}};
+        const calls = [];
+        const save = runInNewContext('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";'+declaration('saveEditModal')+';saveEditModal', {
+            ...learningHelpers,...dateHelpers,structuredClone,appState:state,document:{getElementById:id=>fields[id]},
+            extractCollaborator:()=>({nickname:null}),deepClone:structuredClone,closeEditModal:()=>closed++,render:()=>{},
+            showToast:m=>notices.push(m),console:{error:()=>{}},_doSaveData:async()=>success,invoke:async(cmd,args)=>calls.push([cmd,args])
+        });
+        await save(); assert.equal(closed,0); assert.equal(state.todoData.todos[0].label,'旧标签');
+        assert.equal(fields['edit-learning-label'].value,'数学'); assert.ok(notices.length);
+        success=true; await save(); assert.equal(closed,1); assert.equal(state.todoData.todos[0].label,'数学');
+        state.activeSource={type:'collaboration',id:'source'}; state.collabData={todos:[structuredClone(original)]};
+        fields['edit-learning-label'].value='协作'; await save();
+        assert.equal(calls[0][0],'write_collaboration_todo'); assert.equal(calls[0][1].collabId,'source');
+        assert.equal(JSON.parse(calls[0][1].todoJson).label,'协作'); assert.equal(state.todoData.todos[0].label,'数学');
+    });
+    it('落盘失败回滚新集合并保留旧数据，下一次保存仍可成功', async () => {
+        let success = false;
+        const state = {todoData:{todos:[{id:'existing',content:'原有任务'}],time_entries:[],daily_reviews:[]}};
+        const commit = runInNewContext('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";' + declaration('commitLearning') + ';commitLearning', {
+            ...learningHelpers, appState:state, structuredClone, render:()=>{}, learningUI:{refresh:()=>{}}, _doSaveData:async()=>success
+        });
+        await assert.rejects(commit(d=>d.daily_reviews.push({id:'r',date:'2026-09-10',fact:'不能丢失的草稿'})),/保存失败/);
+        assert.equal(state.todoData.daily_reviews.length,0);
+        assert.equal(state.todoData.todos[0].content,'原有任务');
+        success=true;
+        await commit(d=>d.daily_reviews.push({id:'r',date:'2026-09-10',fact:'重试保存'}));
+        assert.equal(state.todoData.daily_reviews[0].fact,'重试保存');
+    });
+    it('实际写入命令失败会返回失败，而非误报成功', async () => {
+        const save = runInNewContext(declaration('_doSaveData') + ';_doSaveData', {
+            ...learningHelpers, appState:{todoData:{todos:[]},appConfig:{sync_mode:'local'},saveVersion:0},
+            setSyncStatus:()=>{}, SyncState:{SYNCING:1,ERROR:2}, purgeOldDeletedTodos:()=>{},
+            invoke:async()=>{throw new Error('磁盘写入失败');}, console:{error:()=>{}}, Date
+        });
+        assert.equal(await save(),false);
+    });
+    it('实际写入成功后保留计时记录，云端失败不回滚已经落盘的记录', async () => {
+        for (const mode of ['local', 'webdav']) {
+            let persisted;
+            const state = {todoData:{todos:[],time_entries:[],daily_reviews:[]},appConfig:{sync_mode:mode},saveVersion:0};
+            const commit = runInNewContext('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";' + declaration('_doSaveData') + declaration('commitLearning') + ';commitLearning', {
+                ...learningHelpers, appState:state, structuredClone, Date, setTimeout:()=>{},
+                setSyncStatus:()=>{}, SyncState:{SYNCING:1,ERROR:2,IDLE:0}, purgeOldDeletedTodos:()=>{},
+                render:()=>{}, learningUI:{refresh:()=>{}}, showToast:()=>{}, console:{error:()=>{}},
+                invoke:async(cmd,args)=>{if(cmd==='write_todo_data') persisted=JSON.parse(args.data);else throw new Error('云端离线');}
+            });
+            await commit(d=>d.time_entries.push({id:'t',task_ref:{todo_id:'task',source_type:'personal'},started_at:'2026-09-10T01:00:00Z',ended_at:null,updated_at:'2026-09-10T01:00:00Z'}));
+            assert.equal(state.todoData.time_entries.length,1);
+            assert.equal(persisted.time_entries[0].id,'t');
+        }
+    });
+    it('创建任务包含 Schema 的所有属性及标签默认值', () => {
+        const schema=JSON.parse(readFileSync(new URL('../../todo_data.schema.json',import.meta.url),'utf8'));
+        const todo=dateHelpers.createTodo('学习');
+        for (const key of Object.keys(schema.properties.todos.items.properties)) assert.ok(key in todo,`缺少 ${key}`);
+        assert.equal(todo.label,null);
     });
 });

@@ -112,7 +112,10 @@ fun TodoApp(viewModel: TodoViewModel) {
 
     Scaffold(
         topBar = {
-            AppTopBar(viewModel = viewModel, currentRoute = currentRoute)
+            Column {
+                AppTopBar(viewModel = viewModel, currentRoute = currentRoute)
+                com.todo.app.ui.view.LearningBanner(viewModel)
+            }
         },
         bottomBar = {
             NavigationBar(

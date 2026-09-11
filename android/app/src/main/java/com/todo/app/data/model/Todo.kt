@@ -37,7 +37,8 @@ data class Todo(
     @SerialName("completed_dates") var completedDates: List<String> = emptyList(),
     @SerialName("target_count") var targetCount: Int? = null,
     var reminder: Reminder? = null,
-    var subtasks: List<Subtask> = emptyList()
+    var subtasks: List<Subtask> = emptyList(),
+    var label: String? = null
 ) {
     companion object {
         /**

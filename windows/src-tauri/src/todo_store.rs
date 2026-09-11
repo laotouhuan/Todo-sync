@@ -522,6 +522,18 @@ pub async fn pick_sync_folder(app: tauri::AppHandle) -> Result<Option<String>, S
     rx.await.map_err(|e| format!("Dialog cancelled: {e}"))
 }
 
+/// 通过用户选定的文件路径导出，完成写入后才向前端报告成功。
+#[tauri::command]
+pub async fn export_review_markdown(app: tauri::AppHandle, filename: String, content: String) -> Result<bool, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().set_title("导出复盘 Markdown").set_file_name(&filename)
+        .add_filter("Markdown", &["md"]).save_file(move |path| { let _ = tx.send(path); });
+    let Some(path) = rx.await.map_err(|e| e.to_string())? else { return Ok(false); };
+    let path = path.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(path, content.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 #[tauri::command]
 pub fn get_sync_path(app: AppHandle) -> Option<String> {
     load_config(&app).sync_path

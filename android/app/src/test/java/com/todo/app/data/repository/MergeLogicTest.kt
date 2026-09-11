@@ -275,4 +275,19 @@ class MergeLogicTest {
         assertEquals(false, MergeUtils.hasContentChanges(base, onlyRootChanged))
         assertEquals(true, MergeUtils.hasContentChanges(base, reminderChanged))
     }
+
+    @Test fun mergeLearningDataUsesDateAndPreservesTombstones() {
+        val time = "2026-09-10T00:00:00Z"
+        val review = com.todo.app.data.model.DailyReview("a", "2026-09-10", time, time, fact = "旧")
+        val latest = review.copy(id = "b", updated_at = "2026-09-10T01:00:00Z", fact = "新")
+        val entry = com.todo.app.data.model.TimeEntry("t", com.todo.app.data.model.TaskReference("task"), time, time, time)
+        val local = TodoData(1, time, emptyList(), timeEntries = listOf(entry), dailyReviews = listOf(review))
+        val cloud = local.copy(timeEntries = listOf(entry.copy(deleted = true)), dailyReviews = listOf(latest))
+        val merged = MergeUtils.mergeTodoData(local, cloud)
+        assertEquals(listOf(latest), merged.dailyReviews)
+        assertTrue(merged.timeEntries.single().deleted)
+        assertEquals(merged.dailyReviews, MergeUtils.mergeTodoData(cloud, local).dailyReviews)
+        assertEquals(merged.timeEntries, MergeUtils.mergeTodoData(cloud, local).timeEntries)
+    }
+
 }

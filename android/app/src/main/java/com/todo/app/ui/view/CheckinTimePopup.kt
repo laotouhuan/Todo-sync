@@ -101,6 +101,7 @@ fun CheckinTimePopup(
                     value = inputTime,
                     onValueChange = { inputTime = it },
                     label = "完成时间",
+                    modifier = Modifier.fillMaxWidth(),
                     allowEmpty = true
                 )
 

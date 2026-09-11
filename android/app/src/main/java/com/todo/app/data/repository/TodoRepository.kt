@@ -396,9 +396,63 @@ class TodoRepository(private val context: Context) {
 
     fun getTodoData(): Flow<TodoData> = _todoData.asStateFlow()
 
+    // 学习数据与普通待办共用锁，落盘成功后再公布状态。
+    private suspend fun changeLearning(change: (TodoData) -> TodoData): Result<Unit> = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            try {
+                val updated = change(_todoData.value).copy(last_updated = nowIso())
+                atomicWriteJson(jsonFormat.encodeToString(updated))
+                _todoData.value = updated
+                uploadChannel.trySend(Unit)
+                Result.success(Unit)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                Result.failure(e)
+            }
+        }
+    }
+
+    suspend fun startLearning(todo: Todo, ref: com.todo.app.data.model.TaskReference): Result<Unit> {
+        syncWithCloud()
+        return changeLearning { data ->
+            require(!todo.deleted) { "已删除任务不能开始计时" }
+            require(data.timeEntries.none { !it.deleted && it.ended_at == null }) { "已有任务正在计时，请先结束或处理记录" }
+            val now = nowIso()
+            data.copy(timeEntries = data.timeEntries + com.todo.app.data.model.TimeEntry(
+                id = java.util.UUID.randomUUID().toString(), task_ref = ref, started_at = now,
+                created_at = now, updated_at = now, task_content_snapshot = todo.content,
+                label_snapshot = com.todo.app.data.model.Learning.label(todo.label)))
+        }
+    }
+
+    suspend fun stopLearning(id: String): Result<Unit> = changeLearning { data ->
+        val now = nowIso()
+        data.copy(timeEntries = data.timeEntries.map { if (it.id == id && !it.deleted && it.ended_at == null)
+            it.copy(ended_at = now, updated_at = now) else it })
+    }
+
+    suspend fun saveTimeEntry(entry: com.todo.app.data.model.TimeEntry): Result<Unit> = changeLearning { data ->
+        if (!entry.deleted) {
+            require(entry.ended_at != null || data.timeEntries.any { it.id == entry.id && it.ended_at == null && !it.deleted }) { "补录必须填写结束时间" }
+            val error = com.todo.app.data.model.Learning.validate(entry, data.timeEntries)
+            require(error == null) { error ?: "记录无效" }
+        }
+        data.copy(timeEntries = com.todo.app.data.model.Learning.mergeTimes(data.timeEntries.filter { it.id != entry.id } + entry.copy(
+            updated_at = nowIso(), label_snapshot = com.todo.app.data.model.Learning.label(entry.label_snapshot))))
+    }
+
+    suspend fun saveDailyReview(review: com.todo.app.data.model.DailyReview): Result<Unit> = changeLearning { data ->
+        java.time.LocalDate.parse(review.date)
+        require(com.todo.app.data.model.Learning.fields(review).any { it.second.isNotBlank() }) { "请至少填写一项复盘内容" }
+        val existing = data.dailyReviews.find { it.date == review.date }
+        data.copy(dailyReviews = com.todo.app.data.model.Learning.mergeReviews(data.dailyReviews.filter { it.date != review.date } + review.copy(
+            id = existing?.id ?: review.id, created_at = existing?.created_at ?: review.created_at, updated_at = nowIso())))
+    }
+
     /** 将源 Todo 克隆到新周期，重置完成状态和子任务 */
     private fun cloneTodoForNewPeriod(source: Todo, targetDateStr: String): Todo {
         return Todo.create(source.content, targetDateStr).copy(
+            label = source.label,
             taskType = source.taskType,
             targetCount = source.targetCount,
             completed = false,
@@ -452,7 +506,7 @@ class TodoRepository(private val context: Context) {
      * Save the given list of todos to disk and trigger a background upload.
      * Callers must hold [mutex] before invoking this method.
      */
-    private suspend fun saveTodos(todos: List<Todo>) = withContext(Dispatchers.IO) {
+    private suspend fun saveTodos(todos: List<Todo>, failOnError: Boolean = false) = withContext(Dispatchers.IO) {
         val previous = _todoData.value
         // 物理清理：删除超过 7 天的软删除记录，与 Windows 端 purgeOldDeletedTodos() 对齐
         val purged = purgeOldDeletedTodos(todos)
@@ -460,25 +514,33 @@ class TodoRepository(private val context: Context) {
             version = previous.version,
             last_updated = nowIso(),
             todos = purged,
-            reminderSettings = previous.reminderSettings
+            reminderSettings = previous.reminderSettings,
+            timeEntries = previous.timeEntries.map { entry ->
+                if (!entry.deleted && entry.ended_at == null && entry.task_ref.source_type == "personal" && todos.any { it.id == entry.task_ref.todo_id && it.deleted })
+                    entry.copy(ended_at = nowIso(), updated_at = nowIso()) else entry
+            },
+            dailyReviews = previous.dailyReviews
         )
-        _todoData.value = updated
+        if (!failOnError) _todoData.value = updated
         try {
             val jsonString = jsonFormat.encodeToString(updated)
             atomicWriteJson(jsonString)
-
-            // 立即刷新小组件和提醒调度
-            com.todo.app.widget.refreshAllWidgets(context)
-            com.todo.app.notification.ReminderScheduler(context).rescheduleAll(updated)
-
-            // 触发后台同步
-            uploadChannel.trySend(Unit)
+            if (failOnError) _todoData.value = updated
         } catch (e: Exception) {
+            _todoData.value = previous
             if (e is CancellationException) throw e
             Log.e(TAG, "saveTodos failed", e)
-            _todoData.value = previous // rollback on write failure
+            if (failOnError) throw e
             _uiEvent.send(UiEvent.ShowError("保存失败: ${e.message}"))
+            return@withContext
         }
+        // 文件已写入后，小组件或提醒刷新失败不能回滚已保存的任务。
+        runCatching {
+            com.todo.app.widget.refreshAllWidgets(context)
+            com.todo.app.notification.ReminderScheduler(context).rescheduleAll(updated)
+        }.onFailure { Log.e(TAG, "刷新小组件或提醒失败", it) }
+        uploadChannel.trySend(Unit)
+        Unit
     }
 
     suspend fun updateReminderSettings(settings: com.todo.app.data.model.ReminderSettings) = mutex.withLock {
@@ -540,7 +602,7 @@ class TodoRepository(private val context: Context) {
         if (index != -1) {
             todo.updatedAt = nowIso()
             current[index] = todo
-            saveTodos(current)
+            saveTodos(current, failOnError = true)
         }
     }
 
