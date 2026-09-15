@@ -8,6 +8,30 @@ class StatsTimelineTest {
     private val zone = ZoneId.of("Asia/Shanghai")
     private val day = LocalDate.parse("2026-09-10")
     private val ref = TaskReference("task")
+    @Test fun verticalDaysIncludeCrossYearWeekAndEveryMonthDay() {
+        val days = StatsTimeline.days("week", LocalDate.parse("2027-01-01"))
+        assertEquals(7, days.size); assertEquals(LocalDate.parse("2026-12-28"), days.first()); assertEquals(LocalDate.parse("2027-01-03"), days.last())
+        listOf("2026-02-10" to 28, "2028-02-10" to 29, "2026-09-12" to 30, "2026-10-12" to 31).forEach { (date, count) ->
+            val month = StatsTimeline.days("month", LocalDate.parse(date)); assertEquals(count, month.size); assertEquals(1, month.first().dayOfMonth); assertEquals(count, month.last().dayOfMonth)
+        }
+    }
+
+    @Test fun verticalCompletionsUseLocalDatesAndKeepDateOnlyCheckinsUntimed() {
+        val a = Todo.create("A").copy(completed = true, date = "2030-01-01", completedAt = "2026-09-10T17:00:00Z")
+        val b = Todo.create("B").copy(taskType = TaskType.WEEKLY_CHECKIN, completedDates = listOf("2026-09-10", "2026-09-10", "2026-09-10T17:00:00Z", "2026-09-30"))
+        val events = StatsTimeline.completions(listOf(a, b, a.copy(deleted = true)), "week", day, zone)
+        assertEquals(listOf(LocalDate.parse("2026-09-11"), day, LocalDate.parse("2026-09-11")), events.map { it.date })
+        assertNull(events[1].time); assertNotNull(events[0].time); assertEquals("2030-01-01", a.date)
+    }
+
+    @Test fun verticalHitDoesNotWrapMidnightOrSelectOtherDays() {
+        val parts = StatsTimeline.arcs(listOf(entry("cross", "2026-09-10T23:30:00+08:00", "2026-09-11T00:30:00+08:00")), ref, "week", day, zone)
+        assertEquals(0, StatsTimeline.hitSegments(parts, day, 0f, 10f).size)
+        assertEquals(1, StatsTimeline.hitSegments(parts, day, 1440f, 10f).size)
+        assertEquals(1, StatsTimeline.hitSegments(parts, day.plusDays(1), 0f, 10f).size)
+        assertEquals(0, StatsTimeline.hitSegments(parts, day.plusDays(1), 1440f, 10f).size)
+        assertEquals(0, StatsTimeline.hitSegments(parts, day.plusDays(2), 0f, 10f).size)
+    }
     @Test fun clockPositionsKeepSubsecondOrderAndMatchTimerBoundaries() {
         val middle = Instant.parse("2026-09-10T06:00:00Z")
         val before = middle.minusMillis(1)

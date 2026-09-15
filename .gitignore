@@ -19,6 +19,7 @@ pnpm-debug.log*
 # 3. Android 原生项目产物
 # -----------------------------
 .gradle/
+.kotlin/
 *.apk
 *.aab
 *.dex

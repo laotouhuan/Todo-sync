@@ -4,8 +4,30 @@ import java.time.*
 
 data class SubtaskEvent(val todo: Todo, val subtask: Subtask, val date: LocalDate, val time: Instant?)
 data class TimerArc(val part: LearningPart, val startMinute: Float, val endMinute: Float)
+data class TimelineCompletion(val todo: Todo, val date: LocalDate, val time: Instant?)
 
 object StatsTimeline {
+    fun days(period: String, target: LocalDate): List<LocalDate> {
+        val (start, end) = Learning.range(period, target)
+        return generateSequence(start) { it.plusDays(1) }.takeWhile { it < end }.toList()
+    }
+
+    fun completions(todos: List<Todo>, period: String, target: LocalDate, zone: ZoneId = ZoneId.systemDefault()): List<TimelineCompletion> {
+        val (start, end) = Learning.range(period, target)
+        return todos.filterNot { it.deleted }.flatMap { todo ->
+            val times = if (todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) todo.completedDates.distinct()
+                else if (todo.completed) listOfNotNull(todo.completedAt) else emptyList()
+            times.mapNotNull { value ->
+                val time = Learning.instant(value)
+                val date = time?.atZone(zone)?.toLocalDate() ?: runCatching { LocalDate.parse(value) }.getOrNull() ?: return@mapNotNull null
+                if (date >= start && date < end) TimelineCompletion(todo, date, time) else null
+            }
+        }
+    }
+
+    fun hitSegments(parts: List<TimerArc>, date: LocalDate, minute: Float, tolerance: Float = 0f): List<TimerArc> =
+        parts.filter { it.part.date == date && minute >= it.startMinute - tolerance && minute <= it.endMinute + tolerance }
+
     // 任务与子步骤共用精确本地时间刻度，保留秒及小数秒。
     fun clockMinute(time: Instant, zone: ZoneId = ZoneId.systemDefault()): Double =
         time.atZone(zone).toLocalTime().toNanoOfDay() / 60_000_000_000.0

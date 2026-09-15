@@ -13,6 +13,32 @@ export function clockTooltipDateTime(value) {
     return { date: `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, time: `${pad(d.getHours())}:${pad(d.getMinutes())}` };
 }
 
+export function timelineDays(period, target) {
+    const { start, end } = learningRange(period, target), days = [];
+    const cursor = new Date(`${start}T12:00:00`);
+    while (localDay(cursor) < end) { days.push(localDay(cursor)); cursor.setDate(cursor.getDate() + 1); }
+    return days;
+}
+
+export function collectTaskTimelineEvents(todos, period, target) {
+    const { start, end } = learningRange(period, target);
+    return todos.filter(t => !t.deleted).flatMap(todo => {
+        const times = ['weekly_checkin', 'monthly_checkin'].includes(todo.task_type) ? [...new Set(todo.completed_dates || [])] :
+            todo.completed && todo.completed_at ? [todo.completed_at] : [];
+        return times.flatMap(time => {
+            if (!Number.isFinite(Date.parse(time))) return [];
+            const explicit = time.includes('T'), date = explicit ? localDay(time) : time;
+            if (!explicit && (!/^\d{4}-\d{2}-\d{2}$/.test(time) || new Date(time).toISOString().slice(0, 10) !== time)) return [];
+            return date >= start && date < end ? [{ todo, date, completed_at: time, explicit }] : [];
+        });
+    });
+}
+
+// 直线按日期隔离，午夜上端不会命中同一天的 24:00 下端。
+export function hitTimelineSegments(parts, date, minute, tolerance = 0) {
+    return parts.filter(a => a.date === date && minute >= a.startMinute - tolerance && minute <= a.endMinute + tolerance);
+}
+
 export function collectSubtaskEvents(todos, period, target) {
     const { start, end } = learningRange(period, target);
     return todos.filter(t => !t.deleted).flatMap(todo => (todo.subtasks || []).flatMap(subtask => {

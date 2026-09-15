@@ -14,6 +14,7 @@ import {
 
 import { normalizeLearningData, mergeLearningRecords, normalizeLabel } from './timeTracking.js';
 import { createLearningView } from './learningView.js';
+import { evaluateReminderRule } from './reminderRuleUtils.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -974,54 +975,8 @@ function renderGlobalRules(rules = []) {
             const nowTimeStr = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
 
             // 计算实际环境中的待办统计数据作为渲染参考
-            const todayStr = getTodayString();
-            const thisWeekStr = getThisWeekString();
-            const thisMonthStr = getThisMonthString();
-            const activeTodos = getActiveTodos().filter(t => !t.deleted);
-            const scopeVal = scopeSelect.value;
-
-            const isCheckinOrRecurring = (t) => {
-                return t.recurring === 'daily_repeat' ||
-                       t.task_type === 'weekly_checkin' ||
-                       t.task_type === 'monthly_checkin';
-            };
-
-            const isRecurringForToday = (t) => {
-                if (t.recurring === 'daily_repeat') {
-                    return !t.date || t.date === todayStr || (!t.completed && t.date < todayStr);
-                }
-                if (t.task_type === 'weekly_checkin') {
-                    return t.date === thisWeekStr || !t.date;
-                }
-                if (t.task_type === 'monthly_checkin') {
-                    return t.date === thisMonthStr || !t.date;
-                }
-                return false;
-            };
-
-            const scopedTodos = activeTodos.filter(t => {
-                if (scopeVal === 'today_only') {
-                    return !isCheckinOrRecurring(t) && (t.date === todayStr || isOverdue(t, todayStr));
-                } else if (scopeVal === 'recurring_only') {
-                    return isRecurringForToday(t);
-                }
-                // 'all'
-                return (!isCheckinOrRecurring(t) && (t.date === todayStr || isOverdue(t, todayStr))) || isRecurringForToday(t);
-            });
-
-            const isTaskCompletedToday = (t) => {
-                if (t.completed) return true;
-                if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
-                    return Boolean(t.completed_dates && t.completed_dates.some(dStr => dStr.startsWith(todayStr)));
-                }
-                return false;
-            };
-
-            const remainingCount = scopedTodos.filter(t => !isTaskCompletedToday(t)).length;
-            const completedCount = scopedTodos.filter(t => isTaskCompletedToday(t)).length;
-            const totalCount = scopedTodos.length;
-            const overdueCount = scopeVal === 'recurring_only' ? 0 : scopedTodos.filter(t => isOverdue(t, todayStr)).length;
-            const rateVal = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+            const { remainingCount, completedCount, totalCount, overdueCount, completionRate: rateVal } =
+                evaluateReminderRule({ task_scope: scopeSelect.value }, getActiveTodos(), today);
 
             let previewText = rawBody
                 .replace(/\{remaining_count\}/g, String(remainingCount))
@@ -3479,8 +3434,14 @@ function render() {
             const todayGroup = filteredTodos.filter(t => !monthGroup.includes(t) && !weekGroup.includes(t)).sort(sortFunc);
 
             renderCollapsibleGroup(todayGroup, '今日任务', appState.todayCollapsed, 'today', 'var(--accent-color)', todayStr, tomorrowStr);
-            renderCollapsibleGroup(weekGroup, '本周任务', appState.weekCollapsed, 'weekly', '#fadb14', todayStr, tomorrowStr);
-            renderCollapsibleGroup(monthGroup, '本月任务', appState.monthCollapsed, 'monthly', '#ff7a45', todayStr, tomorrowStr);
+            // 按实际设置的本周任务判断顺序，不受搜索或完成状态影响。
+            const hasWeekTasks = getActiveTodos().some(t => !t.deleted && t.date === thisWeekStr);
+            const periodGroups = [
+                [weekGroup, '本周任务', appState.weekCollapsed, 'weekly', '#fadb14'],
+                [monthGroup, '本月任务', appState.monthCollapsed, 'monthly', '#ff7a45'],
+            ];
+            if (!hasWeekTasks) periodGroups.reverse();
+            periodGroups.forEach(args => renderCollapsibleGroup(...args, todayStr, tomorrowStr));
         } else {
             if (appState.allTabMode === 'uncompleted') {
                 // 1. 过滤未完成任务（未达标的打卡任务 + 未完成的普通任务）

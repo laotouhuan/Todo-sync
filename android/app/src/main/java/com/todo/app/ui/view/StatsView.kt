@@ -72,9 +72,9 @@ private fun formatVal(valDouble: Double): String {
     return if (valDouble % 1.0 == 0.0) valDouble.toInt().toString() else String.format(Locale.US, "%.1f", valDouble)
 }
 
-private data class StatsTaskVisualStyle(val color: Color, val shape: String)
+internal data class StatsTaskVisualStyle(val color: Color, val shape: String)
 
-private fun Todo.statsVisualStyle(): StatsTaskVisualStyle = when {
+internal fun Todo.statsVisualStyle(): StatsTaskVisualStyle = when {
     recurring == "daily_repeat" -> StatsTaskVisualStyle(Color(0xFFF59E0B), "triangle")
     taskType == TaskType.WEEKLY_CHECKIN -> StatsTaskVisualStyle(Color(0xFF6366F1), "diamond")
     taskType == TaskType.MONTHLY_CHECKIN -> StatsTaskVisualStyle(Color(0xFFF43F5E), "star")
@@ -500,6 +500,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("完成时间分布", style = MaterialTheme.typography.titleMedium)
                         if (period != "day") TextButton(onClick = {
+                            tooltipTodo = null
                             showTimingPreference = !showTimingPreference
                             viewModel.configManager.statsShowTiming = showTimingPreference
                         }) { Text(if (showTimingPreference) "隐藏计时" else "显示计时", color = if (showTimingPreference) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -507,323 +508,379 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     Text(insightText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                     val sweepProgress = rememberClockSweep(period, targetDate, activeSource)
 
-                    // Clock drawing container
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .wrapContentHeight()
-                            .padding(vertical = 4.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Canvas(
+                    val verticalTiming = showTiming && period != "day"
+                    if (verticalTiming) {
+                        StatsVerticalTimeline(viewModel, timelineTodos, period, targetDate, onEditTodo)
+                    } else {
+                        // Clock drawing container
+                        Box(
                             modifier = Modifier
-                                .size(290.dp, 260.dp)
-                                .pointerInput(plottedDots, period) {
-                                    detectTapGestures(
-                                        onTap = { offset ->
-                                            val touchRadius = 24.dp.toPx()
-                                            val clicked = plottedDots.minByOrNull { dot ->
-                                                val dx = dot.x - offset.x
-                                                val dy = dot.y - offset.y
-                                                dx * dx + dy * dy
-                                            }
-                                            if (clicked != null) {
-                                                val dx = clicked.x - offset.x
-                                                val dy = clicked.y - offset.y
-                                                if (dx * dx + dy * dy <= touchRadius * touchRadius) {
-                                                    onEditTodo(clicked.todo)
+                                .fillMaxWidth()
+                                .wrapContentHeight()
+                                .padding(vertical = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Canvas(
+                                modifier = Modifier
+                                    .size(290.dp, 260.dp)
+                                    .pointerInput(plottedDots, period) {
+                                        detectTapGestures(
+                                            onTap = { offset ->
+                                                val touchRadius = 24.dp.toPx()
+                                                val clicked = plottedDots.minByOrNull { dot ->
+                                                    val dx = dot.x - offset.x
+                                                    val dy = dot.y - offset.y
+                                                    dx * dx + dy * dy
+                                                }
+                                                if (clicked != null) {
+                                                    val dx = clicked.x - offset.x
+                                                    val dy = clicked.y - offset.y
+                                                    if (dx * dx + dy * dy <= touchRadius * touchRadius) {
+                                                        onEditTodo(clicked.todo)
+                                                    } else {
+                                                        tooltipTodo = null
+                                                    }
                                                 } else {
                                                     tooltipTodo = null
                                                 }
-                                            } else {
-                                                tooltipTodo = null
-                                            }
-                                        },
-                                        onLongPress = { offset ->
-                                            val touchRadius = 24.dp.toPx()
-                                            val clicked = plottedDots.minByOrNull { dot ->
-                                                val dx = dot.x - offset.x
-                                                val dy = dot.y - offset.y
-                                                dx * dx + dy * dy
-                                            }
-                                            if (clicked != null) {
-                                                val dx = clicked.x - offset.x
-                                                val dy = clicked.y - offset.y
-                                                if (dx * dx + dy * dy <= touchRadius * touchRadius) {
-                                                    tooltipTodo = clicked.todo
-                                                    tooltipDate = clicked.dateLabel
-                                                    tooltipTime = clicked.timeLabel
-                                                    tooltipOffset = offset
+                                            },
+                                            onLongPress = { offset ->
+                                                val touchRadius = 24.dp.toPx()
+                                                val clicked = plottedDots.minByOrNull { dot ->
+                                                    val dx = dot.x - offset.x
+                                                    val dy = dot.y - offset.y
+                                                    dx * dx + dy * dy
+                                                }
+                                                if (clicked != null) {
+                                                    val dx = clicked.x - offset.x
+                                                    val dy = clicked.y - offset.y
+                                                    if (dx * dx + dy * dy <= touchRadius * touchRadius) {
+                                                        tooltipTodo = clicked.todo
+                                                        tooltipDate = clicked.dateLabel
+                                                        tooltipTime = clicked.timeLabel
+                                                        tooltipOffset = offset
+                                                    }
                                                 }
                                             }
-                                        }
-                                    )
-                                }
-                        ) {
-                            val cx = size.width / 2
-                            val cy = size.height / 2
-                            val rPx = 75.dp.toPx()
-                            val strokeWidthPx = 10.dp.toPx()
-
-                            // Background track
-                            drawCircle(
-                                color = Color.White.copy(alpha = 0.05f),
-                                radius = rPx,
-                                center = Offset(cx, cy),
-                                style = Stroke(width = strokeWidthPx)
-                            )
-
-                            val currentSweep = sweepProgress.value * 360f
-
-                            // Q1 (Top-Right): 0-6 (Night)
-                            drawArc(
-                                color = Color(0xFF3B82F6),
-                                startAngle = 270f,
-                                sweepAngle = minOf(90f, currentSweep),
-                                useCenter = false,
-                                topLeft = Offset(cx - rPx, cy - rPx),
-                                size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
-                                style = Stroke(width = strokeWidthPx),
-                                alpha = if (totalSlots > 0) (if (nightCount > 0) 0.95f else 0.2f) else 0.2f
-                            )
-
-                            // Q2 (Bottom-Right): 6-12 (Morning)
-                            drawArc(
-                                color = Color(0xFFF59E0B),
-                                startAngle = 0f,
-                                sweepAngle = maxOf(0f, minOf(90f, currentSweep - 90f)),
-                                useCenter = false,
-                                topLeft = Offset(cx - rPx, cy - rPx),
-                                size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
-                                style = Stroke(width = strokeWidthPx),
-                                alpha = if (totalSlots > 0) (if (morningCount > 0) 0.95f else 0.2f) else 0.2f
-                            )
-
-                            // Q3 (Bottom-Left): 12-18 (Afternoon)
-                            drawArc(
-                                color = Color(0xFF10B981),
-                                startAngle = 90f,
-                                sweepAngle = maxOf(0f, minOf(90f, currentSweep - 180f)),
-                                useCenter = false,
-                                topLeft = Offset(cx - rPx, cy - rPx),
-                                size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
-                                style = Stroke(width = strokeWidthPx),
-                                alpha = if (totalSlots > 0) (if (afternoonCount > 0) 0.95f else 0.2f) else 0.2f
-                            )
-
-                            // Q4 (Top-Left): 18-24 (Evening)
-                            drawArc(
-                                color = Color(0xFF6366F1),
-                                startAngle = 180f,
-                                sweepAngle = maxOf(0f, minOf(90f, currentSweep - 270f)),
-                                useCenter = false,
-                                topLeft = Offset(cx - rPx, cy - rPx),
-                                size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
-                                style = Stroke(width = strokeWidthPx),
-                                alpha = if (totalSlots > 0) (if (eveningCount > 0) 0.95f else 0.2f) else 0.2f
-                            )
-
-                            // Division lines
-                            drawLine(
-                                color = Color.White.copy(alpha = 0.15f),
-                                start = Offset(cx - rPx - 15.dp.toPx(), cy),
-                                end = Offset(cx + rPx + 15.dp.toPx(), cy),
-                                strokeWidth = 1.dp.toPx()
-                            )
-                            drawLine(
-                                color = Color.White.copy(alpha = 0.15f),
-                                start = Offset(cx, cy - rPx - 15.dp.toPx()),
-                                end = Offset(cx, cy + rPx + 15.dp.toPx()),
-                                strokeWidth = 1.dp.toPx()
-                            )
-
-                            // Clock text labels
-                            val paint = android.graphics.Paint().apply {
-                                textSize = 11.5.sp.toPx()
-                                typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
-                            }
-
-                            paint.color = Color(0xFF3B82F6).toArgb()
-                            paint.textAlign = android.graphics.Paint.Align.RIGHT
-                            drawContext.canvas.nativeCanvas.drawText("深夜 (0-6): $nightPct%", 282.dp.toPx(), 25.dp.toPx(), paint)
-
-                            paint.color = Color(0xFFF59E0B).toArgb()
-                            paint.textAlign = android.graphics.Paint.Align.RIGHT
-                            drawContext.canvas.nativeCanvas.drawText("上午 (6-12): $morningPct%", 282.dp.toPx(), 245.dp.toPx(), paint)
-
-                            paint.color = Color(0xFF10B981).toArgb()
-                            paint.textAlign = android.graphics.Paint.Align.LEFT
-                            drawContext.canvas.nativeCanvas.drawText("下午 (12-18): $afternoonPct%", 8.dp.toPx(), 245.dp.toPx(), paint)
-
-                            paint.color = Color(0xFF6366F1).toArgb()
-                            paint.textAlign = android.graphics.Paint.Align.LEFT
-                            drawContext.canvas.nativeCanvas.drawText("晚上 (18-24): $eveningPct%", 8.dp.toPx(), 25.dp.toPx(), paint)
-
-                            // Draw shapes
-                            val dotRadius = when (period) {
-                                "day" -> 8.dp.toPx()
-                                "week" -> 6.dp.toPx()
-                                else -> 4.5.dp.toPx()
-                            }
-                            val strokeW = when (period) {
-                                "day" -> 1.5.dp.toPx()
-                                "week" -> 1.0.dp.toPx()
-                                else -> 0.7.dp.toPx()
-                            }
-
-                            plottedDots.forEach { dot ->
-                                val dotAlpha = clockEntryAlpha(sweepProgress.value, dot.minute)
-                                if (dotAlpha > 0f) {
-                                    val px = dot.x
-                                    val py = dot.y
-
-                                    when (dot.shape) {
-                                        "circle" -> {
-                                            drawCircle(
-                                                color = dot.color,
-                                                radius = dotRadius,
-                                                center = Offset(px, py),
-                                                alpha = dotAlpha
-                                            )
-                                            drawCircle(
-                                                color = Color.White,
-                                                radius = dotRadius,
-                                                center = Offset(px, py),
-                                                style = Stroke(width = strokeW),
-                                                alpha = dotAlpha
-                                            )
-                                        }
-                                        "triangle" -> {
-                                            val path = Path().apply {
-                                                moveTo(px, py - dotRadius * 1.1f)
-                                                lineTo(px - dotRadius, py + dotRadius * 0.9f)
-                                                lineTo(px + dotRadius, py + dotRadius * 0.9f)
-                                                close()
-                                            }
-                                            drawPath(path = path, color = dot.color, alpha = dotAlpha)
-                                            drawPath(path = path, color = Color.White, style = Stroke(width = strokeW), alpha = dotAlpha)
-                                        }
-                                        "diamond" -> {
-                                            val path = Path().apply {
-                                                moveTo(px, py - dotRadius * 1.1f)
-                                                lineTo(px + dotRadius * 1.1f, py)
-                                                lineTo(px, py + dotRadius * 1.1f)
-                                                lineTo(px - dotRadius * 1.1f, py)
-                                                close()
-                                            }
-                                            drawPath(path = path, color = dot.color, alpha = dotAlpha)
-                                            drawPath(path = path, color = Color.White, style = Stroke(width = strokeW), alpha = dotAlpha)
-                                        }
-                                        "star" -> {
-                                            val path = Path().apply {
-                                                val spikes = 5
-                                                val outerRadius = dotRadius * 1.25f
-                                                val innerRadius = dotRadius * 0.6f
-                                                var rot = Math.PI / 2 * 3
-                                                val step = Math.PI / spikes
-                                                for (i in 0 until spikes) {
-                                                    val px1 = px + Math.cos(rot).toFloat() * outerRadius
-                                                    val py1 = py + Math.sin(rot).toFloat() * outerRadius
-                                                    if (i == 0) moveTo(px1, py1) else lineTo(px1, py1)
-                                                    rot += step
-
-                                                    val px2 = px + Math.cos(rot).toFloat() * innerRadius
-                                                    val py2 = py + Math.sin(rot).toFloat() * innerRadius
-                                                    lineTo(px2, py2)
-                                                    rot += step
-                                                }
-                                                close()
-                                            }
-                                            drawPath(path = path, color = dot.color, alpha = dotAlpha)
-                                            drawPath(path = path, color = Color.White, style = Stroke(width = strokeW), alpha = dotAlpha)
-                                        }
+                                        )
                                     }
-                                }
-                            }
-                        }
-
-                        StatsTimelineLayer(viewModel, timelineTodos, period, targetDate, showTiming, onEditTodo,
-                            sweepProgress = { sweepProgress.value },
-                            fallbackTap = { offset ->
-                                val clicked = plottedDots.minByOrNull { (Offset(it.x, it.y) - offset).getDistance() }
-                                if (clicked != null && (Offset(clicked.x, clicked.y) - offset).getDistance() <= with(density) { 24.dp.toPx() }) onEditTodo(clicked.todo)
-                                else tooltipTodo = null
-                            }, fallbackLongPress = { offset ->
-                                val clicked = plottedDots.minByOrNull { (Offset(it.x, it.y) - offset).getDistance() }
-                                if (clicked != null && (Offset(clicked.x, clicked.y) - offset).getDistance() <= with(density) { 24.dp.toPx() }) {
-                                    tooltipTodo = clicked.todo; tooltipDate = clicked.dateLabel; tooltipTime = clicked.timeLabel; tooltipOffset = offset
-                                }
-                            })
-                        // Tooltip Pop-up overlay for Canvas dots
-                        tooltipTodo?.let { todo ->
-                            Popup(
-                                alignment = Alignment.TopStart,
-                                offset = IntOffset(tooltipOffset.x.toInt(), tooltipOffset.y.toInt() - 40.dp.value.toInt()),
-                                onDismissRequest = { tooltipTodo = null }
                             ) {
-                                Card(
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.inverseSurface),
-                                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Column(modifier = Modifier.padding(10.dp)) {
-                                        Text(todo.content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.inverseOnSurface, fontWeight = FontWeight.Bold)
-                                        Text("完成日期: $tooltipDate", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f))
-                                        Text("打卡时间: $tooltipTime", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f))
+                                val cx = size.width / 2
+                                val cy = size.height / 2
+                                val rPx = 75.dp.toPx()
+                                val strokeWidthPx = 10.dp.toPx()
+
+                                // Background track
+                                drawCircle(
+                                    color = Color.White.copy(alpha = 0.05f),
+                                    radius = rPx,
+                                    center = Offset(cx, cy),
+                                    style = Stroke(width = strokeWidthPx)
+                                )
+
+                                val currentSweep = sweepProgress.value * 360f
+
+                                // Q1 (Top-Right): 0-6 (Night)
+                                drawArc(
+                                    color = Color(0xFF3B82F6),
+                                    startAngle = 270f,
+                                    sweepAngle = minOf(90f, currentSweep),
+                                    useCenter = false,
+                                    topLeft = Offset(cx - rPx, cy - rPx),
+                                    size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
+                                    style = Stroke(width = strokeWidthPx),
+                                    alpha = if (totalSlots > 0) (if (nightCount > 0) 0.95f else 0.2f) else 0.2f
+                                )
+
+                                // Q2 (Bottom-Right): 6-12 (Morning)
+                                drawArc(
+                                    color = Color(0xFFF59E0B),
+                                    startAngle = 0f,
+                                    sweepAngle = maxOf(0f, minOf(90f, currentSweep - 90f)),
+                                    useCenter = false,
+                                    topLeft = Offset(cx - rPx, cy - rPx),
+                                    size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
+                                    style = Stroke(width = strokeWidthPx),
+                                    alpha = if (totalSlots > 0) (if (morningCount > 0) 0.95f else 0.2f) else 0.2f
+                                )
+
+                                // Q3 (Bottom-Left): 12-18 (Afternoon)
+                                drawArc(
+                                    color = Color(0xFF10B981),
+                                    startAngle = 90f,
+                                    sweepAngle = maxOf(0f, minOf(90f, currentSweep - 180f)),
+                                    useCenter = false,
+                                    topLeft = Offset(cx - rPx, cy - rPx),
+                                    size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
+                                    style = Stroke(width = strokeWidthPx),
+                                    alpha = if (totalSlots > 0) (if (afternoonCount > 0) 0.95f else 0.2f) else 0.2f
+                                )
+
+                                // Q4 (Top-Left): 18-24 (Evening)
+                                drawArc(
+                                    color = Color(0xFF6366F1),
+                                    startAngle = 180f,
+                                    sweepAngle = maxOf(0f, minOf(90f, currentSweep - 270f)),
+                                    useCenter = false,
+                                    topLeft = Offset(cx - rPx, cy - rPx),
+                                    size = androidx.compose.ui.geometry.Size(rPx * 2, rPx * 2),
+                                    style = Stroke(width = strokeWidthPx),
+                                    alpha = if (totalSlots > 0) (if (eveningCount > 0) 0.95f else 0.2f) else 0.2f
+                                )
+
+                                // Division lines
+                                drawLine(
+                                    color = Color.White.copy(alpha = 0.15f),
+                                    start = Offset(cx - rPx - 15.dp.toPx(), cy),
+                                    end = Offset(cx + rPx + 15.dp.toPx(), cy),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                                drawLine(
+                                    color = Color.White.copy(alpha = 0.15f),
+                                    start = Offset(cx, cy - rPx - 15.dp.toPx()),
+                                    end = Offset(cx, cy + rPx + 15.dp.toPx()),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+
+                                // Clock text labels
+                                val paint = android.graphics.Paint().apply {
+                                    textSize = 11.5.sp.toPx()
+                                    typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                                }
+
+                                paint.color = Color(0xFF3B82F6).toArgb()
+                                paint.textAlign = android.graphics.Paint.Align.RIGHT
+                                drawContext.canvas.nativeCanvas.drawText("深夜 (0-6): $nightPct%", 282.dp.toPx(), 25.dp.toPx(), paint)
+
+                                paint.color = Color(0xFFF59E0B).toArgb()
+                                paint.textAlign = android.graphics.Paint.Align.RIGHT
+                                drawContext.canvas.nativeCanvas.drawText("上午 (6-12): $morningPct%", 282.dp.toPx(), 245.dp.toPx(), paint)
+
+                                paint.color = Color(0xFF10B981).toArgb()
+                                paint.textAlign = android.graphics.Paint.Align.LEFT
+                                drawContext.canvas.nativeCanvas.drawText("下午 (12-18): $afternoonPct%", 8.dp.toPx(), 245.dp.toPx(), paint)
+
+                                paint.color = Color(0xFF6366F1).toArgb()
+                                paint.textAlign = android.graphics.Paint.Align.LEFT
+                                drawContext.canvas.nativeCanvas.drawText("晚上 (18-24): $eveningPct%", 8.dp.toPx(), 25.dp.toPx(), paint)
+
+                                // Draw shapes
+                                val dotRadius = when (period) {
+                                    "day" -> 8.dp.toPx()
+                                    "week" -> 6.dp.toPx()
+                                    else -> 4.5.dp.toPx()
+                                }
+                                val strokeW = when (period) {
+                                    "day" -> 1.5.dp.toPx()
+                                    "week" -> 1.0.dp.toPx()
+                                    else -> 0.7.dp.toPx()
+                                }
+
+                                plottedDots.forEach { dot ->
+                                    val dotAlpha = clockEntryAlpha(sweepProgress.value, dot.minute)
+                                    if (dotAlpha > 0f) {
+                                        val px = dot.x
+                                        val py = dot.y
+
+                                        when (dot.shape) {
+                                            "circle" -> {
+                                                drawCircle(
+                                                    color = dot.color,
+                                                    radius = dotRadius,
+                                                    center = Offset(px, py),
+                                                    alpha = dotAlpha
+                                                )
+                                                drawCircle(
+                                                    color = Color.White,
+                                                    radius = dotRadius,
+                                                    center = Offset(px, py),
+                                                    style = Stroke(width = strokeW),
+                                                    alpha = dotAlpha
+                                                )
+                                            }
+                                            "triangle" -> {
+                                                val path = Path().apply {
+                                                    moveTo(px, py - dotRadius * 1.1f)
+                                                    lineTo(px - dotRadius, py + dotRadius * 0.9f)
+                                                    lineTo(px + dotRadius, py + dotRadius * 0.9f)
+                                                    close()
+                                                }
+                                                drawPath(path = path, color = dot.color, alpha = dotAlpha)
+                                                drawPath(path = path, color = Color.White, style = Stroke(width = strokeW), alpha = dotAlpha)
+                                            }
+                                            "diamond" -> {
+                                                val path = Path().apply {
+                                                    moveTo(px, py - dotRadius * 1.1f)
+                                                    lineTo(px + dotRadius * 1.1f, py)
+                                                    lineTo(px, py + dotRadius * 1.1f)
+                                                    lineTo(px - dotRadius * 1.1f, py)
+                                                    close()
+                                                }
+                                                drawPath(path = path, color = dot.color, alpha = dotAlpha)
+                                                drawPath(path = path, color = Color.White, style = Stroke(width = strokeW), alpha = dotAlpha)
+                                            }
+                                            "star" -> {
+                                                val path = Path().apply {
+                                                    val spikes = 5
+                                                    val outerRadius = dotRadius * 1.25f
+                                                    val innerRadius = dotRadius * 0.6f
+                                                    var rot = Math.PI / 2 * 3
+                                                    val step = Math.PI / spikes
+                                                    for (i in 0 until spikes) {
+                                                        val px1 = px + Math.cos(rot).toFloat() * outerRadius
+                                                        val py1 = py + Math.sin(rot).toFloat() * outerRadius
+                                                        if (i == 0) moveTo(px1, py1) else lineTo(px1, py1)
+                                                        rot += step
+
+                                                        val px2 = px + Math.cos(rot).toFloat() * innerRadius
+                                                        val py2 = py + Math.sin(rot).toFloat() * innerRadius
+                                                        lineTo(px2, py2)
+                                                        rot += step
+                                                    }
+                                                    close()
+                                                }
+                                                drawPath(path = path, color = dot.color, alpha = dotAlpha)
+                                                drawPath(path = path, color = Color.White, style = Stroke(width = strokeW), alpha = dotAlpha)
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        val dotRadiusDp = when (period) {
-                            "day" -> 8.dp
-                            "week" -> 6.dp
-                            else -> 4.5.dp
-                        }
-
-                        // Left column for makeup check-ins
-                        Column(
-                            modifier = Modifier
-                                .align(Alignment.CenterStart)
-                                .padding(start = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            makeupCheckins.filterIndexed { idx, _ -> idx % 2 == 0 }.forEach { (todo, dateStr) ->
-                                val visualStyle = todo.statsVisualStyle()
-                                var showTooltip by remember { mutableStateOf(false) }
-                                Box(
-                                    modifier = Modifier
-                                        .size(22.dp)
-                                        .pointerInput(todo, dateStr) {
-                                            detectTapGestures(
-                                                onTap = { onEditTodo(todo) },
-                                                onLongPress = { showTooltip = true }
-                                            )
-                                        },
-                                    contentAlignment = Alignment.Center
+                            StatsTimelineLayer(viewModel, timelineTodos, period, targetDate, showTiming, onEditTodo,
+                                sweepProgress = { sweepProgress.value },
+                                fallbackTap = { offset ->
+                                    val clicked = plottedDots.minByOrNull { (Offset(it.x, it.y) - offset).getDistance() }
+                                    if (clicked != null && (Offset(clicked.x, clicked.y) - offset).getDistance() <= with(density) { 24.dp.toPx() }) onEditTodo(clicked.todo)
+                                    else tooltipTodo = null
+                                }, fallbackLongPress = { offset ->
+                                    val clicked = plottedDots.minByOrNull { (Offset(it.x, it.y) - offset).getDistance() }
+                                    if (clicked != null && (Offset(clicked.x, clicked.y) - offset).getDistance() <= with(density) { 24.dp.toPx() }) {
+                                        tooltipTodo = clicked.todo; tooltipDate = clicked.dateLabel; tooltipTime = clicked.timeLabel; tooltipOffset = offset
+                                    }
+                                })
+                            // Tooltip Pop-up overlay for Canvas dots
+                            tooltipTodo?.let { todo ->
+                                Popup(
+                                    alignment = Alignment.TopStart,
+                                    offset = IntOffset(tooltipOffset.x.toInt(), tooltipOffset.y.toInt() - 40.dp.value.toInt()),
+                                    onDismissRequest = { tooltipTodo = null }
                                 ) {
-                                    MakeupIcon(
-                                        shape = visualStyle.shape,
-                                        color = visualStyle.color,
-                                        dotRadius = dotRadiusDp,
-                                        modifier = Modifier.size(22.dp)
-                                    )
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.inverseSurface),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Text(todo.content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.inverseOnSurface, fontWeight = FontWeight.Bold)
+                                            Text("完成日期: $tooltipDate", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f))
+                                            Text("打卡时间: $tooltipTime", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f))
+                                        }
+                                    }
+                                }
+                            }
 
-                                    if (showTooltip) {
-                                        Popup(
-                                            alignment = Alignment.TopStart,
-                                            offset = IntOffset(0, -40.dp.value.toInt()),
-                                            onDismissRequest = { showTooltip = false }
-                                        ) {
-                                            Card(
-                                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.inverseSurface),
-                                                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                                                shape = RoundedCornerShape(8.dp)
+                            val dotRadiusDp = when (period) {
+                                "day" -> 8.dp
+                                "week" -> 6.dp
+                                else -> 4.5.dp
+                            }
+
+                            // Left column for makeup check-ins
+                            Column(
+                                modifier = Modifier
+                                    .align(Alignment.CenterStart)
+                                    .padding(start = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                makeupCheckins.filterIndexed { idx, _ -> idx % 2 == 0 }.forEach { (todo, dateStr) ->
+                                    val visualStyle = todo.statsVisualStyle()
+                                    var showTooltip by remember { mutableStateOf(false) }
+                                    Box(
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .pointerInput(todo, dateStr) {
+                                                detectTapGestures(
+                                                    onTap = { onEditTodo(todo) },
+                                                    onLongPress = { showTooltip = true }
+                                                )
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        MakeupIcon(
+                                            shape = visualStyle.shape,
+                                            color = visualStyle.color,
+                                            dotRadius = dotRadiusDp,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+
+                                        if (showTooltip) {
+                                            Popup(
+                                                alignment = Alignment.TopStart,
+                                                offset = IntOffset(0, -40.dp.value.toInt()),
+                                                onDismissRequest = { showTooltip = false }
                                             ) {
-                                                Column(modifier = Modifier.padding(10.dp)) {
-                                                    Text(todo.content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.inverseOnSurface, fontWeight = FontWeight.Bold)
-                                                    Text("完成日期: $dateStr", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f))
+                                                Card(
+                                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.inverseSurface),
+                                                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                                                    shape = RoundedCornerShape(8.dp)
+                                                ) {
+                                                    Column(modifier = Modifier.padding(10.dp)) {
+                                                        Text(todo.content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.inverseOnSurface, fontWeight = FontWeight.Bold)
+                                                        Text("完成日期: $dateStr", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Right column for makeup check-ins
+                            Column(
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .padding(end = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                makeupCheckins.filterIndexed { idx, _ -> idx % 2 == 1 }.forEach { (todo, dateStr) ->
+                                    val visualStyle = todo.statsVisualStyle()
+                                    var showTooltip by remember { mutableStateOf(false) }
+                                    Box(
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .pointerInput(todo, dateStr) {
+                                                detectTapGestures(
+                                                    onTap = { onEditTodo(todo) },
+                                                    onLongPress = { showTooltip = true }
+                                                )
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        MakeupIcon(
+                                            shape = visualStyle.shape,
+                                            color = visualStyle.color,
+                                            dotRadius = dotRadiusDp,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+
+                                        if (showTooltip) {
+                                            Popup(
+                                                alignment = Alignment.TopEnd,
+                                                offset = IntOffset(0, -40.dp.value.toInt()),
+                                                onDismissRequest = { showTooltip = false }
+                                            ) {
+                                                Card(
+                                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.inverseSurface),
+                                                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                                                    shape = RoundedCornerShape(8.dp)
+                                                ) {
+                                                    Column(modifier = Modifier.padding(10.dp)) {
+                                                        Text(todo.content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.inverseOnSurface, fontWeight = FontWeight.Bold)
+                                                        Text("完成日期: $dateStr", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f))
+                                                    }
                                                 }
                                             }
                                         }
@@ -832,60 +889,9 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                             }
                         }
 
-                        // Right column for makeup check-ins
-                        Column(
-                            modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .padding(end = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            makeupCheckins.filterIndexed { idx, _ -> idx % 2 == 1 }.forEach { (todo, dateStr) ->
-                                val visualStyle = todo.statsVisualStyle()
-                                var showTooltip by remember { mutableStateOf(false) }
-                                Box(
-                                    modifier = Modifier
-                                        .size(22.dp)
-                                        .pointerInput(todo, dateStr) {
-                                            detectTapGestures(
-                                                onTap = { onEditTodo(todo) },
-                                                onLongPress = { showTooltip = true }
-                                            )
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    MakeupIcon(
-                                        shape = visualStyle.shape,
-                                        color = visualStyle.color,
-                                        dotRadius = dotRadiusDp,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-
-                                    if (showTooltip) {
-                                        Popup(
-                                            alignment = Alignment.TopEnd,
-                                            offset = IntOffset(0, -40.dp.value.toInt()),
-                                            onDismissRequest = { showTooltip = false }
-                                        ) {
-                                            Card(
-                                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.inverseSurface),
-                                                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                                                shape = RoundedCornerShape(8.dp)
-                                            ) {
-                                                Column(modifier = Modifier.padding(10.dp)) {
-                                                    Text(todo.content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.inverseOnSurface, fontWeight = FontWeight.Bold)
-                                                    Text("完成日期: $dateStr", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f))
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
                     }
-
                     TimelineLegend(viewModel, timelineTodos, period, targetDate, showTiming, onEditTodo)
-                    if (makeupCheckinCount > 0) {
+                    if (makeupCheckinCount > 0 && !verticalTiming) {
                         val periodText = when (period) {
                             "day" -> "本日"
                             "week" -> "本周"

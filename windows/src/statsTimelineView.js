@@ -1,4 +1,5 @@
 import { collectSubtaskEvents, collectTimerArcs, arcPath, hitArcs, clockMinute, clockTooltipDateTime } from './statsTimeline.js';
+import { renderVerticalTimeline } from './statsVerticalView.js';
 import { formatDuration } from './timeTracking.js';
 import { prepareClockEntry, playClockEntry } from './clockAnimation.js';
 
@@ -77,9 +78,38 @@ export function renderTimeline({ svgEl, todos, entries, source, period, target, 
         const b = node('button', `子步骤 · ${e.date} · ${e.subtask.content}（无具体时间）`);
         b.onclick = () => details('子步骤完成', [e.todo.content, e.subtask.content, e.date], '编辑任务', () => openTodo(e.todo)); undated.append(b);
     });
+    const openTimers = list => {
+        const parts = [...new Map(list.map(a => [`${a.entry.id}:${a.date}`, a])).values()];
+        if (!parts.length) return;
+        details('计时区间', parts.map(a => `${a.entry.task_content_snapshot} · ${a.entry.label_snapshot || '未分类'}${a.entry.task_unavailable ? ' · 原任务不可用' : a.entry.task_deleted ? ' · 原任务已删除' : ''}\n原记录：${timeText(a.entry.started_at)} — ${timeText(a.entry.ended_at)}\n本日：${timeText(a.started_at)} — ${timeText(a.ended_at)} · ${formatDuration(a.duration)}`), '管理记录', () => openRecords([...new Map(parts.map(a => [a.entry.id, a.entry])).values()]));
+    };
+    const timerTooltip = list => {
+        const parts = [...new Map(list.map(a => [`${a.entry.id}:${a.date}`, a])).values()];
+        if (!parts.length) return null;
+        return { title: parts.length === 1 ? parts[0].entry.task_content_snapshot : `${parts.length} 条计时记录`, lines: [...parts.slice(0, 3).flatMap(a => {
+            const start = clockTooltipDateTime(a.started_at), end = clockTooltipDateTime(a.ended_at);
+            return [...(parts.length > 1 ? [a.entry.task_content_snapshot] : []),
+                `标签: ${a.entry.label_snapshot || '未分类'}`,
+                `计时区间: ${start.date} ${start.time} — ${end.date} ${end.time}`,
+                `投入时长: ${formatDuration(a.duration)}`];
+        }), ...(parts.length > 3 ? [`另有 ${parts.length - 3} 条，点击查看全部`] : [])] };
+    };
     function draw(visible) {
         const tooltip = document.getElementById('clock-tooltip'); if (tooltip) tooltip.style.display = 'none';
         svgEl.querySelector('.timeline-layer')?.remove(); document.querySelectorAll('.timeline-detail').forEach(d => d.close());
+        card.querySelector('.timeline-lines-host')?.remove();
+        const linear = visible && period !== 'day';
+        card.classList.toggle('timeline-linear-mode', linear);
+        const clockContainer = svgEl.closest('.efficiency-clock-container');
+        clockContainer.style.display = linear ? 'none' : 'flex';
+        note.textContent = visible && !arcs.length ? '本时段暂无有效计时记录。' : !visible && arcs.length ? '可点击“显示计时”查看投入。' : '';
+        note.hidden = !note.textContent;
+        if (linear) {
+            const host = document.createElement('div'); host.className = 'timeline-lines-host'; clockContainer.after(host);
+            renderVerticalTimeline({ host, todos: todos.filter(t => filters[type(t)] !== false), steps, arcs, period, target,
+                bindTooltip: bindClockTooltip, timerTooltip, openTimers, openTodo, showDetails: details });
+            return;
+        }
         const layer = svg('g', { class: 'timeline-layer' });
         if (visible) {
             arcs.forEach(a => {
@@ -87,11 +117,6 @@ export function renderTimeline({ svgEl, todos, entries, source, period, target, 
                 prepareClockEntry(path, a.startMinute, a.endMinute); layer.append(path);
             });
             const hit = svg('circle', { cx: 170, cy: 130, r: 100, fill: 'none', stroke: 'transparent', 'stroke-width': 18, 'pointer-events': 'stroke', role: 'button', tabindex: 0, 'aria-label': '查看计时区间记录' });
-            const show = list => {
-                const parts = [...new Map(list.map(a => [`${a.entry.id}:${a.date}`, a])).values()];
-                if (!parts.length) return;
-                details('计时区间', parts.map(a => `${a.entry.task_content_snapshot} · ${a.entry.label_snapshot || '未分类'}${a.entry.task_unavailable ? ' · 原任务不可用' : a.entry.task_deleted ? ' · 原任务已删除' : ''}\n原记录：${timeText(a.entry.started_at)} — ${timeText(a.entry.ended_at)}\n本日：${timeText(a.started_at)} — ${timeText(a.ended_at)} · ${formatDuration(a.duration)}`), '管理记录', () => openRecords([...new Map(parts.map(a => [a.entry.id, a.entry])).values()]));
-            };
             const arcsAt = event => {
                 if (event.clientX == null) return arcs;
                 const p = svgEl.createSVGPoint(); p.x = event.clientX; p.y = event.clientY;
@@ -99,19 +124,9 @@ export function renderTimeline({ svgEl, todos, entries, source, period, target, 
                 const minute = (Math.atan2(local.x - 170, 130 - local.y) * 1440 / (2 * Math.PI) + 1440) % 1440;
                 return hitArcs(arcs, minute, 8);
             };
-            bindClockTooltip(hit, '', [], null, 'transparent', 18, 1, event => {
-                const parts = [...new Map(arcsAt(event).map(a => [`${a.entry.id}:${a.date}`, a])).values()];
-                if (!parts.length) return null;
-                return { title: parts.length === 1 ? parts[0].entry.task_content_snapshot : `${parts.length} 条计时记录`, lines: [...parts.slice(0, 3).flatMap(a => {
-                    const start = clockTooltipDateTime(a.started_at), end = clockTooltipDateTime(a.ended_at);
-                    return [...(parts.length > 1 ? [a.entry.task_content_snapshot] : []),
-                        `标签: ${a.entry.label_snapshot || '未分类'}`,
-                        `计时区间: ${start.date} ${start.time} — ${end.date} ${end.time}`,
-                        `投入时长: ${formatDuration(a.duration)}`];
-                }), ...(parts.length > 3 ? [`另有 ${parts.length - 3} 条，点击查看全部`] : [])] };
-            });
-            hit.onclick = event => show(arcsAt(event));
-            hit.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); show(arcs); } };
+            bindClockTooltip(hit, '', [], null, 'transparent', 18, 1, event => timerTooltip(arcsAt(event)));
+            hit.onclick = event => openTimers(arcsAt(event));
+            hit.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openTimers(arcs); } };
             if (arcs.length) layer.append(hit);
         }
         steps.filter(e => e.explicit).forEach((e, i) => {

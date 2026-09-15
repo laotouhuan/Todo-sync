@@ -2,10 +2,35 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { availableLabels, resolveLearningEntries, taskReference, summarizeLearning } from '../src/timeTracking.js';
 import { exportReviews } from '../src/reviewUtils.js';
-import { collectSubtaskEvents, collectTimerArcs, arcPath, hitArcs, clockMinute, clockTooltipDateTime } from '../src/statsTimeline.js';
+import { collectSubtaskEvents, collectTimerArcs, arcPath, hitArcs, clockMinute, clockTooltipDateTime, timelineDays, collectTaskTimelineEvents, hitTimelineSegments } from '../src/statsTimeline.js';
 process.env.TZ = 'Asia/Shanghai';
 const source = { type: 'personal' }, day = '2026-09-10T12:00:00';
 const entry = (id, start = '2026-09-10T09:00:00+08:00', end = '2026-09-10T10:30:00+08:00') => ({ id, task_ref: taskReference({ id: 'task' }), started_at: start, ended_at: end, updated_at: start, created_at: start, label_snapshot: '错字' });
+
+test('直线日期轴覆盖周一至周日及完整月份，包含跨年周和闰年二月', () => {
+    assert.deepEqual(timelineDays('week', '2027-01-01T12:00:00'), ['2026-12-28', '2026-12-29', '2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02', '2027-01-03']);
+    for (const [date, count] of [['2026-02-10', 28], ['2028-02-10', 29], ['2026-09-12', 30], ['2026-10-12', 31]]) {
+        const days = timelineDays('month', `${date}T12:00:00`); assert.equal(days.length, count); assert.ok(days[0].endsWith('-01')); assert.equal(Number(days.at(-1).slice(8)), count);
+    }
+});
+
+test('完成点按本地完成日期进入直线，日期打卡不伪造零点且任务状态不变', () => {
+    const todos = [{ id: 'a', completed: true, date: '2030-01-01', completed_at: '2026-09-10T17:00:00Z' },
+        { id: 'b', task_type: 'weekly_checkin', completed_dates: ['2026-09-10', '2026-09-10', '2026-09-10T17:00:00Z', '2026-09-30'] },
+        { id: 'c', completed: true, deleted: true, completed_at: '2026-09-10T12:00:00Z' }];
+    const before = structuredClone(todos), events = collectTaskTimelineEvents(todos, 'week', day);
+    assert.deepEqual(events.map(e => [e.date, e.explicit]), [['2026-09-11', true], ['2026-09-10', false], ['2026-09-11', true]]);
+    assert.deepEqual(todos, before);
+});
+
+test('直线命中按天隔离，午夜不回绕；跨午夜计时分属两列', () => {
+    const parts = collectTimerArcs([entry('cross', '2026-09-10T23:30:00+08:00', '2026-09-11T00:30:00+08:00')], source, 'week', day);
+    assert.equal(hitTimelineSegments(parts, '2026-09-10', 0, 10).length, 0);
+    assert.equal(hitTimelineSegments(parts, '2026-09-10', 1440, 10).length, 1);
+    assert.equal(hitTimelineSegments(parts, '2026-09-11', 0, 10).length, 1);
+    assert.equal(hitTimelineSegments(parts, '2026-09-11', 1440, 10).length, 0);
+    assert.equal(hitTimelineSegments(parts, '2026-09-12', 0, 10).length, 0);
+});
 
 test('悬浮日期不显示年、时间不显示秒，按本地日期处理跨日和补打卡', () => {
     assert.deepEqual(clockTooltipDateTime('2026-09-10T16:05:59.999Z'), { date: '09-11', time: '00:05' });

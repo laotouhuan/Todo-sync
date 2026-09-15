@@ -265,7 +265,9 @@ fun ClassicListView(viewModel: TodoViewModel) {
         }.sortedWith(TodoComparator)
     }
 
-    val focusItemsOriginal = remember(filtered, todayStr, thisWeekStr, thisMonthStr, expandToday, expandNoDate, expandWeek, expandMonth) {
+    // 按实际设置的本周任务判断顺序，不受搜索或完成状态影响。
+    val hasWeekTasks = activeTodos.any { !it.deleted && it.date == thisWeekStr }
+    val focusItemsOriginal = remember(filtered, hasWeekTasks, todayStr, thisWeekStr, thisMonthStr, expandToday, expandNoDate, expandWeek, expandMonth) {
         val groups = classifyForTodayFocus(filtered, todayStr, thisWeekStr, thisMonthStr)
         val todayTasks = groups.todayTasks
         val noDateTasks = groups.noDateTasks
@@ -280,26 +282,29 @@ fun ClassicListView(viewModel: TodoViewModel) {
             list.addAll(todayTasks.map { FocusItem.Task(it) })
         }
 
-        // 2. Week Tasks
-        list.add(FocusItem.Header("HEADER_WEEK", "本周任务", Color(0xFFFADB14), expandWeek, { expandWeek = !expandWeek }))
-        if (expandWeek) {
-            if (weekTasks.isEmpty()) {
-                list.add(FocusItem.EmptyPlaceholder("PLACEHOLDER_WEEK", "本周无打卡计划，您可从上期导入", "weekly"))
-            } else {
-                list.addAll(weekTasks.map { FocusItem.Task(it) })
+        val weekItems = buildList<FocusItem> {
+            add(FocusItem.Header("HEADER_WEEK", "本周任务", Color(0xFFFADB14), expandWeek, { expandWeek = !expandWeek }))
+            if (expandWeek) {
+                if (weekTasks.isEmpty()) {
+                    add(FocusItem.EmptyPlaceholder("PLACEHOLDER_WEEK", "本周无打卡计划，您可从上期导入", "weekly"))
+                } else {
+                    addAll(weekTasks.map { FocusItem.Task(it) })
+                }
             }
         }
 
-        // 3. Month Tasks
-        list.add(FocusItem.Header("HEADER_MONTH", "本月任务", Color(0xFFFF7A45), expandMonth, { expandMonth = !expandMonth }))
-        if (expandMonth) {
-            if (monthTasks.isEmpty()) {
-                list.add(FocusItem.EmptyPlaceholder("PLACEHOLDER_MONTH", "本月无打卡计划，您可从上期导入", "monthly"))
-            } else {
-                list.addAll(monthTasks.map { FocusItem.Task(it) })
+        val monthItems = buildList<FocusItem> {
+            add(FocusItem.Header("HEADER_MONTH", "本月任务", Color(0xFFFF7A45), expandMonth, { expandMonth = !expandMonth }))
+            if (expandMonth) {
+                if (monthTasks.isEmpty()) {
+                    add(FocusItem.EmptyPlaceholder("PLACEHOLDER_MONTH", "本月无打卡计划，您可从上期导入", "monthly"))
+                } else {
+                    addAll(monthTasks.map { FocusItem.Task(it) })
+                }
             }
         }
 
+        list.addAll(if (hasWeekTasks) weekItems + monthItems else monthItems + weekItems)
         list
     }
 

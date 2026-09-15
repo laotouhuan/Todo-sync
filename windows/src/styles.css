@@ -2988,6 +2988,13 @@ textarea {
 .edit-section > .input-group { margin: 8px 0 !important; }
 .edit-subtask-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .timeline-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.timeline-lines-layout { display: flex; width: 100%; margin-top: 12px; }
+.timeline-lines-layout > svg { flex: 0 0 44px; }
+.timeline-lines-scroll { min-width: 0; flex: 1; overflow-x: auto; overflow-y: hidden; padding-bottom: 6px; }
+.timeline-axis-label { fill: var(--text-secondary); font-size: 10px; font-family: inherit; }
+.timeline-linear-mode #makeup-checkins-left,
+.timeline-linear-mode #makeup-checkins-right,
+.timeline-linear-mode #time-distribution-tip { display: none !important; }
 .timeline-toggle { font: inherit; font-size: .8rem; padding: 6px 10px; min-height: 32px; background: transparent; border: 1px solid var(--glass-border); border-radius: 6px; color: var(--text-secondary); cursor: pointer; }
 .timeline-toggle[aria-pressed="true"] { color: #22d3ee; border-color: #22d3ee; }
 .timeline-note { font-size: .75rem; color: var(--text-secondary); line-height: 1.6; }
