@@ -109,6 +109,7 @@ fun TodoApp(viewModel: TodoViewModel) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val discardedShortTimers by viewModel.discardedShortTimers.collectAsState()
 
     Scaffold(
         topBar = {
@@ -146,6 +147,15 @@ fun TodoApp(viewModel: TodoViewModel) {
             composable(Screen.Stats.route) { StatsView(viewModel) }
             composable(Screen.Settings.route) { SettingsView(viewModel) }
         }
+    }
+    if (discardedShortTimers > 0) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissShortTimerNotice,
+            title = { Text("计时过短") },
+            text = { Text(if (discardedShortTimers == 1) com.todo.app.data.model.Learning.SHORT_TIME_ENTRY_MESSAGE
+                else "${discardedShortTimers} 条计时未超过 30 秒，不保存为记录。") },
+            confirmButton = { TextButton(onClick = viewModel::dismissShortTimerNotice) { Text("知道了") } }
+        )
     }
 }
 

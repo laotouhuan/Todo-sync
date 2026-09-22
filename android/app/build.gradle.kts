@@ -13,27 +13,36 @@ android {
         applicationId = "com.todo.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 34
-        versionName = "1.4.0"
+        versionCode = 35
+        versionName = "1.4.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file("todo-release.keystore")
-            storePassword = "235711lth"
-            keyAlias = "key0"
-            keyPassword = "235711lth"
+        val keystoreFile = file("todo-release.keystore")
+        if (keystoreFile.exists()) {
+            create("release") {
+                storeFile = keystoreFile
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "235711lth"
+                keyAlias = System.getenv("KEY_ALIAS") ?: "key0"
+                keyPassword = System.getenv("KEY_PASSWORD") ?: "235711lth"
+            }
         }
     }
 
     buildTypes {
         getByName("debug") {
-            signingConfig = signingConfigs.getByName("release")
+            val releaseSigning = signingConfigs.findByName("release")
+            if (releaseSigning != null) {
+                signingConfig = releaseSigning
+            }
         }
         release {
-            signingConfig = signingConfigs.getByName("release")
+            val releaseSigning = signingConfigs.findByName("release")
+            if (releaseSigning != null) {
+                signingConfig = releaseSigning
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

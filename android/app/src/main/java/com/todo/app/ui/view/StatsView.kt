@@ -192,7 +192,8 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     var targetDate by remember { mutableStateOf(LocalDate.now()) }
 
     var showTimingPreference by remember { mutableStateOf(viewModel.configManager.statsShowTiming) }
-    val showTiming = period == "day" || showTimingPreference
+    val timingEnabled by viewModel.timeTrackingEnabled.collectAsState()
+    val showTiming = timingEnabled && (period == "day" || showTimingPreference)
     var showTaskList by remember { mutableStateOf(false) }
     var expandedFilterMenu by remember { mutableStateOf(false) }
     var checkedFilters by remember { mutableStateOf(setOf("normal", "daily", "weekly", "monthly")) }
@@ -499,7 +500,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("完成时间分布", style = MaterialTheme.typography.titleMedium)
-                        if (period != "day") TextButton(onClick = {
+                        if (timingEnabled && period != "day") TextButton(onClick = {
                             tooltipTodo = null
                             showTimingPreference = !showTimingPreference
                             viewModel.configManager.statsShowTiming = showTimingPreference

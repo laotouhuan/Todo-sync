@@ -15,6 +15,9 @@ import {
 import { normalizeLearningData, mergeLearningRecords, normalizeLabel } from './timeTracking.js';
 import { createLearningView } from './learningView.js';
 import { evaluateReminderRule } from './reminderRuleUtils.js';
+import { applyLabelChange } from './labelUtils.js';
+import { createLabelManager } from './labelManager.js';
+import { editTimelineSubtask } from './timelineEditor.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -68,6 +71,21 @@ const appState = {
 const learningUI = createLearningView({ state: appState, commit: commitLearning,
     redraw: () => render(), sync: async () => { await _saveQueue; await loadData(); }, toast: message => showToast(message),
     exportFile: ({ filename, content }) => invoke('export_review_markdown', { filename, content }) });
+
+const labelManager = createLabelManager({ getTodos: () => appState.todoData.todos, commit: commitPersonalLabels });
+
+function commitPersonalLabels(plan, target) {
+    const operation = _saveQueue.then(async () => {
+        const result = applyLabelChange(appState.todoData.todos, plan, target, new Date().toISOString());
+        if (!result.count) return 0;
+        const previous = appState.todoData;
+        appState.todoData = { ...previous, todos: result.todos };
+        if (!await _doSaveData({ preserveRecords: true })) { appState.todoData = previous; throw new Error('保存失败，请重试'); }
+        _lastRenderedHash = ''; render(); learningUI.refresh();
+        return result.count;
+    });
+    _saveQueue = operation.catch(() => {}); return operation;
+}
 
 function commitLearning(change) {
     const operation = _saveQueue.then(async () => {
@@ -1135,22 +1153,24 @@ function collectGlobalRulesFromUI() {
     return rules.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
 }
 
-function saveData() {
-    _saveQueue = _saveQueue.then(() => _doSaveData()).catch(e => console.error('Save failed:', e));
+function saveData(options) {
+    _saveQueue = _saveQueue.then(() => _doSaveData(options)).catch(e => console.error('Save failed:', e));
     return _saveQueue;
 }
 
-async function _doSaveData() {
+async function _doSaveData({ preserveRecords = false } = {}) {
     try {
         setSyncStatus(SyncState.SYNCING);
         // 执行物理清理，将删除超 7 天的旧任务彻底抹除，维持 JSON 大小
-        normalizeLearningData(appState.todoData);
-        const deletionTime = new Date().toISOString();
-        for (const entry of appState.todoData.time_entries) {
-            if (!entry.deleted && !entry.ended_at && entry.task_ref.source_type === 'personal' && appState.todoData.todos.some(t => t.id === entry.task_ref.todo_id && t.deleted))
-                entry.ended_at = entry.updated_at = deletionTime;
+        if (!preserveRecords) {
+            normalizeLearningData(appState.todoData);
+            const deletionTime = new Date().toISOString();
+            for (const entry of appState.todoData.time_entries) {
+                if (!entry.deleted && !entry.ended_at && entry.task_ref.source_type === 'personal' && appState.todoData.todos.some(t => t.id === entry.task_ref.todo_id && t.deleted))
+                    entry.ended_at = entry.updated_at = deletionTime;
+            }
+            purgeOldDeletedTodos();
         }
-        purgeOldDeletedTodos();
         
         appState.todoData.last_updated = new Date().toISOString();
         const jsonStr = JSON.stringify(appState.todoData, null, 2);
@@ -2036,7 +2056,8 @@ async function saveEditModal() {
         const { nickname } = extractCollaborator(appState.currentEditingTodo.content);
         draft.content = nickname ? `${newContent} (由 [${nickname}] 添加)` : newContent;
 
-        draft.label = normalizeLabel(document.getElementById('edit-learning-label')?.value);
+        const labelInput = document.getElementById('edit-learning-label');
+        if (labelInput) draft.label = normalizeLabel(labelInput.value);
         const taskTypeSelect = document.getElementById('edit-task-type');
         if (taskTypeSelect) {
             const taskTypeVal = taskTypeSelect.value;
@@ -2190,6 +2211,30 @@ function updateEditModalFields(taskTypeVal) {
         const todo = appState.currentEditingTodo;
         completedAtRow.style.display = (isNormalOrDaily && todo && todo.completed) ? 'flex' : 'none';
     }
+}
+
+function openTimelineSubtask(todo, subtask) {
+    const source = { ...appState.activeSource };
+    editTimelineSubtask(todo, subtask, async patch => {
+        const operation = _saveQueue.then(async () => {
+            if (source.type !== appState.activeSource.type || source.id !== appState.activeSource.id) throw new Error('清单已切换，请重新打开');
+            const data = source.type === 'collaboration' ? appState.collabData : appState.todoData;
+            const current = data?.todos.find(t => t.id === todo.id && !t.deleted);
+            if (!current?.subtasks.some(s => s.id === subtask.id)) throw new Error('该子步骤已删除');
+            const draft = { ...current, updated_at: new Date().toISOString(),
+                subtasks: current.subtasks.map(s => s.id === subtask.id ? { ...s, ...patch } : s) };
+            if (source.type === 'collaboration') {
+                await invoke('write_collaboration_todo', { collabId: source.id, todoJson: JSON.stringify(draft) });
+                data.todos = data.todos.map(t => t.id === draft.id ? draft : t);
+            } else {
+                const previous = data.todos;
+                data.todos = previous.map(t => t.id === draft.id ? draft : t);
+                if (!await _doSaveData()) { data.todos = previous; throw new Error('保存失败，请重试'); }
+            }
+        });
+        _saveQueue = operation.catch(() => {}); await operation;
+        _lastRenderedHash = ''; render();
+    });
 }
 
 function openEditModal(todo) {
@@ -2951,8 +2996,10 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     }
 
     renderTimeline({ svgEl: document.getElementById('efficiency-clock-svg'), todos: activeTodos,
+        timingEnabled: appState.appConfig.time_tracking_enabled !== false,
         entries: learningUI.resolvedEntries(), source: appState.activeSource, period: appState.statsPeriod,
-        target: appState.statsTargetDate, filters: appState.statsFilters, openTodo: openEditModal, openRecords: learningUI.showRecords });
+        target: appState.statsTargetDate, filters: appState.statsFilters, openTodo: openEditModal,
+        openRecord: learningUI.editRecord, openSubtask: openTimelineSubtask });
 
     let displayTodos = periodTodos;
     displayTodos.sort(sortFunc);
@@ -3348,6 +3395,7 @@ function renderFlatPendingGroup(group, label, themeColor, todayStr, tomorrowStr,
 // ====== Main Render Function ======
 
 function render() {
+    labelManager.refresh();
     // 协作模式下的 Loading 与 Error 阻断渲染
     const inputEl = document.getElementById('todo-input');
     if (appState.activeSource.type === 'collaboration') {
@@ -3386,7 +3434,8 @@ function render() {
         appState.activeSource.type,
         appState.activeSource.id || '',
         appState.collabLoading ? 'L' : 'D',
-        appState.collabError || ''
+        appState.collabError || '',
+        appState.appConfig.time_tracking_enabled !== false
     ].join('|');
     learningUI.refresh();
     const _hash = getActiveTodos().map(t => `${t.id}:${t.updated_at}:${t.completed}`).join('|') + '|' + uiStateHash + '|' + JSON.stringify([appState.todoData.time_entries, appState.todoData.daily_reviews]);
@@ -3899,6 +3948,7 @@ function initApp() {
 
     // 设置选项卡 Tab 物理切换逻辑
     const tabBtns = document.querySelectorAll('.settings-tab-btn');
+    labelManager.mount(document.getElementById('panel-labels'));
     const panels = document.querySelectorAll('.settings-panel');
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -4015,6 +4065,8 @@ function initApp() {
 
             const insertionEl = document.getElementById('setting-default-insertion');
             if (insertionEl) insertionEl.value = config.default_insertion || 'top';
+            document.getElementById('setting-time-tracking').checked = config.time_tracking_enabled !== false;
+            labelManager.refresh();
             
             const shareContainer = document.getElementById('share-output-container');
             if (shareContainer) shareContainer.style.display = 'none';
@@ -4072,6 +4124,8 @@ function initApp() {
 
     if (settingsSaveBtn) {
         settingsSaveBtn.addEventListener('click', async () => {
+            settingsSaveBtn.disabled = true;
+            try {
             const newConfig = {
                 sync_mode: settingSyncMode ? settingSyncMode.value : 'local',
                 sync_path: settingSyncPath ? settingSyncPath.value : '',
@@ -4081,8 +4135,11 @@ function initApp() {
                 webdav_filepath: settingWebdavFilepath ? settingWebdavFilepath.value : '',
                 nickname: document.getElementById('setting-nickname') ? document.getElementById('setting-nickname').value.trim() || null : null,
                 default_due_date: document.getElementById('setting-default-due-date') ? document.getElementById('setting-default-due-date').value : 'none',
-                default_insertion: document.getElementById('setting-default-insertion') ? document.getElementById('setting-default-insertion').value : 'top'
+                default_insertion: document.getElementById('setting-default-insertion') ? document.getElementById('setting-default-insertion').value : 'top',
+                time_tracking_enabled: document.getElementById('setting-time-tracking').checked
             };
+
+            if (!newConfig.time_tracking_enabled && !await learningUI.prepareDisable()) return;
 
             if (newConfig.sync_mode === 'local' && newConfig.sync_path) {
                 try {
@@ -4094,6 +4151,7 @@ function initApp() {
 
             await invoke("save_app_config", { config: newConfig });
             appState.appConfig = newConfig;
+            _lastRenderedHash = ''; learningUI.refresh(); render();
 
             // 保存提醒配置到 todoData
             const privacySelect = document.getElementById('setting-privacy-mode');
@@ -4104,9 +4162,11 @@ function initApp() {
                 global_rules: collectGlobalRulesFromUI()
             };
             
+            if (!await saveData({ preserveRecords: true })) throw new Error('偏好已保存，但提醒设置保存失败，请重试');
             if (settingsModal) settingsModal.classList.remove('active');
-            await saveData();
             await loadData();
+            } catch (e) { showToast('设置保存失败：' + (e.message || String(e))); }
+            finally { settingsSaveBtn.disabled = false; }
         });
     }
 

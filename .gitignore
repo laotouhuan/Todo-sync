@@ -13,7 +13,7 @@ pnpm-debug.log*
 # 2. Rust / Tauri 构建产物
 # -----------------------------
 **/target/
-# Cargo.lock # (如果您不希望锁定依赖版本，可以取消注释此行)
+# Cargo.lock 纳入版本控制以锁定依赖版本
 
 # -----------------------------
 # 3. Android 原生项目产物
@@ -34,7 +34,11 @@ captures/
 # -----------------------------
 todo_data.json
 todo_data_*.json
-*.lock
+collaborations.json
+collaborations_*.json
+todo_data.lock
+collaborations.lock
+*.lock.tmp
 backups/
 
 # -----------------------------
@@ -50,9 +54,12 @@ venv/
 # 6. 敏感信息与环境变量
 # -----------------------------
 .env
-.env.local
+.env.*
+!.env.example
 *.key
 *.pem
+*.keystore
+*.jks
 windows/~/
 # Tauri 配置文件含 WebDAV 明文凭据，禁止提交
 config.json

@@ -455,6 +455,7 @@
           <button class="settings-tab-btn active" data-target="panel-about">关于</button>
           <button class="settings-tab-btn" data-target="panel-reminder">提醒</button>
           <button class="settings-tab-btn" data-target="panel-pref">偏好</button>
+          <button class="settings-tab-btn" data-target="panel-labels">标签</button>
           <button class="settings-tab-btn" data-target="panel-collab">协作</button>
           <button class="settings-tab-btn" data-target="panel-sync">同步</button>
         </div>
@@ -521,7 +522,13 @@
                 <option value="bottom">列表最下方（顺序置底）</option>
               </select>
             </div>
+            <div class="input-group">
+              <label><input id="setting-time-tracking" type="checkbox" checked /> 启用任务计时</label>
+              <p>显示计时入口、计时记录和时长统计；关闭后保留已有数据。仅对本机生效。</p>
+            </div>
           </div>
+
+          <div id="panel-labels" class="settings-panel"></div>
 
           <!-- 4. 协作共享 -->
           <div id="panel-collab" class="settings-panel">

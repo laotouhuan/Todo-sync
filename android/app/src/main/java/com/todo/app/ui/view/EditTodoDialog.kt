@@ -343,7 +343,10 @@ fun EditTodoDialog(
 
                     }
                     if (selectedTypeUi == TaskType.WEEKLY_CHECKIN || selectedTypeUi == TaskType.MONTHLY_CHECKIN) {
-                        EditDetailSection("打卡记录", "${completedDates.size} 次" + (targetCount?.let { " · 目标 $it 次" } ?: "")) {
+                        EditDetailSection(
+                            title = if (targetCount == 1) "打卡目标" else "打卡记录",
+                            summary = if (targetCount == 1) "目标 1 次" else "${completedDates.size} 次" + (targetCount?.let { " · 目标 $it 次" } ?: "")
+                        ) {
                             EditTodoCheckinSection(
                                 selectedTypeUi = selectedTypeUi,
                                 todo = todo,
@@ -559,13 +562,15 @@ private fun EditTodoCheckinSection(
         singleLine = true
     )
 
-    Spacer(Modifier.height(12.dp))
-    Text("打卡记录 (点击补卡/消卡)", style = MaterialTheme.typography.titleMedium)
-    Spacer(Modifier.height(4.dp))
-    if (selectedTypeUi == TaskType.WEEKLY_CHECKIN) {
-        EditWeekCheckinGrid(completedDates, onUpdateCompletedDates, todo.date)
-    } else {
-        EditMonthCheckinGrid(date, completedDates, onUpdateCompletedDates)
+    if (targetCount != 1) {
+        Spacer(Modifier.height(12.dp))
+        Text("打卡记录 (点击补卡/销卡)", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(4.dp))
+        if (selectedTypeUi == TaskType.WEEKLY_CHECKIN) {
+            EditWeekCheckinGrid(completedDates, onUpdateCompletedDates, todo.date)
+        } else {
+            EditMonthCheckinGrid(date, completedDates, onUpdateCompletedDates)
+        }
     }
 }
 

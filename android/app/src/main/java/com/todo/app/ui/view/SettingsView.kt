@@ -55,6 +55,7 @@ import com.todo.app.data.model.evaluateReminderRule
 import com.todo.app.data.model.renderReminderTemplate
 import java.util.UUID
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsView(viewModel: TodoViewModel) {
     var serverUrl by remember { mutableStateOf(viewModel.configManager.webDavUrl) }
@@ -66,6 +67,11 @@ fun SettingsView(viewModel: TodoViewModel) {
 
     var defaultDueDate by remember { mutableStateOf(viewModel.configManager.defaultDueDate) }
     var defaultInsertion by remember { mutableStateOf(viewModel.configManager.defaultInsertion) }
+    var timing by remember { mutableStateOf(viewModel.configManager.timeTrackingEnabled) }
+    val personalData by viewModel.todoData.collectAsState()
+    var closingTimers by remember { mutableStateOf<List<com.todo.app.data.model.TimeEntry>?>(null) }
+    var savingPreferences by remember { mutableStateOf(false) }
+    var preferenceError by remember { mutableStateOf("") }
 
     var shareCodeOutput by remember { mutableStateOf("") }
     var shareKeyOutput by remember { mutableStateOf("") }
@@ -96,6 +102,21 @@ fun SettingsView(viewModel: TodoViewModel) {
     }
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+    fun savePreferences(endRecords: List<com.todo.app.data.model.TimeEntry>? = null) {
+        savingPreferences = true
+        coroutineScope.launch {
+            try {
+                val result = viewModel.savePreferences(defaultDueDate, defaultInsertion, timing, endRecords)
+                if (result.isSuccess) {
+                    closingTimers = null; preferenceError = ""
+                    snackbarHostState.showSnackbar("偏好习惯已保存")
+                } else {
+                    preferenceError = result.exceptionOrNull()?.message ?: "设置保存失败"
+                    closingTimers = null
+                }
+            } finally { savingPreferences = false }
+        }
+    }
 
     val buttonShape = RoundedCornerShape(8.dp)
     val cardShape = RoundedCornerShape(12.dp)
@@ -118,20 +139,21 @@ fun SettingsView(viewModel: TodoViewModel) {
     }
 
     var activeTab by remember { mutableStateOf(0) }
-    val tabTitles = listOf("关于", "提醒", "偏好", "协作", "同步")
+    val tabTitles = listOf("关于", "提醒", "偏好", "标签", "协作", "同步")
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            TabRow(
+            ScrollableTabRow(
                 selectedTabIndex = activeTab,
+                edgePadding = 0.dp,
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) {
                 tabTitles.forEachIndexed { index, title ->
                     Tab(
                         selected = activeTab == index,
-                        onClick = { activeTab = index },
+                        onClick = { if (!savingPreferences) activeTab = index },
                         text = { Text(title, fontWeight = FontWeight.Bold, maxLines = 1) }
                     )
                 }
@@ -229,17 +251,21 @@ fun SettingsView(viewModel: TodoViewModel) {
                                         )
                                     }
                                 }
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("启用任务计时", Modifier.weight(1f))
+                                    Switch(timing, { timing = it }, enabled = !savingPreferences)
+                                }
+                                Text("显示计时入口、计时记录和时长统计；关闭后保留已有数据。仅对本机生效。", style = MaterialTheme.typography.bodySmall)
                             }
                         }
                         Spacer(modifier = Modifier.height(24.dp))
+                        if (preferenceError.isNotEmpty()) Text(preferenceError, color = MaterialTheme.colorScheme.error)
                         Button(
                             onClick = {
-                                viewModel.configManager.defaultDueDate = defaultDueDate
-                                viewModel.configManager.defaultInsertion = defaultInsertion
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("偏好习惯已保存")
-                                }
+                                val running = personalData.timeEntries.filter { !it.deleted && it.ended_at == null }
+                                if (!timing && running.isNotEmpty()) closingTimers = running.toList() else savePreferences()
                             },
+                            enabled = !savingPreferences,
                             modifier = Modifier.fillMaxWidth(),
                             shape = buttonShape
                         ) {
@@ -249,6 +275,9 @@ fun SettingsView(viewModel: TodoViewModel) {
                         }
                     }
                     3 -> {
+                        LabelManagerView(viewModel)
+                    }
+                    4 -> {
                         // 4. 协作共享
                         Text("协作共享设置", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
                         ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
@@ -451,7 +480,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                             }
                         }
                     }
-                    4 -> {
+                    5 -> {
                         // 5. 同步与数据维护
                         Text("坚果云 WebDAV 设置", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
 
@@ -538,6 +567,17 @@ fun SettingsView(viewModel: TodoViewModel) {
                             }
                         }
                     }
+                }
+                closingTimers?.let { records ->
+                    AlertDialog(onDismissRequest = { if (!savingPreferences) closingTimers = null },
+                        title = { Text("有 ${records.size} 条计时正在运行") }, text = {
+                            Column(Modifier.height(300.dp).verticalScroll(rememberScrollState())) {
+                                records.forEach { Text(it.task_content_snapshot) }
+                                Text("结束操作会将所列全部记录结束于当前时间，并影响时长统计。仅关闭本机功能不会暂停记录，其他设备或本机重新开启后可继续处理。")
+                                TextButton(enabled = !savingPreferences, onClick = { savePreferences() }) { Text("仅关闭本机计时功能") }
+                                TextButton(enabled = !savingPreferences, onClick = { savePreferences(records) }) { Text("结束计时并关闭") }
+                            }
+                        }, confirmButton = { TextButton(enabled = !savingPreferences, onClick = { closingTimers = null }) { Text("取消") } })
                 }
                 if (showConfirmForcePull) {
                     AlertDialog(

@@ -415,6 +415,7 @@ class TodoRepository(private val context: Context) {
     suspend fun startLearning(todo: Todo, ref: com.todo.app.data.model.TaskReference): Result<Unit> {
         syncWithCloud()
         return changeLearning { data ->
+            require(configManager.timeTrackingEnabled) { "本机任务计时已关闭" }
             require(!todo.deleted) { "已删除任务不能开始计时" }
             require(data.timeEntries.none { !it.deleted && it.ended_at == null }) { "已有任务正在计时，请先结束或处理记录" }
             val now = nowIso()
@@ -425,13 +426,21 @@ class TodoRepository(private val context: Context) {
         }
     }
 
-    suspend fun stopLearning(id: String): Result<Unit> = changeLearning { data ->
-        val now = nowIso()
-        data.copy(timeEntries = data.timeEntries.map { if (it.id == id && !it.deleted && it.ended_at == null)
-            it.copy(ended_at = now, updated_at = now) else it })
+    suspend fun stopLearning(id: String): Result<Int> {
+        var discarded = 0
+        return changeLearning { data ->
+            require(configManager.timeTrackingEnabled) { "本机任务计时已关闭" }
+            val now = nowIso()
+            data.copy(timeEntries = data.timeEntries.map { entry ->
+                if (entry.id == id && !entry.deleted && entry.ended_at == null) {
+                    com.todo.app.data.model.Learning.finishTimeEntry(entry, now).also { if (it.deleted) discarded++ }
+                } else entry
+            })
+        }.map { discarded }
     }
 
     suspend fun saveTimeEntry(entry: com.todo.app.data.model.TimeEntry): Result<Unit> = changeLearning { data ->
+        require(configManager.timeTrackingEnabled) { "本机任务计时已关闭" }
         if (!entry.deleted) {
             require(entry.ended_at != null || data.timeEntries.any { it.id == entry.id && it.ended_at == null && !it.deleted }) { "补录必须填写结束时间" }
             val error = com.todo.app.data.model.Learning.validate(entry, data.timeEntries)
@@ -439,6 +448,41 @@ class TodoRepository(private val context: Context) {
         }
         data.copy(timeEntries = com.todo.app.data.model.Learning.mergeTimes(data.timeEntries.filter { it.id != entry.id } + entry.copy(
             updated_at = nowIso(), label_snapshot = com.todo.app.data.model.Learning.label(entry.label_snapshot))))
+    }
+
+    suspend fun finishConfirmedTimers(expected: List<com.todo.app.data.model.TimeEntry>, now: String): Result<Int> {
+        var discarded = 0
+        return changeLearning { data ->
+            val running = data.timeEntries.filter { !it.deleted && it.ended_at == null }
+            require(running.toSet() == expected.toSet()) { "运行记录已变化，请重新保存并确认" }
+            data.copy(timeEntries = data.timeEntries.map { entry ->
+                if (entry in running) {
+                    com.todo.app.data.model.Learning.finishTimeEntry(entry, now).also { if (it.deleted) discarded++ }
+                } else entry
+            })
+        }.map { discarded }
+    }
+
+    suspend fun updatePersonalLabels(plan: com.todo.app.data.model.LabelChangePlan, target: String?): Result<Int> {
+        ensureDataLoaded()
+        return mutex.withLock {
+            withContext(Dispatchers.IO) {
+                try {
+                    val (todos, count) = com.todo.app.data.model.LabelUtils.apply(_todoData.value.todos, plan, target, nowIso())
+                    if (count > 0) {
+                        // 标签操作完整保留个人扩展数据，不触发任务删除或运行记录清理。
+                        val updated = _todoData.value.copy(todos = todos, last_updated = nowIso())
+                        atomicWriteJson(jsonFormat.encodeToString(updated))
+                        _todoData.value = updated
+                        uploadChannel.trySend(Unit)
+                    }
+                    Result.success(count)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    Result.failure(e)
+                }
+            }
+        }
     }
 
     suspend fun saveDailyReview(review: com.todo.app.data.model.DailyReview): Result<Unit> = changeLearning { data ->

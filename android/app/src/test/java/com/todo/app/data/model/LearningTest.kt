@@ -11,6 +11,47 @@ class LearningTest {
     private fun entry(id: String, start: String, end: String?, label: String? = "数学") =
         TimeEntry(id, TaskReference("task"), start, start, end ?: start, "定理", label, end)
 
+    @Test fun shortTimersAreDiscardedAtThirtySecondsAndStayDeletedAfterSync() {
+        val running = entry("short", "2026-09-18T23:59:45+08:00", null)
+        for (duration in listOf(0L, 29999L, 30000L, 30001L, 60000L)) {
+            val end = Learning.instant(running.started_at)!!.plusMillis(duration).toString()
+            val finished = Learning.finishTimeEntry(running, end)
+            assertEquals(duration <= 30000, finished.deleted)
+            assertEquals(end, finished.ended_at)
+            assertEquals(end, finished.updated_at)
+            assertEquals(running.created_at, finished.created_at)
+            assertNull(running.ended_at)
+            for (merged in listOf(Learning.mergeTimes(listOf(running), listOf(finished)), Learning.mergeTimes(listOf(finished), listOf(running)))) {
+                assertEquals(duration <= 30000, merged.single().deleted)
+                val summary = Learning.summary(merged, LocalDate.parse("2026-09-18"), LocalDate.parse("2026-09-20"), zone)
+                assertEquals(if (duration <= 30000) 0L else duration, summary.duration)
+                assertEquals(0, summary.running)
+                if (duration <= 30000) assertEquals(0, summary.count)
+            }
+        }
+    }
+
+    @Test fun finishingPreservesHistoryAndRejectsInvalidClocks() {
+        val old = entry("old", "2026-09-18T00:00:00Z", "2026-09-18T00:00:01Z")
+        assertEquals(old, Learning.finishTimeEntry(old, "2026-09-18T00:02:00Z"))
+        val deleted = old.copy(ended_at = null, deleted = true)
+        assertEquals(deleted, Learning.finishTimeEntry(deleted, "2026-09-18T00:02:00Z"))
+        for (end in listOf("invalid", "2026-09-17T23:59:59Z")) {
+            assertTrue(runCatching { Learning.finishTimeEntry(old.copy(ended_at = null), end) }.exceptionOrNull() is IllegalArgumentException)
+        }
+        assertTrue(runCatching { Learning.finishTimeEntry(old.copy(started_at = "invalid", ended_at = null), old.ended_at!!) }.isFailure)
+    }
+
+    @Test fun manualSaveChecksMinimumDurationButAllowsRunningEntries() {
+        val start = Instant.parse("2026-09-18T00:00:00Z")
+        val now = Instant.parse("2026-09-19T00:00:00Z")
+        for (duration in listOf(1000L, 30000L, 30001L)) {
+            val e = entry("manual", start.toString(), start.plusMillis(duration).toString())
+            assertEquals(if (duration <= 30000) Learning.SHORT_TIME_ENTRY_MESSAGE else null, Learning.validate(e, emptyList(), now))
+        }
+        assertNull(Learning.validate(entry("running", start.toString(), null), emptyList(), now))
+    }
+
     @Test fun crossMidnightCountsOnBothDays() {
         val e = entry("a", "2026-09-10T23:40:00+08:00", "2026-09-11T00:20:00+08:00")
         assertEquals(listOf(1200000L, 1200000L), Learning.split(e, zone).map { it.duration })

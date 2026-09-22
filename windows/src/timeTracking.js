@@ -115,11 +115,23 @@ export function overlappingEntries(entries) {
     return ids;
 }
 
+export const MIN_TIME_ENTRY_DURATION_MS = 30_000;
+export const SHORT_TIME_ENTRY_MESSAGE = '计时未超过 30 秒，不保存为记录。';
+
+// 短计时保留删除标记参与同步，避免其他设备恢复已丢弃的运行记录。
+export function finishTimeEntry(entry, endedAt) {
+    if (entry.deleted || entry.ended_at != null) return entry;
+    const duration = Date.parse(endedAt) - Date.parse(entry.started_at);
+    if (!Number.isFinite(duration) || duration < 0) throw new Error('计时时间异常，请检查开始和结束时间');
+    return { ...entry, ended_at: endedAt, updated_at: endedAt, deleted: duration <= MIN_TIME_ENTRY_DURATION_MS };
+}
+
 export function validateTimeEntry(entry, entries, now = Date.now()) {
     const start = Date.parse(entry.started_at), end = entry.ended_at == null ? null : Date.parse(entry.ended_at);
     if (!Number.isFinite(start) || (end !== null && !Number.isFinite(end))) return '请输入有效的日期和时间';
     if (start > now || (end !== null && end > now)) return '不能记录未来的学习时间';
     if (end !== null && end <= start) return '结束时间必须晚于开始时间';
+    if (end !== null && end - start <= MIN_TIME_ENTRY_DURATION_MS) return SHORT_TIME_ENTRY_MESSAGE;
     if (overlappingEntries([...entries.filter(e => e.id !== entry.id), entry]).has(entry.id)) return '与其他计时记录重叠，请检查起止时间';
     return null;
 }

@@ -49,6 +49,8 @@ private fun LearningClock(entry: TimeEntry) {
 
 @Composable
 fun LearningTimer(todo: Todo, viewModel: TodoViewModel) {
+    val timingEnabled by viewModel.timeTrackingEnabled.collectAsState()
+    if (!timingEnabled) return
     val data by viewModel.todoData.collectAsState()
     val active = data.timeEntries.filter { !it.deleted && it.ended_at == null }
     val ref = viewModel.learningReference(todo)
@@ -73,6 +75,8 @@ fun LearningTimer(todo: Todo, viewModel: TodoViewModel) {
 
 @Composable
 fun LearningBanner(viewModel: TodoViewModel) {
+    val timingEnabled by viewModel.timeTrackingEnabled.collectAsState()
+    if (!timingEnabled) return
     val data by viewModel.todoData.collectAsState()
     val active = data.timeEntries.filter { !it.deleted && it.ended_at == null }
     var show by remember { mutableStateOf(false) }
@@ -92,6 +96,8 @@ fun LearningBanner(viewModel: TodoViewModel) {
 
 @Composable
 fun LearningRecordsDialog(viewModel: TodoViewModel, ids: List<String>, onDismiss: () -> Unit) {
+    val timingEnabled by viewModel.timeTrackingEnabled.collectAsState()
+    if (!timingEnabled) return
     AlertDialog(onDismissRequest = onDismiss, title = { Text("计时记录") }, text = {
         Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
             Text("有多条运行记录时，请补上真实结束时间或删除误开记录。", fontSize = 12.sp)
@@ -102,6 +108,8 @@ fun LearningRecordsDialog(viewModel: TodoViewModel, ids: List<String>, onDismiss
 
 @Composable
 fun LearningTaskRecords(viewModel: TodoViewModel, todo: Todo) {
+    val timingEnabled by viewModel.timeTrackingEnabled.collectAsState()
+    if (!timingEnabled) return
     val data by viewModel.todoData.collectAsState()
     val ref = viewModel.learningReference(todo)
     val records = data.timeEntries.filter { !it.deleted && it.task_ref == ref }
@@ -130,6 +138,8 @@ fun LearningTaskRecords(viewModel: TodoViewModel, todo: Todo) {
 
 @Composable
 fun LearningRecords(viewModel: TodoViewModel, todo: Todo? = null, ids: List<String>? = null) {
+    val timingEnabled by viewModel.timeTrackingEnabled.collectAsState()
+    if (!timingEnabled) return
     val data by viewModel.todoData.collectAsState()
     val tasks by viewModel.learningTasks.collectAsState()
     val resolved = remember(data.timeEntries, tasks) { Learning.resolveEntries(data.timeEntries, tasks).associateBy { it.id } }
@@ -169,7 +179,7 @@ private fun displayLearningTime(value: String): String = Learning.instant(value)
     ?.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) ?: value
 
 @Composable
-private fun TimeEntryEditor(entry: TimeEntry, viewModel: TodoViewModel, onDismiss: () -> Unit) {
+internal fun TimeEntryEditor(entry: TimeEntry, viewModel: TodoViewModel, onDismiss: () -> Unit) {
     var start by rememberSaveable(entry.id) { mutableStateOf(displayLearningTime(entry.started_at)) }
     var end by rememberSaveable(entry.id) { mutableStateOf(entry.ended_at?.let(::displayLearningTime) ?: "") }
     val data by viewModel.todoData.collectAsState()
@@ -179,6 +189,7 @@ private fun TimeEntryEditor(entry: TimeEntry, viewModel: TodoViewModel, onDismis
     val scope = rememberCoroutineScope()
     AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("编辑计时记录") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("所属任务：${entry.task_content_snapshot}")
             Text("日期和时间格式：2026-09-10 09:30:00", fontSize = 12.sp)
             OutlinedTextField(start, { start = it }, label = { Text("开始日期和时间") }, enabled = !busy)
             OutlinedTextField(end, { end = it }, label = { Text("结束日期和时间（运行中可留空）") }, enabled = !busy)
@@ -199,6 +210,7 @@ private fun TimeEntryEditor(entry: TimeEntry, viewModel: TodoViewModel, onDismis
 
 @Composable
 fun LearningInsights(viewModel: TodoViewModel, period: String, targetDate: LocalDate) {
+    val timingEnabled by viewModel.timeTrackingEnabled.collectAsState()
     val data by viewModel.todoData.collectAsState()
     val tasks by viewModel.learningTasks.collectAsState()
     val resolved = remember(data.timeEntries, tasks) { Learning.resolveEntries(data.timeEntries, tasks) }
@@ -212,7 +224,7 @@ fun LearningInsights(viewModel: TodoViewModel, period: String, targetDate: Local
     var reviewDate by rememberSaveable { mutableStateOf<String?>(null) }
     var showExport by remember { mutableStateOf(false) }
     val summary = remember(resolved, start, end, selectedLabel) { Learning.summary(resolved, start, end, selectedLabel = selectedLabel) }
-    Card(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+    if (timingEnabled) Card(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
         Column(Modifier.padding(14.dp)) {
             Text("我的学习投入", style = MaterialTheme.typography.titleMedium)
             Box {
@@ -321,6 +333,7 @@ private fun DailyReviewDialog(viewModel: TodoViewModel, date: String, onDismiss:
 
 @Composable
 private fun ReviewExportDialog(viewModel: TodoViewModel, data: TodoData, period: String, date: LocalDate, onDismiss: () -> Unit) {
+    val timingEnabled by viewModel.timeTrackingEnabled.collectAsState()
     val tasks by viewModel.learningTasks.collectAsState()
     var include by remember { mutableStateOf(true) }; var content by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf("") }; var savedUri by rememberSaveable { mutableStateOf<String?>(null) }
@@ -336,8 +349,10 @@ private fun ReviewExportDialog(viewModel: TodoViewModel, data: TodoData, period:
     }
     AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("导出复盘 Markdown") }, text = {
         Column {
-            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(include, { include = it }); Text("附带当日学习时长统计" + if (period == "day") "" else "（逐日）") }
-            Text("进行中和待核对记录不计入统计。", fontSize = 12.sp)
+            if (timingEnabled) {
+                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(include, { include = it }); Text("附带当日学习时长统计" + if (period == "day") "" else "（逐日）") }
+                Text("进行中和待核对记录不计入统计。", fontSize = 12.sp)
+            }
             if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
             savedUri?.let { uri -> TextButton(onClick = {
                 val intent = Intent(Intent.ACTION_SEND).setType("text/markdown").putExtra(Intent.EXTRA_STREAM, Uri.parse(uri)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -345,7 +360,7 @@ private fun ReviewExportDialog(viewModel: TodoViewModel, data: TodoData, period:
             }) { Text("分享已导出文件") } }
         }
     }, confirmButton = { TextButton(enabled = !busy, onClick = {
-        try { val result = Learning.export(data, period, date, include, tasks = tasks); content = result.second; launcher.launch(result.first) }
+        try { val result = Learning.export(data, period, date, timingEnabled && include, tasks = tasks); content = result.second; launcher.launch(result.first) }
         catch (e: Exception) { error = e.message ?: "导出失败" }
     }) { Text("保存文件") } }, dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("关闭") } })
 }

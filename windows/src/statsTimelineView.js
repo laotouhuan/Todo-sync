@@ -2,6 +2,7 @@ import { collectSubtaskEvents, collectTimerArcs, arcPath, hitArcs, clockMinute, 
 import { renderVerticalTimeline } from './statsVerticalView.js';
 import { formatDuration } from './timeTracking.js';
 import { prepareClockEntry, playClockEntry } from './clockAnimation.js';
+import { selectTimelineRecord } from './timelineEditor.js';
 
 function node(tag, text) { const n = document.createElement(tag); n.textContent = text; return n; }
 function svg(tag, attrs) { const n = document.createElementNS('http://www.w3.org/2000/svg', tag); Object.entries(attrs).forEach(([k, v]) => n.setAttribute(k, v)); return n; }
@@ -48,15 +49,15 @@ export function bindClockTooltip(mark, title, lines, color, stroke = '#ffffff', 
     mark.addEventListener('click', hide);
 }
 
-export function renderTimeline({ svgEl, todos, entries, source, period, target, filters, openTodo, openRecords }) {
+export function renderTimeline({ svgEl, todos, entries, source, period, target, filters, openTodo, openRecord, openSubtask, timingEnabled = true }) {
     document.querySelectorAll('.timeline-detail').forEach(d => d.close());
     const card = document.getElementById('time-distribution');
     let header = card.querySelector('.timeline-header');
     if (!header) { header = node('div', ''); header.className = 'timeline-header'; card.prepend(header); }
     header.replaceChildren(node('h3', '完成时间分布'));
     let enabled = false; try { enabled = localStorage.getItem('stats-show-timing') === 'true'; } catch { /* 无本地存储时保持默认 */ }
-    const showTiming = period === 'day' || enabled;
-    if (period !== 'day') {
+    const showTiming = timingEnabled && (period === 'day' || enabled);
+    if (timingEnabled && period !== 'day') {
         const toggle = node('button', enabled ? '隐藏计时' : '显示计时'); toggle.className = 'timeline-toggle';
         toggle.setAttribute('aria-pressed', String(enabled));
         toggle.onclick = () => {
@@ -68,7 +69,7 @@ export function renderTimeline({ svgEl, todos, entries, source, period, target, 
     const type = t => t.recurring === 'daily_repeat' ? 'daily' : t.task_type === 'weekly_checkin' ? 'weekly' : t.task_type === 'monthly_checkin' ? 'monthly' : 'normal';
     const colors = { normal: '#10B981', daily: '#F59E0B', weekly: '#6366F1', monthly: '#F43F5E' };
     const steps = collectSubtaskEvents(todos.filter(t => filters[type(t)] !== false), period, target);
-    const arcs = collectTimerArcs(entries, source, period, target);
+    const arcs = timingEnabled ? collectTimerArcs(entries, source, period, target) : [];
     let note = card.querySelector('.timeline-note');
     if (!note) { note = node('p', ''); note.className = 'timeline-note'; card.append(note); }
     let undated = card.querySelector('.timeline-undated');
@@ -76,12 +77,12 @@ export function renderTimeline({ svgEl, todos, entries, source, period, target, 
     undated.replaceChildren();
     steps.filter(e => !e.explicit).forEach(e => {
         const b = node('button', `子步骤 · ${e.date} · ${e.subtask.content}（无具体时间）`);
-        b.onclick = () => details('子步骤完成', [e.todo.content, e.subtask.content, e.date], '编辑任务', () => openTodo(e.todo)); undated.append(b);
+        b.onclick = () => openSubtask(e.todo, e.subtask); undated.append(b);
     });
     const openTimers = list => {
         const parts = [...new Map(list.map(a => [`${a.entry.id}:${a.date}`, a])).values()];
         if (!parts.length) return;
-        details('计时区间', parts.map(a => `${a.entry.task_content_snapshot} · ${a.entry.label_snapshot || '未分类'}${a.entry.task_unavailable ? ' · 原任务不可用' : a.entry.task_deleted ? ' · 原任务已删除' : ''}\n原记录：${timeText(a.entry.started_at)} — ${timeText(a.entry.ended_at)}\n本日：${timeText(a.started_at)} — ${timeText(a.ended_at)} · ${formatDuration(a.duration)}`), '管理记录', () => openRecords([...new Map(parts.map(a => [a.entry.id, a.entry])).values()]));
+        selectTimelineRecord(parts.map(a => a.entry), openRecord);
     };
     const timerTooltip = list => {
         const parts = [...new Map(list.map(a => [`${a.entry.id}:${a.date}`, a])).values()];
@@ -107,7 +108,7 @@ export function renderTimeline({ svgEl, todos, entries, source, period, target, 
         if (linear) {
             const host = document.createElement('div'); host.className = 'timeline-lines-host'; clockContainer.after(host);
             renderVerticalTimeline({ host, todos: todos.filter(t => filters[type(t)] !== false), steps, arcs, period, target,
-                bindTooltip: bindClockTooltip, timerTooltip, openTimers, openTodo, showDetails: details });
+                bindTooltip: bindClockTooltip, timerTooltip, openTimers, openTodo, openSubtask, showDetails: details });
             return;
         }
         const layer = svg('g', { class: 'timeline-layer' });
@@ -138,11 +139,8 @@ export function renderTimeline({ svgEl, todos, entries, source, period, target, 
             dot.setAttribute('aria-label', caption);
             const stamp = clockTooltipDateTime(e.completed_at);
             bindClockTooltip(dot, e.subtask.content, [`所属任务: ${e.todo.content}`, `完成日期: ${stamp.date}`, `完成时间: ${stamp.time}`], colors[type(e.todo)], colors[type(e.todo)], 2, 1);
-            const open = () => {
-                const nearby = steps.filter(x => x.explicit && Math.abs(Date.parse(x.completed_at) - Date.parse(e.completed_at)) < 60000);
-                details('子步骤完成', nearby.map(x => `${x.todo.content} / ${x.subtask.content}\n${timeText(x.completed_at)}`), '编辑任务', () => openTodo(e.todo));
-            };
-            dot.onclick = open; dot.onkeydown = event => { if (event.key === 'Enter') open(); }; layer.append(dot);
+            const open = () => openSubtask(e.todo, e.subtask);
+            dot.onclick = open; dot.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } }; layer.append(dot);
         });
         svgEl.append(layer);
         playClockEntry(layer);

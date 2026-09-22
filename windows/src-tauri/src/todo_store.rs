@@ -56,6 +56,27 @@ pub struct AppConfig {
     pub nickname: Option<String>,
     pub default_due_date: Option<String>,
     pub default_insertion: Option<String>,
+    pub time_tracking_enabled: Option<bool>, // 缺失时前端默认开启，本机偏好不参与数据同步
+}
+
+#[cfg(test)]
+mod preference_tests {
+    use super::AppConfig;
+
+    #[test]
+    fn old_config_keeps_timing_enabled() {
+        let config: AppConfig = serde_json::from_str("{}").unwrap();
+        assert!(config.time_tracking_enabled.unwrap_or(true));
+        assert!(AppConfig::default().time_tracking_enabled.unwrap_or(true));
+    }
+
+    #[test]
+    fn disabled_timing_survives_round_trip() {
+        let config: AppConfig = serde_json::from_str(r#"{"time_tracking_enabled":false}"#).unwrap();
+        let saved = serde_json::to_string(&config).unwrap();
+        let restored: AppConfig = serde_json::from_str(&saved).unwrap();
+        assert_eq!(restored.time_tracking_enabled, Some(false));
+    }
 }
 
 pub fn get_config_path(app: &AppHandle) -> Result<PathBuf, String> {

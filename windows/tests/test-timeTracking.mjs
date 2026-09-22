@@ -1,9 +1,48 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeLabel, normalizeLearningData, mergeLearningRecords, canonicalLearning, splitTimeEntry, summarizeLearning, validateTimeEntry, overlappingEntries, learningRange, formatDuration, sameTask, taskReference } from '../src/timeTracking.js';
+import { normalizeLabel, normalizeLearningData, mergeLearningRecords, canonicalLearning, splitTimeEntry, summarizeLearning, validateTimeEntry, overlappingEntries, learningRange, formatDuration, sameTask, taskReference, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE } from '../src/timeTracking.js';
 
 const entry = (id, start, end, label = '数学') => ({ id, task_ref: {source_type:'personal',source_id:null,todo_id:'task'}, task_content_snapshot:'定理', label_snapshot:label, started_at:start, ended_at:end, created_at:start, updated_at:end || start, deleted:false });
 process.env.TZ = 'Asia/Shanghai';
+
+test('结束计时的 30 秒边界、同步删除标记和统计排除', () => {
+    const running = entry('short', '2026-09-18T23:59:45+08:00', null);
+    for (const duration of [0, 29999, 30000, 30001, 60000]) {
+        const end = new Date(Date.parse(running.started_at) + duration).toISOString();
+        const finished = finishTimeEntry(running, end);
+        assert.equal(finished.deleted, duration <= 30000);
+        assert.equal(finished.ended_at, end);
+        assert.equal(finished.updated_at, end);
+        assert.equal(finished.created_at, running.created_at);
+        assert.equal(running.ended_at, null);
+        for (const merged of [mergeLearningRecords([running], [finished]), mergeLearningRecords([finished], [running])]) {
+            assert.equal(merged[0].deleted, duration <= 30000);
+            const summary = summarizeLearning(merged, '2026-09-18', '2026-09-20');
+            assert.equal(summary.duration, duration <= 30000 ? 0 : duration);
+            assert.equal(summary.running, 0);
+            if (duration <= 30000) assert.equal(summary.count, 0);
+        }
+    }
+});
+
+test('结束操作不改写历史或已删除记录，异常时间不会丢弃记录', () => {
+    const old = entry('old', '2026-09-18T00:00:00Z', '2026-09-18T00:00:01Z');
+    assert.equal(finishTimeEntry(old, '2026-09-18T00:02:00Z'), old);
+    const deleted = { ...old, ended_at: null, deleted: true };
+    assert.equal(finishTimeEntry(deleted, '2026-09-18T00:02:00Z'), deleted);
+    const running = { ...old, ended_at: null };
+    for (const end of ['invalid', '2026-09-17T23:59:59Z']) assert.throws(() => finishTimeEntry(running, end), /计时时间异常/);
+    assert.throws(() => finishTimeEntry({ ...running, started_at: 'invalid' }, old.ended_at), /计时时间异常/);
+});
+
+test('手动保存计时也检查 30 秒边界，运行中的记录不受阈值限制', () => {
+    const start = '2026-09-18T00:00:00Z', now = Date.parse('2026-09-19T00:00:00Z');
+    for (const duration of [1000, 30000, 30001]) {
+        const e = entry('manual', start, new Date(Date.parse(start) + duration).toISOString());
+        assert.equal(validateTimeEntry(e, [], now), duration <= 30000 ? SHORT_TIME_ENTRY_MESSAGE : null);
+    }
+    assert.equal(validateTimeEntry(entry('running', start, null), [], now), null);
+});
 
 test('跨午夜每天计次，周次数累加，午夜边界不产生空记录', () => {
     const e = entry('1','2026-09-10T23:40:00+08:00','2026-09-11T00:20:00+08:00');

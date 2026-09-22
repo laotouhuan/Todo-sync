@@ -49,8 +49,8 @@ fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: S
     val progress = rememberClockSweep(period, target, ref, parts, events)
     var selectedPoints by remember { mutableStateOf<List<VerticalCompletion>>(emptyList()) }
     var selectedParts by remember { mutableStateOf<List<TimerArc>>(emptyList()) }
-    var recordIds by remember { mutableStateOf<List<String>?>(null) }
-    LaunchedEffect(period, target, ref, parts, events) { selectedParts = emptyList(); selectedPoints = emptyList(); recordIds = null }
+    var editingSteps by remember { mutableStateOf<List<Pair<Todo, Subtask>>>(emptyList()) }
+    LaunchedEffect(period, target, ref, parts, events) { selectedParts = emptyList(); selectedPoints = emptyList(); editingSteps = emptyList() }
     val month = period == "month"
     val density = LocalDensity.current
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -65,7 +65,11 @@ fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: S
             val dayIndex = floor(offset.x / stridePx).toInt()
             val date = days.getOrNull(dayIndex) ?: return
             val nearby = points.filter { it.first.date == date && (it.second - offset).getDistance() <= with(density) { 10.dp.toPx() } }.map { it.first }
-            if (nearby.isNotEmpty()) { selectedPoints = nearby; selectedParts = emptyList(); return }
+            if (nearby.isNotEmpty()) {
+                val substeps = nearby.mapNotNull { e -> e.subtask?.let { e.todo to it } }
+                if (substeps.size == nearby.size) editingSteps = substeps else selectedPoints = nearby
+                selectedParts = emptyList(); return
+            }
             val minute = (offset.y - top) / height * 1440
             if (minute !in 0f..1440f || abs(offset.x - (dayIndex + .5f) * stridePx) > with(density) { 12.dp.toPx() }) return
             selectedParts = StatsTimeline.hitSegments(parts, date, minute, 10f).distinctBy { it.part.entry.id to it.part.date }
@@ -105,7 +109,7 @@ fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: S
     completed.filter { it.time == null }.forEach { e -> TextButton(onClick = { onEditTodo(e.todo) }) { Text("${e.date.toString().drop(5)} · ${e.todo.content}（无具体时间）") } }
     val format = DateTimeFormatter.ofPattern("MM-dd HH:mm")
     fun time(value: Instant) = value.atZone(ZoneId.systemDefault()).format(format)
-    if (selectedParts.isNotEmpty() || selectedPoints.isNotEmpty()) AlertDialog(
+    if (selectedPoints.isNotEmpty()) AlertDialog(
         onDismissRequest = { selectedParts = emptyList(); selectedPoints = emptyList() },
         title = { Text(if (selectedParts.isNotEmpty()) "计时记录" else "完成记录") },
         text = { Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
@@ -113,20 +117,16 @@ fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: S
                 Text(e.subtask?.content ?: e.todo.content)
                 if (e.subtask != null) Text("所属任务：${e.todo.content}")
                 Text("完成时间：${time(e.time)}")
-                TextButton(onClick = { selectedPoints = emptyList(); onEditTodo(e.todo) }) { Text("编辑任务") }
-            }
-            selectedParts.forEach { a ->
-                Text(a.part.entry.task_content_snapshot)
-                Text("标签：${a.part.entry.label_snapshot ?: "未分类"}")
-                Text("计时区间：${time(a.part.startedAt)} — ${time(a.part.endedAt)}")
-                Text("投入时长：${Learning.duration(a.part.duration)}")
-                HorizontalDivider()
+                TextButton(onClick = {
+                    selectedPoints = emptyList()
+                    if (e.subtask != null) editingSteps = listOf(e.todo to e.subtask) else onEditTodo(e.todo)
+                }) { Text(if (e.subtask != null) "编辑子步骤" else "编辑任务") }
             }
         } },
-        confirmButton = { TextButton(onClick = { selectedPoints = emptyList(); selectedParts = emptyList() }) { Text("关闭") } },
-        dismissButton = { if (selectedParts.isNotEmpty()) TextButton(onClick = { recordIds = selectedParts.map { it.part.entry.id }.distinct(); selectedParts = emptyList() }) { Text("管理记录") } }
+        confirmButton = { TextButton(onClick = { selectedPoints = emptyList(); selectedParts = emptyList() }) { Text("关闭") } }
     )
-    recordIds?.let { LearningRecordsDialog(viewModel, it) { recordIds = null } }
+    if (selectedParts.isNotEmpty()) TimelineRecordEditor(viewModel, selectedParts.map { it.part.entry.id }.distinct()) { selectedParts = emptyList() }
+    if (editingSteps.isNotEmpty()) TimelineSubtaskPicker(viewModel, editingSteps) { editingSteps = emptyList() }
 }
 
 private fun DrawScope.drawVerticalMark(todo: Todo, subtask: Boolean, center: Offset, radius: Float, alpha: Float) {

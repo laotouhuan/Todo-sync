@@ -41,8 +41,7 @@ fun StatsTimelineLayer(viewModel: TodoViewModel, todos: List<Todo>, period: Stri
     } }
     var selectedSteps by remember { mutableStateOf<List<SubtaskEvent>>(emptyList()) }
     var selectedArcs by remember { mutableStateOf<List<TimerArc>>(emptyList()) }
-    var recordIds by remember { mutableStateOf<List<String>?>(null) }
-    LaunchedEffect(showTiming, period, target, data, tasks) { selectedArcs = emptyList(); selectedSteps = emptyList(); recordIds = null }
+    LaunchedEffect(showTiming, period, target, data, tasks) { selectedArcs = emptyList(); selectedSteps = emptyList() }
     fun hit(offset: Offset): Boolean = with(density) {
         val matching = points.filter { (_, p) -> (p - offset).getDistance() <= 12.dp.toPx() }.map { it.first }
         if (matching.isNotEmpty()) { selectedSteps = matching; true }
@@ -70,39 +69,22 @@ fun StatsTimelineLayer(viewModel: TodoViewModel, todos: List<Todo>, period: Stri
             drawCircle(color, (if (period == "day") 4 else 3).dp.toPx(), p, alpha = alpha, style = Stroke(2.dp.toPx()))
         }
     }
-    val format = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-    if (selectedSteps.isNotEmpty()) AlertDialog(onDismissRequest = { selectedSteps = emptyList() }, title = { Text("子步骤完成") }, text = {
-        Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
-            selectedSteps.forEach { e ->
-                Text("${e.todo.content} / ${e.subtask.content}")
-                Text(e.time?.atZone(ZoneId.systemDefault())?.format(format) ?: "${e.date}（无具体时间）")
-                TextButton(onClick = { selectedSteps = emptyList(); onEditTodo(e.todo) }) { Text("编辑任务") }
-            }
-        }
-    }, confirmButton = { TextButton(onClick = { selectedSteps = emptyList() }) { Text("关闭") } })
-    if (selectedArcs.isNotEmpty()) AlertDialog(onDismissRequest = { selectedArcs = emptyList() }, title = { Text("计时区间") }, text = {
-        Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
-            selectedArcs.forEach { a ->
-                val e = a.part.entry
-                Text("${e.task_content_snapshot} · ${e.label_snapshot ?: "未分类"}" + if (e.task_ref !in tasks) " · 原任务不可用" else if (tasks[e.task_ref]?.deleted == true) " · 原任务已删除" else "")
-                Text("原记录：${Learning.instant(e.started_at)?.atZone(ZoneId.systemDefault())?.format(format)} — ${Learning.instant(e.ended_at)?.atZone(ZoneId.systemDefault())?.format(format)}")
-                Text("本日：${a.part.startedAt.atZone(ZoneId.systemDefault()).format(format)} — ${a.part.endedAt.atZone(ZoneId.systemDefault()).format(format)} · ${Learning.duration(a.part.duration)}")
-                HorizontalDivider()
-            }
-        }
-    }, confirmButton = { TextButton(onClick = { recordIds = selectedArcs.map { it.part.entry.id }.distinct(); selectedArcs = emptyList() }) { Text("管理记录") } },
-        dismissButton = { TextButton(onClick = { selectedArcs = emptyList() }) { Text("关闭") } })
-    recordIds?.let { LearningRecordsDialog(viewModel, it) { recordIds = null } }
+    if (selectedSteps.isNotEmpty()) TimelineSubtaskPicker(viewModel, selectedSteps.map { it.todo to it.subtask }) { selectedSteps = emptyList() }
+    if (selectedArcs.isNotEmpty()) TimelineRecordEditor(viewModel, selectedArcs.map { it.part.entry.id }.distinct()) { selectedArcs = emptyList() }
+
 }
 
 @Composable
 fun TimelineLegend(viewModel: TodoViewModel, todos: List<Todo>, period: String, target: LocalDate, showTiming: Boolean, onEditTodo: (Todo) -> Unit) {
+    val timingEnabled by viewModel.timeTrackingEnabled.collectAsState()
     val data by viewModel.todoData.collectAsState()
     val source by viewModel.activeSource.collectAsState()
     val ref = if (source is TodoViewModel.ActiveSource.Collaboration) TaskReference("", "collaboration", (source as TodoViewModel.ActiveSource.Collaboration).collab.id) else TaskReference("")
     val arcs = remember(data.timeEntries, ref, period, target) { StatsTimeline.arcs(data.timeEntries, ref, period, target) }
     val undated = remember(todos, period, target) { StatsTimeline.subtasks(todos, period, target).filter { it.time == null } }
     if (showTiming && arcs.isEmpty()) Text("本时段暂无有效计时记录", style = MaterialTheme.typography.bodySmall)
-    if (!showTiming && arcs.isNotEmpty()) Text("可点击“显示计时”查看投入", style = MaterialTheme.typography.bodySmall)
-    undated.forEach { e -> TextButton(onClick = { onEditTodo(e.todo) }) { Text("子步骤 · ${e.date} · ${e.subtask.content}（无具体时间）") } }
+    if (timingEnabled && !showTiming && arcs.isNotEmpty()) Text("可点击“显示计时”查看投入", style = MaterialTheme.typography.bodySmall)
+    var selectedStep by remember { mutableStateOf<SubtaskEvent?>(null) }
+    selectedStep?.let { e -> TimelineSubtaskEditor(viewModel, e.todo, e.subtask) { selectedStep = null } }
+    undated.forEach { e -> TextButton(onClick = { selectedStep = e }) { Text("子步骤 · ${e.date} · ${e.subtask.content}（无具体时间）") } }
 }

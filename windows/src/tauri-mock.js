@@ -11,7 +11,7 @@ if (!window.__TAURI__) {
           return false; // 浏览器只能确认发起下载，不能声称落盘成功。
         }
         if (cmd === 'get_app_config') {
-          return JSON.parse(localStorage.getItem('todo_app_config') || '{"sync_mode":"local","local_sync_path":""}');
+          return { time_tracking_enabled: true, ...JSON.parse(localStorage.getItem('todo_app_config') || '{"sync_mode":"local","local_sync_path":""}') };
         }
         if (cmd === 'read_todo_data') {
           return localStorage.getItem('todo_data') || '{"version":1,"todos":[]}';

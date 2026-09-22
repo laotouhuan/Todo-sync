@@ -2,6 +2,7 @@ import { parse as parseSource } from 'acorn';
 import { runInNewContext } from 'node:vm';
 import * as learningHelpers from '../src/timeTracking.js';
 import * as dateHelpers from '../src/dateUtils.js';
+import { applyLabelChange, planLabelChange } from '../src/labelUtils.js';
 /**
  * 数据逻辑测试（合并、迁移、Schema 校验）
  * 测试 mergeTodoData 和 migrateAndNormalize 的核心逻辑
@@ -689,6 +690,33 @@ describe('学习保存失败与串行队列', () => {
     const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
     const tree = parseSource(source, {ecmaVersion:'latest',sourceType:'module'});
     const declaration = name => { const n = tree.body.find(n => n.type === 'FunctionDeclaration' && n.id.name === name); return source.slice(n.start,n.end); };
+    it('实际标签保存固定个人来源，失败可重试且完整保留计时和复盘', async () => {
+        const task = { id: 'same', content: '个人任务', label: '学习', updated_at: '2026-09-01T00:00:00Z' };
+        const entry = { id: 'e', task_ref: { todo_id: 'deleted', source_type: 'personal' }, started_at: '2026-09-01T00:00:00Z', ended_at: null };
+        const original = { todos: [task, { id: 'deleted', deleted: true }], time_entries: [entry], daily_reviews: [{ id: 'r', fact: '保留复盘' }], reminder_settings: { enabled: false } };
+        const state = { todoData: original, collabData: { todos: [{ ...task, content: '协作任务' }] }, activeSource: { type: 'collaboration' }, appConfig: { sync_mode: 'webdav' }, saveVersion: 0 };
+        let fail = true, writes = 0, saved;
+        const commit = runInNewContext('let _saveQueue=Promise.resolve();let _lastRenderedHash="";' + declaration('_doSaveData') + declaration('commitPersonalLabels') + ';commitPersonalLabels', {
+            ...learningHelpers, applyLabelChange, appState: state, structuredClone, Date, setTimeout: () => {},
+            render: () => {}, learningUI: { refresh: () => {} }, setSyncStatus: () => {}, SyncState: { SYNCING: 1, ERROR: 2, IDLE: 0 },
+            purgeOldDeletedTodos: () => { throw new Error('标签保存不能清理记录'); }, showToast: () => {}, console: { error: () => {} },
+            invoke: async (cmd, args) => {
+                if (cmd === 'write_todo_data') { writes++; if (fail) throw new Error('磁盘失败'); saved = JSON.parse(args.data); }
+                else if (cmd === 'sync_to_cloud') throw new Error('云端离线');
+                else throw new Error('不应写协作数据');
+            }
+        });
+        const plan = planLabelChange(original.todos, '学习');
+        await assert.rejects(commit(plan, '英语'), /保存失败/);
+        assert.equal(state.todoData, original);
+        fail = false;
+        assert.equal(await commit(plan, '英语'), 1);
+        assert.equal(writes, 2); assert.equal(saved.todos[0].label, '英语');
+        assert.deepEqual(saved.time_entries, original.time_entries);
+        assert.deepEqual(saved.daily_reviews, original.daily_reviews);
+        assert.deepEqual(saved.reminder_settings, original.reminder_settings);
+        assert.equal(saved.todos.length, 2); assert.equal(state.collabData.todos[0].label, '学习');
+    });
     it('实际编辑保存失败保留草稿及原标签，重试成功才关闭；协作写入保持来源隔离', async () => {
         let success = false, closed = 0; const notices = [];
         const original = {id:'task',content:'旧内容',label:'旧标签',subtasks:[],updated_at:'2026-09-10T00:00:00Z'};

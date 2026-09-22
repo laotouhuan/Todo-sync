@@ -1,4 +1,4 @@
-import { normalizeLabel, taskReference, sameTask, learningRange, summarizeLearning, formatDuration, validateTimeEntry, localDay, overlappingEntries, availableLabels, resolveLearningEntries } from './timeTracking.js';
+import { normalizeLabel, taskReference, sameTask, learningRange, summarizeLearning, formatDuration, validateTimeEntry, localDay, overlappingEntries, availableLabels, resolveLearningEntries, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE } from './timeTracking.js';
 import { reviewFields, reviewPreview, exportReviews } from './reviewUtils.js';
 
 // 所有用户文字均通过 textContent/value 写入，计时刷新只更新文本。
@@ -26,6 +26,8 @@ function localInput(iso) {
 }
 
 export function createLearningView({ state, commit, redraw, sync, toast, exportFile }) {
+    const enabled = () => state.appConfig.time_tracking_enabled !== false;
+    const requireEnabled = () => { if (!enabled()) throw new Error('本机任务计时已关闭'); };
     const data = () => state.todoData;
     const entries = () => data().time_entries || [];
     const knownTasks = () => [...(data().todos || []).map(todo => ({ todo, ref: taskReference(todo) })),
@@ -33,30 +35,48 @@ export function createLearningView({ state, commit, redraw, sync, toast, exportF
     const resolvedEntries = () => resolveLearningEntries(entries(), knownTasks());
     const entryLabel = entry => resolvedEntries().find(e => e.id === entry.id)?.label_snapshot || '未分类';
     const running = () => entries().filter(e => !e.deleted && e.ended_at == null);
-    let labelFilter, banner, lastConflict = '', reviewLeave, refreshLabelPicker;
+    let labelFilter, banner, lastConflict = '', reviewLeave, refreshLabelPicker, timer;
     const run = async action => { try { await action(); } catch (e) { toast(e.message || String(e)); } };
     function clock(entry) {
         const node = el('span', '', 'learning-clock'); node.dataset.started = entry.started_at; return node;
     }
     function tick() {
+        if (!enabled()) return;
         document.querySelectorAll('[data-started]').forEach(node => {
             node.textContent = formatDuration(Date.now() - Date.parse(node.dataset.started), true);
         });
     }
     async function stop(id) {
-        await commit(d => { const e = d.time_entries.find(x => x.id === id); if (e && !e.deleted && !e.ended_at) e.ended_at = e.updated_at = new Date().toISOString(); });
+        let discarded = 0;
+        await commit(d => {
+            requireEnabled();
+            d.time_entries = d.time_entries.map(entry => {
+                if (entry.id !== id || entry.deleted || entry.ended_at != null) return entry;
+                const finished = finishTimeEntry(entry, new Date().toISOString());
+                if (finished.deleted) discarded++;
+                return finished;
+            });
+        });
+        showShortTimerNotice(discarded);
+    }
+    function showShortTimerNotice(count) {
+        if (!count) return;
+        const dialog = modal('计时过短');
+        dialog.append(el('p', count === 1 ? SHORT_TIME_ENTRY_MESSAGE : `${count} 条计时未超过 30 秒，不保存为记录。`),
+            button('知道了', () => dialog.close()));
     }
     async function remove(entry) {
-        await commit(d => { const e = d.time_entries.find(x => x.id === entry.id); if (e) { e.deleted = true; e.updated_at = new Date().toISOString(); } });
+        await commit(d => { requireEnabled(); const e = d.time_entries.find(x => x.id === entry.id); if (e) { e.deleted = true; e.updated_at = new Date().toISOString(); } });
     }
     function attachTimer(row, todo) {
-        if (todo.deleted) return;
+        if (todo.deleted || !enabled()) return;
         const ref = taskReference(todo, state.activeSource); const current = running().find(e => sameTask(e.task_ref, ref));
         const group = el('span', null, 'learning-timer');
         if (current) { group.append(clock(current), button('结束', () => run(() => stop(current.id)))); }
         else if (!running().length) group.append(button('开始', () => run(async () => {
             await sync();
             await commit(d => {
+                requireEnabled();
                 if (d.time_entries.some(e => !e.deleted && !e.ended_at)) throw new Error('已有任务正在计时，请先结束或处理记录');
                 const now = new Date().toISOString();
                 d.time_entries.push({ id: crypto.randomUUID(), task_ref: ref, task_content_snapshot: todo.content,
@@ -66,8 +86,11 @@ export function createLearningView({ state, commit, redraw, sync, toast, exportF
         row.insertBefore(group, row.querySelector('.edit-btn')); tick();
     }
     function editEntry(original, todo, ref, changed = () => {}) {
+        if (!enabled()) return;
         const now = new Date().toISOString();
         const dialog = modal(original ? '编辑计时记录' : '补录计时记录');
+        dialog.dataset.timing = 'true';
+        dialog.append(el('p', '所属任务：' + (original?.task_content_snapshot || todo?.content || '')));
         const start = input('datetime-local', localInput(original?.started_at || now), '开始日期和时间', dialog); start.step = '1';
         const end = input('datetime-local', localInput(original ? original.ended_at : now), '结束日期和时间（运行中的记录可留空）', dialog); end.step = '1';
         dialog.append(el('p', '所属任务标签：' + (original ? entryLabel(original) : normalizeLabel(todo?.label) || '未分类') + '（在任务编辑页修改）'));
@@ -79,6 +102,7 @@ export function createLearningView({ state, commit, redraw, sync, toast, exportF
                     created_at: now, deleted: false, label_snapshot: normalizeLabel(todo.label) }), started_at: new Date(start.value).toISOString(),
                     ended_at: end.value ? new Date(end.value).toISOString() : null, updated_at: new Date().toISOString() };
                 await commit(d => {
+                    requireEnabled();
                     if (!updated.ended_at && !d.time_entries.some(e => e.id === updated.id && !e.deleted && !e.ended_at)) throw new Error('该记录已结束，请填写结束时间');
                     const failure = validateTimeEntry(updated, d.time_entries); if (failure) throw new Error(failure);
                     d.time_entries = [...d.time_entries.filter(e => e.id !== updated.id), updated];
@@ -100,13 +124,20 @@ export function createLearningView({ state, commit, redraw, sync, toast, exportF
         }
     }
     function showRecords(list, title = '计时记录', todo, ref) {
-        const dialog = modal(title); const body = el('div'); dialog.append(body);
+        if (!enabled()) return;
+        const dialog = modal(title);
+        dialog.classList.add('learning-records-dialog');
+        const actions = el('div', null, 'learning-records-actions');
+        const body = el('div', null, 'learning-records-body');
+        dialog.append(actions, body);
+        dialog.dataset.timing = 'true';
         if (todo) {
             const refresh = () => recordList(body, entries().filter(e => !e.deleted && sameTask(e.task_ref, ref)), todo, ref);
-            body.before(button('补录计时记录', () => editEntry(null, todo, ref, refresh)));
+            actions.append(button('补录计时记录', () => editEntry(null, todo, ref, refresh)));
             dialog.addEventListener('close', () => compactEditor());
         }
-        recordList(body, list.map(e => entries().find(raw => raw.id === e.id) || e), todo, ref); dialog.append(button('关闭', () => dialog.close()));
+        actions.append(button('关闭', () => dialog.close()));
+        recordList(body, list.map(e => entries().find(raw => raw.id === e.id) || e), todo, ref);
     }
     function editTask(todo) {
         const parent = document.querySelector('#edit-modal .modal-content'); if (!parent) return;
@@ -114,6 +145,7 @@ export function createLearningView({ state, commit, redraw, sync, toast, exportF
         const host = el('section', null, 'learning-edit-extra');
         const ref = taskReference(todo, state.activeSource);
         const recordDetails = el('details', null, 'edit-section');
+        recordDetails.dataset.timingSection = 'true'; recordDetails.hidden = !enabled();
         const recordSummary = el('summary', '计时记录'); recordSummary.id = 'edit-records-summary';
         recordDetails.append(recordSummary,
             button('管理计时记录', () => showRecords(entries().filter(e => !e.deleted && sameTask(e.task_ref, ref)), '计时记录', todo, ref)),
@@ -168,7 +200,7 @@ export function createLearningView({ state, commit, redraw, sync, toast, exportF
         subtasks.firstChild.textContent = items.length ? '子步骤／备注：' + items.filter(t => t.completed).length + '/' + items.length : '添加子步骤／备注';
         if (reset) { parent.querySelectorAll('details').forEach(d => { d.open = false; }); subtasks.open = items.length > 0; parent.scrollTop = 0; }
         const todo = state.currentEditingTodo;
-        if (todo && byId('edit-records-summary')) {
+        if (enabled() && todo && byId('edit-records-summary')) {
             const list = entries().filter(e => !e.deleted && sameTask(e.task_ref, taskReference(todo, state.activeSource)));
             const range = learningRange('day', new Date()); const summary = summarizeLearning(resolvedEntries(), range.start, range.end);
             const parts = summary.parts.filter(p => list.some(e => e.id === p.entry.id));
@@ -231,10 +263,11 @@ export function createLearningView({ state, commit, redraw, sync, toast, exportF
     }
     function exportDialog(period = state.statsPeriod, target = state.statsTargetDate) {
         const d = modal('导出复盘 Markdown');
-        const include = input('checkbox', '', period === 'day' ? '附带当日学习时长统计' : '附带当日学习时长统计（逐日附带）', d); include.checked = true;
+        const include = input('checkbox', '', period === 'day' ? '附带当日学习时长统计' : '附带当日学习时长统计（逐日附带）', d); include.checked = enabled();
+        include.parentElement.dataset.timingSection = 'true'; include.parentElement.hidden = !enabled();
         const error = el('p', '', 'learning-error'); d.append(error);
         d.append(button('导出文件', async () => {
-            try { const result = exportReviews(data(), period, target, include.checked, knownTasks()); const saved = await exportFile(result); if (saved) { toast('文件已保存'); d.close(); } }
+            try { const result = exportReviews(data(), period, target, enabled() && include.checked, knownTasks()); const saved = await exportFile(result); if (saved) { toast('文件已保存'); d.close(); } }
             catch (e) { error.textContent = e.message || String(e); }
         }), button('取消', () => d.close()));
     }
@@ -254,7 +287,7 @@ export function createLearningView({ state, commit, redraw, sync, toast, exportF
         })));
         if (summary.running) learning.append(el('p', `${summary.running} 条进行中，尚未计入汇总`));
         if (summary.pending) learning.append(button(`${summary.pending} 条待核对记录未计入 · 查看`, () => showRecords(entries().filter(e => !e.deleted && overlappingEntries(entries()).has(e.id)), '核对计时记录')));
-        host.append(learning);
+        if (enabled()) host.append(learning);
         const review = el('section', null, 'learning-card'); review.append(el('h3', '我的复盘'), button('导出 Markdown', () => exportDialog()));
         const list = (data().daily_reviews || []).filter(r => !r.deleted && r.date >= start && r.date < end).sort((a, b) => b.date.localeCompare(a.date));
         if (state.statsPeriod === 'day') {
@@ -267,9 +300,13 @@ export function createLearningView({ state, commit, redraw, sync, toast, exportF
         host.append(review);
     }
     function refresh() {
+        if (enabled() && !timer) timer = setInterval(tick, 1000);
+        if (!enabled() && timer) { clearInterval(timer); timer = null; }
+        document.querySelectorAll('[data-timing-section]').forEach(n => { n.hidden = !enabled(); });
+        if (!enabled()) document.querySelectorAll('dialog[data-timing]').forEach(d => d.close());
         refreshLabelPicker?.();
         if (!banner) { banner = el('div', null, 'learning-banner'); document.querySelector('main')?.before(banner); }
-        banner.replaceChildren(); const active = running(); banner.hidden = !active.length;
+        banner.replaceChildren(); const active = enabled() ? running() : []; banner.hidden = !active.length;
         if (active.length === 1) banner.append(el('span', active[0].task_content_snapshot), clock(active[0]),
             button('结束', () => run(() => stop(active[0].id))), button('记录', () => showRecords(active)));
         if (active.length > 1) {
@@ -280,12 +317,38 @@ export function createLearningView({ state, commit, redraw, sync, toast, exportF
     }
     function install() {
         const anchor = document.querySelector('.stats-list-toggle-container'); const host = el('div'); host.id = 'learning-insights'; anchor?.before(host);
-        setInterval(tick, 1000);
         // 编辑弹窗阻止底层导航；关闭窗口也先处理未保存正文。
         window.addEventListener('beforeunload', e => { if (reviewLeave) { e.preventDefault(); e.returnValue = ''; } });
         window.__TAURI__.window?.getCurrentWindow?.().onCloseRequested(async event => {
             if (reviewLeave) { event.preventDefault(); if (await reviewLeave()) await window.__TAURI__.window.getCurrentWindow().close(); }
         });
     }
-    return { install, refresh, attachTimer, editTask, renderStats, compactEditor, resolvedEntries, showRecords };
+    async function prepareDisable() {
+        const active = structuredClone(running()); if (!active.length) return true;
+        const answer = await choices(`有 ${active.length} 条计时正在运行：${active.map(e => e.task_content_snapshot).join('、')}。结束操作将全部结束于当前时间并影响统计；仅关闭本机功能会保留运行记录，重新开启或在其他设备处理。`,
+            [['仅关闭本机计时功能', 'hide'], ['结束计时并关闭', 'stop'], ['取消', 'cancel']]);
+        if (answer === 'cancel') return false;
+        if (answer === 'stop') {
+            const now = new Date().toISOString();
+            let discarded = 0;
+            await commit(d => {
+                const current = d.time_entries.filter(e => !e.deleted && !e.ended_at);
+                if (current.length !== active.length || current.some(e => !active.some(old => JSON.stringify(old) === JSON.stringify(e)))) throw new Error('运行记录已变化，请重新保存并确认');
+                d.time_entries = d.time_entries.map(entry => {
+                    if (!current.includes(entry)) return entry;
+                    const finished = finishTimeEntry(entry, now);
+                    if (finished.deleted) discarded++;
+                    return finished;
+                });
+            });
+            showShortTimerNotice(discarded);
+        }
+        return true;
+    }
+    function editRecord(entry) {
+        const current = entries().find(e => e.id === entry.id && !e.deleted);
+        if (!current) { toast('该计时记录已删除'); return; }
+        editEntry(current);
+    }
+    return { install, refresh, attachTimer, editTask, renderStats, compactEditor, resolvedEntries, showRecords, editRecord, prepareDisable };
 }

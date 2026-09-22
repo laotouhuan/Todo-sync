@@ -2964,6 +2964,11 @@ textarea {
 .learning-banner>span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .learning-dialog { color: var(--text-primary, #222); background: var(--modal-bg-solid, #222); margin: auto; border: 1px solid #8886; border-radius: 14px; padding: 20px; width: min(520px, 90vw); max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 70px #0005; }
 .learning-dialog::backdrop { background: #0007; }
+.learning-records-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+.learning-records-dialog > h3, .learning-records-actions { flex-shrink: 0; }
+.learning-records-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.learning-records-actions > :last-child { margin-left: auto; }
+.learning-records-body { min-height: 0; overflow-y: auto; }
 .learning-dialog label,.learning-edit-extra label { display: block; font-size: .85rem; margin: 12px 0; }
 .learning-dialog input:not([type=checkbox]),.learning-dialog textarea,.learning-edit-extra input { display: block; width: 100%; box-sizing: border-box; margin-top: 5px; padding: 9px; color: inherit; background: #8881; border: 1px solid #8886; border-radius: 6px; }
 .learning-dialog input[type=checkbox] { margin-left: 10px; }
@@ -3010,3 +3015,8 @@ textarea {
 .learning-record { font-size: .9rem; line-height: 1.6; padding: 12px 0; }
 .learning-record small { color: var(--text-secondary); font-size: .8rem; }
 .learning-dialog .learning-button { font-size: .85rem; }
+:is(.label-actions, .label-task) { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.label-task { border-bottom: 1px solid var(--border-color, #555); padding-bottom: 8px; }
+.label-task > button { flex: 1; text-align: left; overflow-wrap: anywhere; min-width: 100px; }
+#panel-labels > input { width: 100%; box-sizing: border-box; }
+[data-timing-section][hidden] { display: none !important; }

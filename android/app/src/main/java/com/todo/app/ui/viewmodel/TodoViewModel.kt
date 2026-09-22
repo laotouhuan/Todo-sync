@@ -37,6 +37,30 @@ data class HealthMetrics(
 )
 
 class TodoViewModel(private val repository: TodoRepository, val configManager: ConfigManager) : ViewModel() {
+    private val _timeTrackingEnabled = MutableStateFlow(configManager.timeTrackingEnabled)
+    val timeTrackingEnabled: StateFlow<Boolean> = _timeTrackingEnabled.asStateFlow()
+    private val _discardedShortTimers = MutableStateFlow(0)
+    val discardedShortTimers: StateFlow<Int> = _discardedShortTimers.asStateFlow()
+
+    fun dismissShortTimerNotice() { _discardedShortTimers.value = 0 }
+
+    suspend fun savePreferences(dueDate: String, insertion: String, timing: Boolean,
+        endRecords: List<com.todo.app.data.model.TimeEntry>? = null): Result<Unit> {
+        return try {
+            if (endRecords != null) {
+                val discarded = repository.finishConfirmedTimers(endRecords, com.todo.app.data.model.nowIso()).getOrThrow()
+                _discardedShortTimers.value += discarded
+            }
+            kotlinx.coroutines.withContext(Dispatchers.IO) { configManager.savePreferences(dueDate, insertion, timing) }
+            _timeTrackingEnabled.value = timing
+            Result.success(Unit)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updatePersonalLabels(plan: com.todo.app.data.model.LabelChangePlan, target: String?) = repository.updatePersonalLabels(plan, target)
 
     sealed class ActiveSource {
         object Personal : ActiveSource()
@@ -315,7 +339,9 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
             } else emptyMap()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
     suspend fun startLearning(todo: Todo) = repository.startLearning(todo, learningReference(todo))
-    suspend fun stopLearning(id: String) = repository.stopLearning(id)
+    suspend fun stopLearning(id: String): Result<Unit> = repository.stopLearning(id).map { discarded ->
+        _discardedShortTimers.value += discarded
+    }
     suspend fun saveTimeEntry(entry: com.todo.app.data.model.TimeEntry) = repository.saveTimeEntry(entry)
     suspend fun saveDailyReview(review: com.todo.app.data.model.DailyReview) = repository.saveDailyReview(review)
     suspend fun saveEditedTodo(todo: Todo) {

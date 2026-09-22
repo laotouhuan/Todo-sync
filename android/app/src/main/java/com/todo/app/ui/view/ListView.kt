@@ -1000,14 +1000,17 @@ fun TodoItemRow(
                         },
                         enabled = !isReadOnly
                     )
-                    Column(modifier = Modifier.weight(1f).clickable {
-                        if (todo.taskType == TaskType.MONTHLY_CHECKIN) {
-                            calendarExpanded = !calendarExpanded
-                        } else if (todo.subtasks.isNotEmpty()) {
-                            expanded = !expanded
-                        }
-                    }) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier.clickable {
+                                if (todo.taskType == TaskType.MONTHLY_CHECKIN && todo.targetCount != 1) {
+                                    calendarExpanded = !calendarExpanded
+                                } else if (todo.subtasks.isNotEmpty()) {
+                                    expanded = !expanded
+                                }
+                            },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             val textColor by animateColorAsState(
                                 targetValue = if (isVisualCompleted) Color.Gray else MaterialTheme.colorScheme.onSurface,
                                 animationSpec = tween(durationMillis = 300)
@@ -1084,7 +1087,7 @@ fun TodoItemRow(
                             Text(text = meta.joinToString(" | "), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                         }
 
-                        if (todo.taskType == TaskType.WEEKLY_CHECKIN) {
+                        if (todo.taskType == TaskType.WEEKLY_CHECKIN && todo.targetCount != 1) {
                             Spacer(Modifier.height(6.dp))
                             val dates = remember { getThisWeekDates() }
                             val labels = listOf("一", "二", "三", "四", "五", "六", "日")
@@ -1105,10 +1108,7 @@ fun TodoItemRow(
                                                 width = if (isToday) 2.dp else 0.5.dp,
                                                 color = if (isToday) Color(0xFFFAAD14) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
                                                 shape = RoundedCornerShape(4.dp)
-                                            )
-                                            .clickable(enabled = !isReadOnly) {
-                                                viewModel.updateTodo(todo.withToggledCheckinDate(dateStr))
-                                            },
+                                            ),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
@@ -1139,7 +1139,7 @@ fun TodoItemRow(
                                 )
                             }
 
-                            if (calendarExpanded) {
+                            if (calendarExpanded && todo.targetCount != 1) {
                                 Spacer(Modifier.height(6.dp))
                                 val dates = remember(todo.date) { getMonthCalendarDates(todo.date) }
 
@@ -1196,15 +1196,6 @@ fun TodoItemRow(
                                                             width = if (isToday) 2.dp else 0.5.dp,
                                                             color = if (isToday) Color(0xFFFAAD14) else MaterialTheme.colorScheme.outline.copy(alpha = if (isCurrentMonth) 0.2f else 0.05f),
                                                             shape = RoundedCornerShape(4.dp)
-                                                        )
-                                                        .then(
-                                                            if ((isCurrentMonth || isChecked) && !isReadOnly) {
-                                                                Modifier.clickable {
-                                                                    viewModel.updateTodo(todo.withToggledCheckinDate(dateStr))
-                                                                }
-                                                            } else {
-                                                                Modifier
-                                                            }
                                                         ),
                                                     contentAlignment = Alignment.Center
                                                 ) {

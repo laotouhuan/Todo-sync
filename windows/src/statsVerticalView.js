@@ -20,7 +20,7 @@ function completionMark(event, x, y, radius) {
     return svg('polygon', { points, fill: color, stroke: '#fff', 'stroke-width': 1 });
 }
 
-export function renderVerticalTimeline({ host, todos, steps, arcs, period, target, bindTooltip, timerTooltip, openTimers, openTodo, showDetails }) {
+export function renderVerticalTimeline({ host, todos, steps, arcs, period, target, bindTooltip, timerTooltip, openTimers, openTodo, openSubtask, showDetails }) {
     const days = timelineDays(period, target), month = period === 'month';
     const stride = month ? 32 : 42, width = days.length * stride, top = 44, height = 288, total = 356;
     const yAt = minute => top + minute / 1440 * height;
@@ -67,7 +67,7 @@ export function renderVerticalTimeline({ host, todos, steps, arcs, period, targe
             mark.setAttribute('role', 'button'); mark.setAttribute('tabindex', '0'); mark.setAttribute('aria-label', `${title} ${stamp.date} ${stamp.time}`);
             prepareClockEntry(mark, minute);
             bindTooltip(mark, title, [...(e.subtask ? [`所属任务: ${e.todo.content}`] : []), `完成日期: ${stamp.date}`, `完成时间: ${stamp.time}`], color, e.subtask ? color : '#fff', 1.5, 1);
-            const open = () => showDetails(e.subtask ? '子步骤完成' : '任务完成', [e.todo.content, ...(e.subtask ? [e.subtask.content] : []), `${stamp.date} ${stamp.time}`], '编辑任务', () => openTodo(e.todo));
+            const open = () => e.subtask ? openSubtask(e.todo, e.subtask) : showDetails('任务完成', [e.todo.content, `${stamp.date} ${stamp.time}`], '编辑任务', () => openTodo(e.todo));
             mark.onclick = open; mark.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } }; marks.append(mark);
         });
     });

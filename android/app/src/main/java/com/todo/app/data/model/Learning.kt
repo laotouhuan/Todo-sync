@@ -31,6 +31,18 @@ data class LearningSummary(val duration: Long, val count: Int, val parts: List<L
     val groups: List<LearningGroup>, val pending: Int, val running: Int)
 
 object Learning {
+    const val SHORT_TIME_ENTRY_MESSAGE = "计时未超过 30 秒，不保存为记录。"
+    private val minimumDuration = Duration.ofSeconds(30)
+
+    // 短计时保留删除标记参与同步，避免其他设备恢复已丢弃的运行记录。
+    fun finishTimeEntry(entry: TimeEntry, endedAt: String): TimeEntry {
+        if (entry.deleted || entry.ended_at != null) return entry
+        val start = instant(entry.started_at)
+        val end = instant(endedAt)
+        require(start != null && end != null && !end.isBefore(start)) { "计时时间异常，请检查开始和结束时间" }
+        return entry.copy(ended_at = endedAt, updated_at = endedAt,
+            deleted = Duration.between(start, end) <= minimumDuration)
+    }
     private val json = Json { encodeDefaults = true }
     fun label(value: String?): String? = value?.trim()?.let { Normalizer.normalize(it, Normalizer.Form.NFC) }
         ?.takeIf { it.isNotEmpty() && it != "未分类" }
@@ -97,6 +109,7 @@ object Learning {
         if (entry.ended_at != null && end == null) return "请输入有效的结束日期和时间"
         if (start > now || (end != null && end > now)) return "不能记录未来的学习时间"
         if (end != null && end <= start) return "结束时间必须晚于开始时间"
+        if (end != null && Duration.between(start, end) <= minimumDuration) return SHORT_TIME_ENTRY_MESSAGE
         if (overlaps(entries.filter { it.id != entry.id } + entry).contains(entry.id)) return "与其他计时记录重叠，请检查起止时间"
         return null
     }
