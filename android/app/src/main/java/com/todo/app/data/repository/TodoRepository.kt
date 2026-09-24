@@ -17,15 +17,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
-import java.io.FileOutputStream
-import java.io.IOException
 import java.util.UUID
 import com.todo.app.data.model.nowIso
 import com.todo.app.data.model.nowInstant
@@ -46,6 +43,13 @@ sealed class UiEvent {
     data class ShowError(val error: String) : UiEvent()
 }
 
+internal fun generateShareCodeKey(random: java.security.SecureRandom = java.security.SecureRandom()): String {
+    val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    return buildString(12) {
+        repeat(12) { append(alphabet[random.nextInt(alphabet.length)]) }
+    }
+}
+
 /**
  * 待办事项数据仓库接口，模拟本地持久化。
  */
@@ -60,7 +64,7 @@ class TodoRepository(private val context: Context) {
     }
 
     private val dataFile = File(context.filesDir, "todo_data.json")
-    private val tmpFile = File(context.filesDir, "todo_data.tmp")
+    private val personalStore = PersonalDataStore(dataFile)
     private val collabFile = File(context.filesDir, "collaborations.json")
     private val collabTmpFile = File(context.filesDir, "collaborations.tmp")
     private val configManager = ConfigManager(context)
@@ -70,7 +74,24 @@ class TodoRepository(private val context: Context) {
     // Repository-scoped coroutine scope: SupervisorJob ensures one failed upload doesn't cancel future ones.
     // Not cancelled explicitly -- TodoRepository is an app-singleton; call repoScope.cancel() if ever scoped shorter.
     private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val mutex = Mutex()
+    private val mutex = personalStore.mutex
+
+    val loadError = personalStore.loadError.asStateFlow()
+    private val _timeTrackingEnabled = MutableStateFlow(configManager.timeTrackingEnabled)
+    val timeTrackingEnabled = _timeTrackingEnabled.asStateFlow()
+
+    // 等持有数据锁的修改完成后刷新，Glance 读取时不会重入同一把锁。
+    private fun requestWidgetRefresh() {
+        repoScope.launch {
+            mutex.withLock { }
+            com.todo.app.widget.refreshAllWidgets(context)
+        }
+    }
+
+    private fun refreshReminders(data: TodoData) {
+        runCatching { com.todo.app.notification.ReminderScheduler(context).rescheduleAll(data) }
+            .onFailure { Log.e(TAG, "提醒刷新失败", it) }
+    }
 
     private val _uiEvent = Channel<UiEvent>(Channel.BUFFERED)
     val uiEvent: Flow<UiEvent> = _uiEvent.receiveAsFlow()
@@ -168,46 +189,11 @@ class TodoRepository(private val context: Context) {
         webDavClient = null
     }
 
-    /**
-     * Atomic write: write to tmp file then sync to disk, then rename to prevent data corruption on crash.
-     * Uses FileOutputStream + fd.sync() for reliability across Android filesystems.
-     */
-    private fun atomicWriteJson(json: String) {
-        try {
-            tmpFile.outputStream().use { fos ->
-                fos.write(json.toByteArray(Charsets.UTF_8))
-                fos.fd.sync()
-            }
-            // Try atomic rename first
-            if (!tmpFile.renameTo(dataFile)) {
-                // Fallback: copy bytes to dataFile then delete tmp
-                dataFile.outputStream().use { fos ->
-                    fos.write(json.toByteArray(Charsets.UTF_8))
-                    fos.fd.sync()
-                }
-                tmpFile.delete()
-            }
-        } catch (e: IOException) {
-            Log.e(TAG, "atomicWriteJson failed, falling back to direct write", e)
-            try {
-                dataFile.writeText(json)
-                tmpFile.delete()
-            } catch (_: Exception) {}
-        }
-    }
+    private val _todoData = personalStore.data
 
-    private val _todoData = MutableStateFlow(
-        TodoData(
-            version = 1,
-            last_updated = nowIso(),
-            todos = emptyList()
-        )
-    )
-
-    private val dataLoaded = CompletableDeferred<Unit>()
-
-    val isSyncing = MutableStateFlow(false)
-    private val _syncStatus = MutableStateFlow(0) // 0: success/none, 1: syncing, 2: error
+    private val cloudSyncState = CloudSyncState()
+    val isSyncing = cloudSyncState.syncing
+    private val _syncStatus = cloudSyncState.status // 0：空闲，1：同步中，2：失败
     val syncStatus: kotlinx.coroutines.flow.StateFlow<Int> = _syncStatus.asStateFlow()
 
     private val uploadChannel = Channel<Unit>(Channel.CONFLATED)
@@ -216,9 +202,10 @@ class TodoRepository(private val context: Context) {
         // P1-12: Load from disk asynchronously
         repoScope.launch {
             try {
-                loadFromDisk()
-            } finally {
-                dataLoaded.complete(Unit)
+                ensureDataLoaded()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                _uiEvent.trySend(UiEvent.ShowError(loadError.value ?: "数据加载失败"))
             }
         }
         repoScope.launch {
@@ -230,32 +217,6 @@ class TodoRepository(private val context: Context) {
     }
 
 
-
-    private suspend fun loadFromDisk() {
-        if (dataFile.exists()) {
-            try {
-                val jsonString = dataFile.readText()
-                val parsed = jsonFormat.decodeFromString<TodoData>(jsonString)
-                val migratedData = com.todo.app.data.model.MergeUtils.normalizeData(parsed)
-                val migratedTodos = migratedData.todos
-
-                // 旧数据迁移：所有 todo 的 order 都为 0.0 时，按 createdAt 降序分配递增序号
-                if (migratedTodos.size > 1 && migratedTodos.all { it.order == 0.0 }) {
-                    val sorted = migratedTodos.sortedByDescending { it.createdAt }
-                    sorted.forEachIndexed { index, todo -> todo.order = index.toDouble() }
-                    _todoData.value = migratedData.copy(todos = sorted)
-                    // 持久化迁移结果
-                    try { atomicWriteJson(jsonFormat.encodeToString(TodoData.serializer(), _todoData.value)) } catch (_: Exception) {}
-                } else {
-                    _todoData.value = migratedData
-                }
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                Log.e(TAG, "loadFromDisk failed, using empty list", e)
-                _uiEvent.send(UiEvent.ShowError("数据加载失败，已使用空列表: ${e.message}"))
-            }
-        }
-    }
 
     private fun createLocalBackup() {
         if (!dataFile.exists()) return
@@ -295,16 +256,14 @@ class TodoRepository(private val context: Context) {
                 val backupFile = File(File(context.filesDir, "backups"), filename)
                 if (!backupFile.exists()) return@withContext false
 
-                createLocalBackup() // backup the current state before restoring
-
                 val jsonString = backupFile.readText()
-                _todoData.value = jsonFormat.decodeFromString<TodoData>(jsonString)
-                atomicWriteJson(jsonString)
-
-                initWebDavClient()
-                webDavClient?.uploadFile(configManager.filePath, jsonString)
-
-                com.todo.app.widget.refreshAllWidgets(context)
+                val restored = personalStore.decode(jsonString)
+                // 先读取并验证恢复源，避免备份轮换或同秒命名覆盖正在恢复的内容。
+                createLocalBackup()
+                personalStore.commitLocked(restored)
+                refreshReminders(_todoData.value)
+                uploadChannel.trySend(Unit)
+                requestWidgetRefresh()
                 true
             }.onFailure { e ->
                 if (e is CancellationException) throw e
@@ -316,16 +275,14 @@ class TodoRepository(private val context: Context) {
 
 
     suspend fun syncWithCloud() = mutex.withLock { withContext(Dispatchers.IO) {
-        if (isSyncing.value) return@withContext
-        isSyncing.value = true
-        _syncStatus.value = 1
-        com.todo.app.widget.refreshAllWidgets(context)
         try {
-            initWebDavClient()
-            val client = webDavClient ?: return@withContext
-            val cloudJson = client.downloadFile(configManager.filePath)
-            if (cloudJson != null) {
-                try {
+            val result = cloudSyncState.run(configManager.isConfigured()) {
+                requestWidgetRefresh()
+                personalStore.loadLocked()
+                initWebDavClient()
+                val client = webDavClient ?: error("同步客户端初始化失败")
+                val cloudJson = client.downloadFile(configManager.filePath)
+                if (cloudJson != null) {
                     val cloudData = jsonFormat.decodeFromString<TodoData>(cloudJson)
                     val localData = _todoData.value
                     val mergedData = com.todo.app.data.model.MergeUtils.mergeTodoData(localData, cloudData)
@@ -335,35 +292,25 @@ class TodoRepository(private val context: Context) {
                     val cloudChanged = com.todo.app.data.model.MergeUtils.hasContentChanges(mergedData, cloudData)
                     if (localChanged) {
                         createLocalBackup()
-                        _todoData.value = mergedData
-                        atomicWriteJson(mergedJson)
-                        com.todo.app.widget.refreshAllWidgets(context)
-                        com.todo.app.notification.ReminderScheduler(context).rescheduleAll(mergedData)
-                        _uiEvent.send(UiEvent.ShowMessage("检测到云端更新，已自动同步完成"))
+                        personalStore.commitLocked(mergedData)
+                        requestWidgetRefresh()
+                        refreshReminders(mergedData)
                     }
                     if (cloudChanged) {
                         client.uploadFile(configManager.filePath, mergedJson)
                     }
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e
-                    Log.e(TAG, "syncWithCloud merge failed", e)
+                    if (localChanged) _uiEvent.trySend(UiEvent.ShowMessage("检测到云端更新，已自动同步完成"))
+                } else {
+                    // 只有成功加载的数据才能上传。
+                    client.uploadFile(configManager.filePath, jsonFormat.encodeToString(_todoData.value))
                 }
-            } else {
-                // 如果云端没有文件，尝试上传本地
-                val localData = _todoData.value
-                val localJson = jsonFormat.encodeToString(localData)
-                client.uploadFile(configManager.filePath, localJson)
             }
-            _syncStatus.value = 0
-            com.todo.app.widget.refreshAllWidgets(context)
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            Log.e(TAG, "syncWithCloud failed", e)
-            _syncStatus.value = 2
-            com.todo.app.widget.refreshAllWidgets(context)
-            _uiEvent.send(UiEvent.ShowError("同步失败: ${e.message}"))
+            result.exceptionOrNull()?.let { e ->
+                Log.e(TAG, "syncWithCloud failed", e)
+                _uiEvent.trySend(UiEvent.ShowError("同步失败: ${e.message}"))
+            }
         } finally {
-            isSyncing.value = false
+            requestWidgetRefresh()
         }
     }
     }
@@ -374,13 +321,12 @@ class TodoRepository(private val context: Context) {
             val client = webDavClient ?: throw Exception("配置信息未填写完整")
             val cloudJson = client.downloadFile(configManager.filePath)
             if (cloudJson != null) {
-                createLocalBackup()
                 val cloudData = jsonFormat.decodeFromString<TodoData>(cloudJson)
                 val migratedData = com.todo.app.data.model.MergeUtils.normalizeData(cloudData)
-                _todoData.value = migratedData
-                atomicWriteJson(jsonFormat.encodeToString(migratedData))
-                com.todo.app.widget.refreshAllWidgets(context)
-                com.todo.app.notification.ReminderScheduler(context).rescheduleAll(migratedData)
+                createLocalBackup()
+                personalStore.commitLocked(migratedData)
+                requestWidgetRefresh()
+                refreshReminders(migratedData)
                 _uiEvent.send(UiEvent.ShowMessage("强制拉取成功！"))
             } else {
                 _uiEvent.send(UiEvent.ShowError("下载失败：找不到文件或密码错误"))
@@ -400,10 +346,11 @@ class TodoRepository(private val context: Context) {
     private suspend fun changeLearning(change: (TodoData) -> TodoData): Result<Unit> = mutex.withLock {
         withContext(Dispatchers.IO) {
             try {
+                personalStore.loadLocked()
                 val updated = change(_todoData.value).copy(last_updated = nowIso())
-                atomicWriteJson(jsonFormat.encodeToString(updated))
-                _todoData.value = updated
+                personalStore.commitLocked(updated)
                 uploadChannel.trySend(Unit)
+                requestWidgetRefresh()
                 Result.success(Unit)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -413,30 +360,37 @@ class TodoRepository(private val context: Context) {
     }
 
     suspend fun startLearning(todo: Todo, ref: com.todo.app.data.model.TaskReference): Result<Unit> {
+        try {
+            ensureDataLoaded()
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            return Result.failure(e)
+        }
         syncWithCloud()
-        return changeLearning { data ->
-            require(configManager.timeTrackingEnabled) { "本机任务计时已关闭" }
-            require(!todo.deleted) { "已删除任务不能开始计时" }
-            require(data.timeEntries.none { !it.deleted && it.ended_at == null }) { "已有任务正在计时，请先结束或处理记录" }
-            val now = nowIso()
-            data.copy(timeEntries = data.timeEntries + com.todo.app.data.model.TimeEntry(
-                id = java.util.UUID.randomUUID().toString(), task_ref = ref, started_at = now,
-                created_at = now, updated_at = now, task_content_snapshot = todo.content,
-                label_snapshot = com.todo.app.data.model.Learning.label(todo.label)))
+        return withContext(Dispatchers.IO) {
+            try {
+                personalStore.start(todo, ref, { configManager.timeTrackingEnabled })
+                uploadChannel.trySend(Unit)
+                requestWidgetRefresh()
+                Result.success(Unit)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                Result.failure(e)
+            }
         }
     }
 
-    suspend fun stopLearning(id: String): Result<Int> {
-        var discarded = 0
-        return changeLearning { data ->
-            require(configManager.timeTrackingEnabled) { "本机任务计时已关闭" }
-            val now = nowIso()
-            data.copy(timeEntries = data.timeEntries.map { entry ->
-                if (entry.id == id && !entry.deleted && entry.ended_at == null) {
-                    com.todo.app.data.model.Learning.finishTimeEntry(entry, now).also { if (it.deleted) discarded++ }
-                } else entry
-            })
-        }.map { discarded }
+    suspend fun stopLearning(id: String): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val discarded = personalStore.stop(id, { configManager.timeTrackingEnabled })
+            uploadChannel.trySend(Unit)
+            Result.success(discarded)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            Result.failure(e)
+        } finally {
+            requestWidgetRefresh()
+        }
     }
 
     suspend fun saveTimeEntry(entry: com.todo.app.data.model.TimeEntry): Result<Unit> = changeLearning { data ->
@@ -450,31 +404,36 @@ class TodoRepository(private val context: Context) {
             updated_at = nowIso(), label_snapshot = com.todo.app.data.model.Learning.label(entry.label_snapshot))))
     }
 
-    suspend fun finishConfirmedTimers(expected: List<com.todo.app.data.model.TimeEntry>, now: String): Result<Int> {
-        var discarded = 0
-        return changeLearning { data ->
-            val running = data.timeEntries.filter { !it.deleted && it.ended_at == null }
-            require(running.toSet() == expected.toSet()) { "运行记录已变化，请重新保存并确认" }
-            data.copy(timeEntries = data.timeEntries.map { entry ->
-                if (entry in running) {
-                    com.todo.app.data.model.Learning.finishTimeEntry(entry, now).also { if (it.deleted) discarded++ }
-                } else entry
+    suspend fun saveTimingPreferences(dueDate: String, insertion: String, timing: Boolean,
+        expected: List<com.todo.app.data.model.TimeEntry>?): Result<Int> = withContext(Dispatchers.IO) {
+        val before = _todoData.value
+        try {
+            val discarded = personalStore.saveTimingPreferences(expected, {
+                configManager.savePreferences(dueDate, insertion, timing)
             })
-        }.map { discarded }
+            Result.success(discarded)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            Result.failure(e)
+        } finally {
+            _timeTrackingEnabled.value = configManager.timeTrackingEnabled
+            if (_todoData.value !== before) uploadChannel.trySend(Unit)
+            requestWidgetRefresh()
+        }
     }
 
     suspend fun updatePersonalLabels(plan: com.todo.app.data.model.LabelChangePlan, target: String?): Result<Int> {
-        ensureDataLoaded()
         return mutex.withLock {
             withContext(Dispatchers.IO) {
                 try {
+                    personalStore.loadLocked()
                     val (todos, count) = com.todo.app.data.model.LabelUtils.apply(_todoData.value.todos, plan, target, nowIso())
                     if (count > 0) {
                         // 标签操作完整保留个人扩展数据，不触发任务删除或运行记录清理。
                         val updated = _todoData.value.copy(todos = todos, last_updated = nowIso())
-                        atomicWriteJson(jsonFormat.encodeToString(updated))
-                        _todoData.value = updated
+                        personalStore.commitLocked(updated)
                         uploadChannel.trySend(Unit)
+                        requestWidgetRefresh()
                     }
                     Result.success(count)
                 } catch (e: Exception) {
@@ -515,13 +474,10 @@ class TodoRepository(private val context: Context) {
 
     /**
      * 等待磁盘数据加载完成后返回当前数据。
-     * 如果已加载完毕则立即返回（零开销）。
+     * 已加载时在锁内复用缓存，不重复读取磁盘。
      * 供冷启动场景（BroadcastReceiver / Boot / Widget / App 启动）使用。
      */
-    suspend fun ensureDataLoaded(): TodoData {
-        dataLoaded.await()
-        return _todoData.value
-    }
+    suspend fun ensureDataLoaded(): TodoData = withContext(Dispatchers.IO) { personalStore.ensureLoaded() }
 
     /** 物理清理已删除超过 PURGE_DELETED_AFTER_DAYS 天的旧记录，防止 JSON 无限膨胀。
      *  与 Windows 端 purgeOldDeletedTodos() 逻辑完全对齐。 */
@@ -550,7 +506,8 @@ class TodoRepository(private val context: Context) {
      * Save the given list of todos to disk and trigger a background upload.
      * Callers must hold [mutex] before invoking this method.
      */
-    private suspend fun saveTodos(todos: List<Todo>, failOnError: Boolean = false) = withContext(Dispatchers.IO) {
+    private suspend fun saveTodos(todos: List<Todo>) = withContext(Dispatchers.IO) {
+        personalStore.loadLocked()
         val previous = _todoData.value
         // 物理清理：删除超过 7 天的软删除记录，与 Windows 端 purgeOldDeletedTodos() 对齐
         val purged = purgeOldDeletedTodos(todos)
@@ -565,106 +522,81 @@ class TodoRepository(private val context: Context) {
             },
             dailyReviews = previous.dailyReviews
         )
-        if (!failOnError) _todoData.value = updated
-        try {
-            val jsonString = jsonFormat.encodeToString(updated)
-            atomicWriteJson(jsonString)
-            if (failOnError) _todoData.value = updated
-        } catch (e: Exception) {
-            _todoData.value = previous
-            if (e is CancellationException) throw e
-            Log.e(TAG, "saveTodos failed", e)
-            if (failOnError) throw e
-            _uiEvent.send(UiEvent.ShowError("保存失败: ${e.message}"))
-            return@withContext
-        }
-        // 文件已写入后，小组件或提醒刷新失败不能回滚已保存的任务。
-        runCatching {
-            com.todo.app.widget.refreshAllWidgets(context)
-            com.todo.app.notification.ReminderScheduler(context).rescheduleAll(updated)
-        }.onFailure { Log.e(TAG, "刷新小组件或提醒失败", it) }
+        personalStore.commitLocked(updated)
+        requestWidgetRefresh()
+        refreshReminders(updated)
         uploadChannel.trySend(Unit)
         Unit
     }
 
     suspend fun updateReminderSettings(settings: com.todo.app.data.model.ReminderSettings) = mutex.withLock {
         withContext(Dispatchers.IO) {
+            personalStore.loadLocked()
             val previous = _todoData.value
             val settingsUpdatedAt = nowInstant()
             val updated = previous.copy(
                 last_updated = settingsUpdatedAt,
                 reminderSettings = settings.copy(updatedAt = settingsUpdatedAt)
             )
-            _todoData.value = updated
             try {
-                val jsonString = jsonFormat.encodeToString(updated)
-                atomicWriteJson(jsonString)
-                com.todo.app.notification.ReminderScheduler(context).rescheduleAll(updated)
+                personalStore.commitLocked(updated)
+                refreshReminders(updated)
                 uploadChannel.trySend(Unit)
+                requestWidgetRefresh()
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                _todoData.value = previous
+                _uiEvent.trySend(UiEvent.ShowError("提醒设置保存失败：${e.message}"))
             }
         }
     }
 
-    private suspend fun performBackgroundUpload() {
-        if (!configManager.isConfigured()) return
-        val jsonString = try {
-            val currentData = _todoData.value
-            jsonFormat.encodeToString(currentData)
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            Log.e(TAG, "performBackgroundUpload serialize failed", e)
-            return
-        }
-
-        _syncStatus.value = 1
-        com.todo.app.widget.refreshAllWidgets(context)
+    private suspend fun performBackgroundUpload() = mutex.withLock {
         try {
-            initWebDavClient()
-            webDavClient?.uploadFile(configManager.filePath, jsonString)
-            _syncStatus.value = 0
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            Log.e(TAG, "performBackgroundUpload upload failed", e)
-            _syncStatus.value = 2
+            cloudSyncState.run(configManager.isConfigured()) {
+                val currentData = personalStore.loadLocked()
+                requestWidgetRefresh()
+                initWebDavClient()
+                val client = webDavClient ?: error("同步客户端初始化失败")
+                client.uploadFile(configManager.filePath, jsonFormat.encodeToString(currentData))
+            }.onFailure { Log.e(TAG, "performBackgroundUpload upload failed", it) }
+        } finally {
+            requestWidgetRefresh()
         }
-        com.todo.app.widget.refreshAllWidgets(context)
     }
 
     suspend fun addTodo(todo: Todo) = mutex.withLock {
+        withContext(Dispatchers.IO) { personalStore.loadLocked() }
         val current = _todoData.value.todos.toMutableList()
-        todo.updatedAt = nowIso()
-        current.add(todo)
+        current.add(todo.copy(updatedAt = nowIso()))
         saveTodos(current)
     }
 
     suspend fun updateTodo(todo: Todo) = mutex.withLock {
+        withContext(Dispatchers.IO) { personalStore.loadLocked() }
         val current = _todoData.value.todos.toMutableList()
         val index = current.indexOfFirst { it.id == todo.id }
         if (index != -1) {
-            todo.updatedAt = nowIso()
-            current[index] = todo
-            saveTodos(current, failOnError = true)
+            current[index] = todo.copy(updatedAt = nowIso())
+            saveTodos(current)
         }
     }
 
     suspend fun batchUpdateTodos(updatedTodos: List<Todo>) = mutex.withLock {
+        withContext(Dispatchers.IO) { personalStore.loadLocked() }
         val current = _todoData.value.todos.toMutableList()
         val indexMap = current.withIndex().associate { (i, t) -> t.id to i }
         val now = nowIso()
         for (todo in updatedTodos) {
             val index = indexMap[todo.id] ?: -1
             if (index != -1) {
-                todo.updatedAt = now
-                current[index] = todo
+                current[index] = todo.copy(updatedAt = now)
             }
         }
         saveTodos(current)
     }
 
     suspend fun deleteTodo(id: String) = mutex.withLock {
+        withContext(Dispatchers.IO) { personalStore.loadLocked() }
         val current = _todoData.value.todos.toMutableList()
         val index = current.indexOfFirst { it.id == id }
         if (index != -1) {
@@ -770,6 +702,7 @@ class TodoRepository(private val context: Context) {
     }
 
     suspend fun toggleTodoStatus(id: String) = mutex.withLock {
+        withContext(Dispatchers.IO) { personalStore.loadLocked() }
         val current = _todoData.value.todos.toMutableList()
         val index = current.indexOfFirst { it.id == id }
         if (index != -1) {
@@ -822,6 +755,7 @@ class TodoRepository(private val context: Context) {
     }
 
     suspend fun importSelectedFromLastPeriod(type: String, selectedIds: List<String>) = mutex.withLock { withContext(Dispatchers.IO) {
+        personalStore.loadLocked()
         val today = java.time.LocalDate.now()
         val targetPeriodStr = if (type == "weekly") {
             com.todo.app.data.model.weekStringOf(today)
@@ -839,6 +773,7 @@ class TodoRepository(private val context: Context) {
     }}
 
     suspend fun importFromLastPeriod(type: String) = mutex.withLock { withContext(Dispatchers.IO) {
+        personalStore.loadLocked()
         val today = java.time.LocalDate.now()
         val sourcePeriodStr = if (type == "weekly") {
             com.todo.app.data.model.weekStringOf(today.minusWeeks(1))
@@ -969,9 +904,7 @@ class TodoRepository(private val context: Context) {
             exp = expTime
         )
         val json = jsonFormat.encodeToString(payload)
-        val key = (1..12).map {
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"[(0 until 62).random()]
-        }.joinToString("")
+        val key = generateShareCodeKey()
 
         // Derivate key via SHA-256
         val digest = java.security.MessageDigest.getInstance("SHA-256")

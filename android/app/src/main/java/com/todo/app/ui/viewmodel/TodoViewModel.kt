@@ -37,8 +37,8 @@ data class HealthMetrics(
 )
 
 class TodoViewModel(private val repository: TodoRepository, val configManager: ConfigManager) : ViewModel() {
-    private val _timeTrackingEnabled = MutableStateFlow(configManager.timeTrackingEnabled)
-    val timeTrackingEnabled: StateFlow<Boolean> = _timeTrackingEnabled.asStateFlow()
+    val timeTrackingEnabled: StateFlow<Boolean> = repository.timeTrackingEnabled
+    val dataLoadError = repository.loadError
     private val _discardedShortTimers = MutableStateFlow(0)
     val discardedShortTimers: StateFlow<Int> = _discardedShortTimers.asStateFlow()
 
@@ -46,17 +46,8 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
 
     suspend fun savePreferences(dueDate: String, insertion: String, timing: Boolean,
         endRecords: List<com.todo.app.data.model.TimeEntry>? = null): Result<Unit> {
-        return try {
-            if (endRecords != null) {
-                val discarded = repository.finishConfirmedTimers(endRecords, com.todo.app.data.model.nowIso()).getOrThrow()
-                _discardedShortTimers.value += discarded
-            }
-            kotlinx.coroutines.withContext(Dispatchers.IO) { configManager.savePreferences(dueDate, insertion, timing) }
-            _timeTrackingEnabled.value = timing
-            Result.success(Unit)
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            Result.failure(e)
+        return repository.saveTimingPreferences(dueDate, insertion, timing, endRecords).map { discarded ->
+            _discardedShortTimers.value += discarded
         }
     }
 
@@ -173,15 +164,25 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
 
     fun updateReminderSettings(settings: com.todo.app.data.model.ReminderSettings) {
         viewModelScope.launch {
-            repository.updateReminderSettings(settings)
-            rescheduleAlarms()
+            try {
+                repository.updateReminderSettings(settings)
+                rescheduleAlarms()
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _uiEvent.emit("提醒设置失败：${e.message}")
+            }
         }
     }
 
     fun rescheduleAlarms() {
         viewModelScope.launch {
-            val data = repository.ensureDataLoaded()
-            com.todo.app.notification.ReminderScheduler(configManager.context).rescheduleAll(data)
+            try {
+                val data = repository.ensureDataLoaded()
+                com.todo.app.notification.ReminderScheduler(configManager.context).rescheduleAll(data)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                android.util.Log.e("TodoViewModel", "数据未就绪，暂不调度提醒", e)
+            }
         }
     }
 

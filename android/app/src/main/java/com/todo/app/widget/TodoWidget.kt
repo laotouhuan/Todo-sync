@@ -14,6 +14,8 @@ import androidx.glance.action.actionParametersOf
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
+import androidx.glance.appwidget.AndroidRemoteViews
+import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
@@ -31,6 +33,15 @@ import androidx.glance.unit.ColorProvider
 import com.todo.app.MainActivity
 import com.todo.app.TodoApplication
 import com.todo.app.WidgetAddActivity
+import com.todo.app.WidgetTimerActivity
+import com.todo.app.R
+import com.todo.app.data.model.Learning
+import android.os.SystemClock
+import android.widget.RemoteViews
+import android.widget.Toast
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.todo.app.data.model.Todo
 import com.todo.app.data.model.DateStrings
 import com.todo.app.data.model.classifyForTodayFocus
@@ -58,6 +69,7 @@ object WidgetTheme {
 // ====== Glance key constants ======
 
 val TodoIdKey = ActionParameters.Key<String>("todoId")
+val TimeEntryIdKey = ActionParameters.Key<String>("timeEntryId")
 
 /** Widget 渲染模型：区分真实 Todo 和 UI 分隔线，避免污染领域模型 */
 sealed class WidgetItem {
@@ -77,15 +89,16 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
     }
 
     override val stateDefinition = PreferencesGlanceStateDefinition
+    override val sizeMode = SizeMode.Exact
 
     @android.annotation.SuppressLint("StateFlowValueCalledInComposition")
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val repository = TodoApplication.instance.repository
-        val loadedData = try {
+        try {
             repository.ensureDataLoaded()
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             android.util.Log.e("TodoWidget", "Widget ensureDataLoaded 失败: ${e.message}", e)
-            com.todo.app.data.model.TodoData(version = 1, last_updated = "", todos = emptyList())
         }
 
         provideContent {
@@ -94,6 +107,12 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
             val version = prefs[VERSION_KEY] ?: 0
 
             val currentData = repository.getCurrentData()
+            val loadFailure = repository.loadError.value
+            val timerState = widgetTimerState(currentData, repository.timeTrackingEnabled.value)
+            val size = LocalSize.current
+            val fullHeader = showHeader && size.width >= 260.dp && size.height >= 300.dp
+            val hideHeader = size.height < 200.dp &&
+                (timerState is WidgetTimerState.Running || timerState is WidgetTimerState.Attention)
             val expandedTodos = prefs[EXPANDED_TODOS_KEY] ?: emptySet()
 
             val dates = DateStrings.now()
@@ -140,9 +159,18 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                     .fillMaxSize()
                     .background(widgetBackground)
                     .cornerRadius(20.dp)
-                    .padding(16.dp)
+                    .padding(if (size.width < 200.dp || size.height < 200.dp) 8.dp else 16.dp)
             ) {
-                if (showHeader) {
+                if (loadFailure != null) {
+                    Text("数据加载失败", style = TextStyle(color = textColor, fontSize = 15.sp))
+                    Text("请重试或打开应用，在设置中恢复备份。", style = TextStyle(color = textVariantColor))
+                    Text("重试", modifier = GlanceModifier.padding(12.dp)
+                        .clickable(actionRunCallback<RetryLoadActionCallback>()), style = TextStyle(color = textColor))
+                    Text("打开应用", modifier = GlanceModifier.padding(12.dp)
+                        .clickable(actionStartActivity<MainActivity>()), style = TextStyle(color = textColor))
+                    return@Column
+                }
+                if (fullHeader) {
                     Row(
                         modifier = GlanceModifier.fillMaxWidth().padding(bottom = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -160,6 +188,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            TimerStartButton(timerState, textColor)
                             Text(
                                 text = "打开",
                                 style = TextStyle(color = textColor, fontSize = 12.sp, fontWeight = FontWeight.Bold),
@@ -198,16 +227,17 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                         )
                     }
                     Spacer(modifier = GlanceModifier.height(16.dp))
-                } else {
+                } else if (!hideHeader) {
                     Row(
                         modifier = GlanceModifier.fillMaxWidth().padding(bottom = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
+                        if (size.width >= 220.dp) Text(
                             text = "今天聚焦",
                             style = TextStyle(color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold),
                             modifier = GlanceModifier.defaultWeight()
                         )
+                        TimerStartButton(timerState, textColor)
                         Text(
                             text = "打开",
                             style = TextStyle(color = textColor, fontSize = 12.sp, fontWeight = FontWeight.Bold),
@@ -220,6 +250,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                     }
                 }
 
+                WidgetTimerBar(timerState, textColor, surfaceColor)
                 if (todayFocus.isEmpty()) {
                     Box(modifier = GlanceModifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
@@ -251,7 +282,8 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                                     }
                                 }
                                 is WidgetItem.TodoItem -> {
-                                    TodoItemWidget(item.todo, surfaceColor, textColor, textVariantColor, expandedTodos.contains(item.todo.id), todayStr)
+                                    TodoItemWidget(item.todo, surfaceColor, textColor, textVariantColor,
+                                        expandedTodos.contains(item.todo.id), todayStr, isWidgetTimingTodo(timerState, item.todo.id))
                                 }
                             }
                         }
@@ -263,7 +295,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
 }
 
 @Composable
-fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProvider, textVariantColor: ColorProvider, isExpanded: Boolean, todayStr: String) {
+fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProvider, textVariantColor: ColorProvider, isExpanded: Boolean, todayStr: String, isTiming: Boolean = false) {
     val isCompletedToShow = todo.completed || (
         (todo.taskType == TaskType.WEEKLY_CHECKIN || todo.taskType == TaskType.MONTHLY_CHECKIN) &&
         todo.completedDates.any { it.startsWith(todayStr) }
@@ -303,7 +335,7 @@ fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProv
                 )
             }
             Text(
-                text = todo.content,
+                text = if (isTiming) "⏱ ${todo.content}" else todo.content,
                 style = TextStyle(
                     color = if (isCompletedToShow) textVariantColor else textColor,
                     textDecoration = if (isCompletedToShow) androidx.glance.text.TextDecoration.LineThrough else androidx.glance.text.TextDecoration.None,
@@ -332,6 +364,54 @@ fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProv
 
 // ====== Widget concrete classes ======
 
+@Composable
+private fun TimerStartButton(state: WidgetTimerState, color: ColorProvider) {
+    if (state == WidgetTimerState.Idle) {
+        Box(GlanceModifier.size(48.dp).clickable(actionStartActivity<WidgetTimerActivity>()),
+            contentAlignment = Alignment.Center) {
+            Image(ImageProvider(android.R.drawable.ic_media_play), contentDescription = "开始任务计时",
+                modifier = GlanceModifier.size(24.dp), colorFilter = ColorFilter.tint(color))
+        }
+    }
+}
+
+@Composable
+private fun WidgetTimerBar(state: WidgetTimerState, color: ColorProvider, surface: ColorProvider) {
+    when (state) {
+        is WidgetTimerState.Running -> {
+            val entry = state.entry
+            val context = LocalContext.current
+            val start = Learning.instant(entry.started_at)!!.toEpochMilli()
+            val clock = RemoteViews(context.packageName, R.layout.widget_timer_chronometer).apply {
+                setChronometer(R.id.widget_chronometer,
+                    SystemClock.elapsedRealtime() - (System.currentTimeMillis() - start).coerceAtLeast(0), null, true)
+                setContentDescription(R.id.widget_chronometer, "当前任务已计时时长")
+            }
+            Column(GlanceModifier.fillMaxWidth().background(surface).cornerRadius(12.dp).padding(8.dp)) {
+                Text("⏱ ${widgetTimerTitle(entry)}", maxLines = 1,
+                    style = TextStyle(color = color, fontSize = 14.sp),
+                    modifier = GlanceModifier.fillMaxWidth().padding(vertical = 6.dp)
+                        .clickable(actionStartActivity<MainActivity>()))
+                Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    AndroidRemoteViews(clock, modifier = GlanceModifier.defaultWeight())
+                    Box(GlanceModifier.width(56.dp).height(48.dp)
+                        .clickable(actionRunCallback<StopTimerActionCallback>(actionParametersOf(TimeEntryIdKey to entry.id))),
+                        contentAlignment = Alignment.Center) {
+                        Text("结束", style = TextStyle(color = color, fontWeight = FontWeight.Bold))
+                    }
+                }
+            }
+            Spacer(GlanceModifier.height(8.dp))
+        }
+        is WidgetTimerState.Attention -> {
+            Text(state.message, style = TextStyle(color = color, fontSize = 14.sp),
+                modifier = GlanceModifier.fillMaxWidth().padding(vertical = 16.dp)
+                    .clickable(actionStartActivity<MainActivity>()))
+        }
+        else -> Unit
+    }
+}
+
 class TodoCompactWidget : BaseTodoWidget(maxItems = 3, showHeader = false)
 class TodoNormalWidget : BaseTodoWidget(maxItems = 20, showHeader = true)
 
@@ -343,7 +423,9 @@ class ToggleActionCallback : ActionCallback {
             val todoId = parameters[TodoIdKey] ?: return
             TodoApplication.instance.repository.toggleTodoStatus(todoId)
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             android.util.Log.e("TodoWidget", "ToggleActionCallback onAction 失败: ${e.message}", e)
+            widgetMessage(context, e.message ?: "操作失败，请重试")
         }
     }
 }
@@ -378,6 +460,34 @@ class SyncActionCallback : ActionCallback {
         } catch (e: Exception) {
             android.util.Log.e("TodoWidget", "SyncActionCallback onAction 失败: ${e.message}", e)
         }
+    }
+}
+
+private suspend fun widgetMessage(context: Context, message: String) = withContext(Dispatchers.Main) {
+    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+}
+
+class StopTimerActionCallback : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        val id = parameters[TimeEntryIdKey] ?: return
+        val result = TodoApplication.instance.repository.stopLearning(id)
+        result.fold(onSuccess = { discarded ->
+            if (discarded > 0) widgetMessage(context, Learning.SHORT_TIME_ENTRY_MESSAGE)
+        }, onFailure = { widgetMessage(context, it.message ?: "结束计时失败，请重试") })
+        // 始终根据最新记录重新渲染，旧按钮不意味着当前已无计时。
+        refreshAllWidgets(context)
+    }
+}
+
+class RetryLoadActionCallback : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        try {
+            TodoApplication.instance.repository.ensureDataLoaded()
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            widgetMessage(context, "加载失败，请在设置中恢复备份")
+        }
+        refreshAllWidgets(context)
     }
 }
 

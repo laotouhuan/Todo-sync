@@ -107,7 +107,7 @@ class WidgetAddActivity : ComponentActivity() {
         val configManager = TodoApplication.instance.configManager
         lifecycleScope.launch {
             try {
-                val currentData = repository.getTodoData().first()
+                val currentData = repository.ensureDataLoaded()
                 val newTodo = Todo.createFromParsed(
                     parsed = parsed,
                     content = parsed.content,
@@ -118,10 +118,11 @@ class WidgetAddActivity : ComponentActivity() {
                 repository.addTodo(newTodo)
 
                 refreshAllWidgets(applicationContext)
-            } catch (e: Exception) {
-                android.util.Log.e("WidgetAdd", "保存待办失败", e)
-            } finally {
                 finish()
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                android.util.Log.e("WidgetAdd", "保存待办失败", e)
+                Toast.makeText(this@WidgetAddActivity, "保存失败：${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }

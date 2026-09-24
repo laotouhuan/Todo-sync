@@ -69,6 +69,7 @@ fun SettingsView(viewModel: TodoViewModel) {
     var defaultInsertion by remember { mutableStateOf(viewModel.configManager.defaultInsertion) }
     var timing by remember { mutableStateOf(viewModel.configManager.timeTrackingEnabled) }
     val personalData by viewModel.todoData.collectAsState()
+    val dataLoadError by viewModel.dataLoadError.collectAsState()
     var closingTimers by remember { mutableStateOf<List<com.todo.app.data.model.TimeEntry>?>(null) }
     var savingPreferences by remember { mutableStateOf(false) }
     var preferenceError by remember { mutableStateOf("") }
@@ -112,6 +113,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                     snackbarHostState.showSnackbar("偏好习惯已保存")
                 } else {
                     preferenceError = result.exceptionOrNull()?.message ?: "设置保存失败"
+                    timing = viewModel.configManager.timeTrackingEnabled
                     closingTimers = null
                 }
             } finally { savingPreferences = false }
@@ -166,6 +168,10 @@ fun SettingsView(viewModel: TodoViewModel) {
                     .padding(16.dp)
                     .verticalScroll(rememberScrollState())
             ) {
+                dataLoadError?.let { message ->
+                    Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(bottom = 12.dp))
+                    Text("可在“同步”页恢复备份或强制从云端恢复。", modifier = Modifier.padding(bottom = 12.dp))
+                }
                 when (activeTab) {
                     0 -> {
                         // 1. 关于与更新
@@ -263,7 +269,8 @@ fun SettingsView(viewModel: TodoViewModel) {
                         Button(
                             onClick = {
                                 val running = personalData.timeEntries.filter { !it.deleted && it.ended_at == null }
-                                if (!timing && running.isNotEmpty()) closingTimers = running.toList() else savePreferences()
+                                if (!timing && running.isNotEmpty()) closingTimers = running.toList()
+                                else savePreferences(if (!timing && dataLoadError == null) emptyList() else null)
                             },
                             enabled = !savingPreferences,
                             modifier = Modifier.fillMaxWidth(),
@@ -386,7 +393,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                                 }
 
                                 TextDivider("生成我的共享授权口令")
-                                Text("允许被授权者将新待办追加到您的列表中，他们对现有待办仅有只读权限。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("仅分享给可信朋友。授权码包含 WebDAV 凭据，接收者可直接访问该凭据允许访问的文件；只读和有效期限制仅在本应用内生效。撤销访问需在网盘中更换或撤销应用密码。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.height(8.dp))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),

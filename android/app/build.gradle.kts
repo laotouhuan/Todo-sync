@@ -5,6 +5,10 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+val releaseStorePassword = System.getenv("KEYSTORE_PASSWORD")
+val releaseKeyPassword = System.getenv("KEY_PASSWORD")
+val releaseKeystoreFile = file("todo-release.keystore")
+
 android {
     namespace = "com.todo.app"
     compileSdk = 36
@@ -13,31 +17,24 @@ android {
         applicationId = "com.todo.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 35
-        versionName = "1.4.1"
+        versionCode = 36
+        versionName = "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
-        val keystoreFile = file("todo-release.keystore")
-        if (keystoreFile.exists()) {
+        if (releaseKeystoreFile.exists() && !releaseStorePassword.isNullOrBlank() && !releaseKeyPassword.isNullOrBlank()) {
             create("release") {
-                storeFile = keystoreFile
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "235711lth"
+                storeFile = releaseKeystoreFile
+                storePassword = releaseStorePassword
                 keyAlias = System.getenv("KEY_ALIAS") ?: "key0"
-                keyPassword = System.getenv("KEY_PASSWORD") ?: "235711lth"
+                keyPassword = releaseKeyPassword
             }
         }
     }
 
     buildTypes {
-        getByName("debug") {
-            val releaseSigning = signingConfigs.findByName("release")
-            if (releaseSigning != null) {
-                signingConfig = releaseSigning
-            }
-        }
         release {
             val releaseSigning = signingConfigs.findByName("release")
             if (releaseSigning != null) {
@@ -56,6 +53,19 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+    }
+}
+
+tasks.configureEach {
+    if (name == "preReleaseBuild") {
+        doFirst {
+            check(releaseKeystoreFile.isFile) {
+                "Android Release 需要 android/app/todo-release.keystore"
+            }
+            check(!releaseStorePassword.isNullOrBlank() && !releaseKeyPassword.isNullOrBlank()) {
+                "Android Release 需要设置 KEYSTORE_PASSWORD 和 KEY_PASSWORD 环境变量"
+            }
+        }
     }
 }
 

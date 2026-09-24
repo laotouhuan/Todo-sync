@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="sharedpref" path="todo_encrypted_prefs.xml" />
+    <exclude domain="file" path="collaborations.json" />
+    <exclude domain="file" path="collaborations.tmp" />
+</full-backup-content>

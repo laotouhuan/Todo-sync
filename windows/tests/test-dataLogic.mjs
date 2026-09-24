@@ -58,7 +58,9 @@ function migrateAndNormalize(todo) {
     // 2. 补全新字段默认值
     todo.task_type = todo.task_type || 'normal';
     todo.completed_dates = todo.completed_dates || [];
-    todo.target_count = todo.target_count ?? null;
+    todo.target_count = Number.isSafeInteger(todo.target_count) && todo.target_count > 0
+        ? todo.target_count
+        : null;
     if (todo.reminder === undefined) todo.reminder = null;
     if (todo.subtasks) {
         todo.subtasks.forEach(s => {
@@ -323,6 +325,17 @@ describe('migrateAndNormalize', () => {
         assert.deepEqual(todo.completed_dates, []);
         assert.equal(todo.target_count, null);
         assert.deepEqual(todo.subtasks, []);
+    });
+
+    it('清除不合法的打卡目标并保留正整数', () => {
+        for (const targetCount of ['<b>注入</b>', 1.5, 0, -1, Infinity]) {
+            const todo = { target_count: targetCount, content: '测试' };
+            migrateAndNormalize(todo);
+            assert.equal(todo.target_count, null);
+        }
+        const validTodo = { target_count: 4, content: '测试' };
+        migrateAndNormalize(validTodo);
+        assert.equal(validTodo.target_count, 4);
     });
 
     it('处理 null 输入不崩溃', () => {
@@ -656,6 +669,74 @@ describe('数据契约 Schema 校验', () => {
     });
 });
 
+describe('实际页面的同步 ID 注入回归', () => {
+    const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+    const names = ['escapeHtml', 'migrateAndNormalize', 'renderHealth', 'renderCollabListInSettings'];
+    const declarations = parseSource(source, { ecmaVersion: 'latest', sourceType: 'module' }).body
+        .filter(n => n.type === 'FunctionDeclaration' && names.includes(n.id.name))
+        .map(n => source.slice(n.start, n.end)).join('\n');
+    const ids = ['normal-id', '\"><img data-injected="yes" src="x">', "'&<>\""];
+
+    function harness() {
+        const htmlWrites = [];
+        const element = () => ({
+            dataset: {}, style: {}, children: [], buttons: [], listeners: {},
+            classList: { add() {} },
+            set innerHTML(value) {
+                htmlWrites.push(value);
+                // 记录 HTML 写入边界；按钮仅作为 dataset 和事件的测试替身。
+                this.buttons = [...value.matchAll(/<button class="([^"]+)"/g)].map(match => {
+                    const button = element(); button.className = match[1]; return button;
+                });
+            },
+            querySelector(selector) { return this.querySelectorAll(selector)[0]; },
+            querySelectorAll(selector) { return this.buttons.filter(b => b.className.split(' ').includes(selector.slice(1))); },
+            appendChild(child) { this.children.push(child); },
+            addEventListener(type, action) { this.listeners[type] = action; }
+        });
+        const nodes = new Map();
+        const document = { createElement: element, getElementById(id) {
+            if (!nodes.has(id)) nodes.set(id, element());
+            return nodes.get(id);
+        } };
+        const state = { healthThroughputDays: 7, collaborations: [] };
+        const todos = [];
+        const api = runInNewContext(declarations + ';({migrateAndNormalize,renderHealth,renderCollabListInSettings})', {
+            ...dateHelpers, ...learningHelpers, document, appState: state, getActiveTodos: () => todos, Date
+        });
+        return { api, state, todos, document, htmlWrites };
+    }
+
+    it('任务 ID 经实际归一化和健康页渲染后只进入按钮属性，不进入 HTML 模板', () => {
+        const h = harness();
+        h.todos.push(...ids.map(id => h.api.migrateAndNormalize({
+            id, content: '任务', completed: false, created_at: '2020-01-01T00:00:00Z'
+        })));
+        h.api.renderHealth('2026-09-24', '2026-09-25');
+        const items = h.document.getElementById('sleeping-list').children;
+        assert.equal(items.length, ids.length);
+        items.forEach((item, i) => {
+            assert.equal(item.buttons.length, 2);
+            item.buttons.forEach(button => assert.equal(button.dataset.id, ids[i]));
+        });
+        assert.ok(h.htmlWrites.every(html => !html.includes('data-injected')));
+    });
+
+    it('协作来源 ID 不进入 HTML 模板，解绑按钮保留原 ID 和点击事件', () => {
+        const h = harness();
+        h.state.collaborations = ids.map(id => ({ id, name: '朋友' }));
+        h.api.renderCollabListInSettings();
+        const items = h.document.getElementById('collab-list').children;
+        assert.equal(items.length, ids.length);
+        items.forEach((item, i) => {
+            assert.equal(item.buttons.length, 1);
+            assert.equal(item.buttons[0].dataset.id, ids[i]);
+            assert.equal(typeof item.buttons[0].listeners.click, 'function');
+        });
+        assert.ok(h.htmlWrites.every(html => !html.includes('data-injected')));
+    });
+});
+
 // 直接执行实际源文件中的合并函数，避免只验证测试内的旧副本。
 describe('学习数据实际合并入口', () => {
     const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
@@ -666,6 +747,12 @@ describe('学习数据实际合并入口', () => {
         assert.equal(api.migrateAndNormalize({content:'任务',label:' 数学 '}).label,'数学');
         const out=api.mergeTodoData({version:1,todos:[]},null).data;
         assert.equal(out.time_entries.length,0); assert.equal(out.daily_reviews.length,0);
+    });
+    it('实际迁移函数拒绝非正整数及注入文本作为打卡目标', () => {
+        for (const target_count of ['<b>注入</b>', 1.5, 0, -1, Infinity]) {
+            assert.equal(api.migrateAndNormalize({ content: '测试', target_count }).target_count, null);
+        }
+        assert.equal(api.migrateAndNormalize({ content: '测试', target_count: 4 }).target_count, 4);
     });
     it('任务标签冲突沿用实际合并结果，候选不收集被覆盖的版本', () => {
         const old = { id:'task', content:'任务', created_at:'2026-09-10T00:00:00Z', updated_at:'2026-09-10T01:00:00Z', label:'数学习' };

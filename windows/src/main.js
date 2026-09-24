@@ -294,8 +294,8 @@ function applyTaskType(todo, taskType, targetCount) {
 }
 
 function migrateAndNormalize(todo) {
-    todo.label = normalizeLabel(todo.label);
     if (!todo) return todo;
+    todo.label = normalizeLabel(todo.label);
     // 1. 旧版 recurring 迁移
     if (todo.recurring === 'daily') {
         todo.recurring = 'daily_repeat';
@@ -316,7 +316,9 @@ function migrateAndNormalize(todo) {
     // 2. 补全新字段默认值
     todo.task_type = todo.task_type || 'normal';
     todo.completed_dates = todo.completed_dates || [];
-    todo.target_count = todo.target_count ?? null;
+    todo.target_count = Number.isSafeInteger(todo.target_count) && todo.target_count > 0
+        ? todo.target_count
+        : null;
     if (todo.reminder === undefined) todo.reminder = null;
     if (todo.completed === null) todo.completed = false;
     if (todo.subtasks) {
@@ -761,10 +763,12 @@ function renderCollabListInSettings() {
                 <strong>${escapeHtml(collab.name)}</strong>
                 <span class="collab-expire-time">${expireText}</span>
             </div>
-            <button class="collab-delete-btn" data-id="${collab.id}">解绑</button>
+            <button class="collab-delete-btn">解绑</button>
         `;
         
-        item.querySelector('.collab-delete-btn').addEventListener('click', async (e) => {
+        const deleteButton = item.querySelector('.collab-delete-btn');
+        deleteButton.dataset.id = collab.id;
+        deleteButton.addEventListener('click', async (e) => {
             const id = e.target.dataset.id;
             if (confirm(`确定要解绑“${collab.name}”的协作清单吗？`)) {
                 try {
@@ -1250,6 +1254,7 @@ function getMetaHtml(todo, todayStr, tomorrowStr) {
 // ====== Create Todo Item Element ======
 function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) {
     const li = document.createElement('li');
+    const targetCount = Number.isSafeInteger(todo.target_count) && todo.target_count > 0 ? todo.target_count : null;
     const isCheckinCompletedToday = (todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin')
         && todo.completed_dates && todo.completed_dates.some(dStr => dStr.startsWith(todayStr));
     const isVisualCompleted = checkinDate !== null ? true : (todo.completed || isCheckinCompletedToday);
@@ -1284,8 +1289,8 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
         const count = getWeeklyCompletedCount(todo);
         const infoRow = document.createElement('div');
         infoRow.style.cssText = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;";
-        const labelText = todo.target_count 
-            ? `进度：${count}/${todo.target_count}次` 
+        const labelText = targetCount
+            ? `进度：${count}/${targetCount}次`
             : `打卡：${count}次`;
         infoRow.innerHTML = `<span style="font-size: 0.75rem; color: var(--text-secondary);">${labelText}</span>`;
         checkinContainer.appendChild(infoRow);
@@ -1325,8 +1330,8 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
         const barRow = document.createElement('div');
         barRow.style.cssText = "display: flex; align-items: center; justify-content: space-between; gap: 8px;";
         
-        if (todo.target_count) {
-            const target = todo.target_count;
+        if (targetCount) {
+            const target = targetCount;
             const pct = Math.min(100, Math.round((count / target) * 100));
             barRow.innerHTML = `
                 <div style="flex-grow: 1; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; position: relative;">
@@ -1335,9 +1340,10 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
                 <span style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; margin-left: 8px;">进度：${count}/${target}天</span>
             `;
         } else {
-            barRow.innerHTML = `
-                <span style="font-size: 0.75rem; color: var(--text-secondary);">打卡：${count}次</span>
-            `;
+            const progressText = document.createElement('span');
+            progressText.style.cssText = 'font-size: 0.75rem; color: var(--text-secondary);';
+            progressText.textContent = `打卡：${count}次`;
+            barRow.appendChild(progressText);
         }
 
         const monthCalendarGrid = document.createElement('div');
@@ -3253,10 +3259,13 @@ function renderHealth(todayStr, tomorrowStr) {
                     <span>已存活 ${age} 天</span>
                 </div>
                 <div class="sleeping-item-actions">
-                    <button class="sleeping-action-btn btn-postpone" data-id="${todo.id}">延期</button>
-                    <button class="sleeping-action-btn btn-delete" data-id="${todo.id}">删除</button>
+                    <button class="sleeping-action-btn btn-postpone">延期</button>
+                    <button class="sleeping-action-btn btn-delete">删除</button>
                 </div>
             `;
+            item.querySelectorAll('.sleeping-action-btn').forEach(button => {
+                button.dataset.id = todo.id;
+            });
             sleepingList.appendChild(item);
         });
     }

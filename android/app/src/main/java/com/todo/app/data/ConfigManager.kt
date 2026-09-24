@@ -11,7 +11,7 @@ class ConfigManager(val context: Context) {
         get() = prefs.getBoolean("time_tracking_enabled", true)
 
     // 等待实际写入结果，失败时恢复内存值，避免界面误报设置生效。
-    fun savePreferences(dueDate: String, insertion: String, timing: Boolean) {
+    internal fun savePreferences(dueDate: String, insertion: String, timing: Boolean) {
         val oldDue = defaultDueDate
         val oldInsertion = defaultInsertion
         val oldTiming = timeTrackingEnabled
