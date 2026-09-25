@@ -54,14 +54,24 @@ class TodoDateUtilsTest {
 
     @Test
     fun testCategorizeTimeSlot() {
-        // morning: 6-11
-        assertEquals("morning", categorizeTimeSlot("2026-06-15T08:00:00+08:00"))
-        // afternoon: 12-17
-        assertEquals("afternoon", categorizeTimeSlot("2026-06-15T14:30:00+08:00"))
-        // evening: 18-23
-        assertEquals("evening", categorizeTimeSlot("2026-06-15T20:15:00+08:00"))
-        // night: 0-5
-        assertEquals("night", categorizeTimeSlot("2026-06-15T02:00:00+08:00"))
+        // 同一时间点须按设备时区分类，不能假定测试机器始终使用北京时间。
+        val originalTimeZone = java.util.TimeZone.getDefault()
+        try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Asia/Shanghai"))
+            assertEquals("morning", categorizeTimeSlot("2026-06-15T08:00:00+08:00"))
+            assertEquals("afternoon", categorizeTimeSlot("2026-06-15T14:30:00+08:00"))
+            assertEquals("evening", categorizeTimeSlot("2026-06-15T20:15:00+08:00"))
+            assertEquals("night", categorizeTimeSlot("2026-06-15T02:00:00+08:00"))
+
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
+            assertEquals("night", categorizeTimeSlot("2026-06-15T08:00:00+08:00"))
+            assertEquals("morning", categorizeTimeSlot("2026-06-15T14:30:00+08:00"))
+            assertEquals("afternoon", categorizeTimeSlot("2026-06-15T20:15:00+08:00"))
+            // 转换后是前一天的傍晚。
+            assertEquals("evening", categorizeTimeSlot("2026-06-15T02:00:00+08:00"))
+        } finally {
+            java.util.TimeZone.setDefault(originalTimeZone)
+        }
         // unknown
         assertEquals("unknown", categorizeTimeSlot(null))
         assertEquals("unknown", categorizeTimeSlot("invalid-date"))
