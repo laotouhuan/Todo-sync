@@ -3,6 +3,7 @@ package com.todo.app.widget
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.Preferences
@@ -110,9 +111,8 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
             val loadFailure = repository.loadError.value
             val timerState = widgetTimerState(currentData, repository.timeTrackingEnabled.value)
             val size = LocalSize.current
+            val actionSize = if (size.width < 180.dp) 30.dp else 48.dp
             val fullHeader = showHeader && size.width >= 260.dp && size.height >= 300.dp
-            val hideHeader = size.height < 200.dp &&
-                (timerState is WidgetTimerState.Running || timerState is WidgetTimerState.Attention)
             val expandedTodos = prefs[EXPANDED_TODOS_KEY] ?: emptySet()
 
             val dates = DateStrings.now()
@@ -189,6 +189,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TimerStartButton(timerState, textColor)
+                            WidgetRefreshButton(textColor)
                             Text(
                                 text = "打开",
                                 style = TextStyle(color = textColor, fontSize = 12.sp, fontWeight = FontWeight.Bold),
@@ -200,15 +201,6 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                             )
                             Spacer(modifier = GlanceModifier.width(12.dp))
                             Box(modifier = GlanceModifier.size(8.dp).background(statusColor).cornerRadius(4.dp)) {}
-                            Spacer(modifier = GlanceModifier.width(8.dp))
-                            Image(
-                                provider = ImageProvider(android.R.drawable.ic_popup_sync),
-                                contentDescription = "Sync",
-                                modifier = GlanceModifier
-                                    .size(28.dp)
-                                    .padding(4.dp)
-                                    .clickable(actionRunCallback<SyncActionCallback>())
-                            )
                         }
                     }
 
@@ -227,26 +219,35 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                         )
                     }
                     Spacer(modifier = GlanceModifier.height(16.dp))
-                } else if (!hideHeader) {
+                } else {
                     Row(
-                        modifier = GlanceModifier.fillMaxWidth().padding(bottom = 12.dp),
+                        modifier = GlanceModifier.fillMaxWidth().padding(bottom = if (size.height < 200.dp) 4.dp else 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (size.width >= 220.dp) Text(
+                        if (size.width >= 260.dp) Text(
                             text = "今天聚焦",
                             style = TextStyle(color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold),
                             modifier = GlanceModifier.defaultWeight()
                         )
-                        TimerStartButton(timerState, textColor)
-                        Text(
-                            text = "打开",
-                            style = TextStyle(color = textColor, fontSize = 12.sp, fontWeight = FontWeight.Bold),
-                            modifier = GlanceModifier
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                                .background(ColorProvider(WidgetTheme.OpenButtonBg))
-                                .cornerRadius(8.dp)
-                                .clickable(actionStartActivity<MainActivity>())
-                        )
+                        TimerStartButton(timerState, textColor, actionSize)
+                        WidgetRefreshButton(textColor, actionSize)
+                        if (size.width < 180.dp) {
+                            Box(GlanceModifier.size(actionSize).clickable(actionStartActivity<MainActivity>()),
+                                contentAlignment = Alignment.Center) {
+                                Image(ImageProvider(android.R.drawable.ic_menu_view), contentDescription = "打开应用",
+                                    modifier = GlanceModifier.size(24.dp), colorFilter = ColorFilter.tint(textColor))
+                            }
+                        } else {
+                            Text(
+                                text = "打开",
+                                style = TextStyle(color = textColor, fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                                modifier = GlanceModifier
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    .background(ColorProvider(WidgetTheme.OpenButtonBg))
+                                    .cornerRadius(8.dp)
+                                    .clickable(actionStartActivity<MainActivity>())
+                            )
+                        }
                     }
                 }
 
@@ -365,9 +366,18 @@ fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProv
 // ====== Widget concrete classes ======
 
 @Composable
-private fun TimerStartButton(state: WidgetTimerState, color: ColorProvider) {
+private fun WidgetRefreshButton(color: ColorProvider, buttonSize: Dp = 48.dp) {
+    Box(GlanceModifier.size(buttonSize).clickable(actionRunCallback<SyncActionCallback>()),
+        contentAlignment = Alignment.Center) {
+        Image(ImageProvider(android.R.drawable.ic_popup_sync), contentDescription = "同步并刷新",
+            modifier = GlanceModifier.size(24.dp), colorFilter = ColorFilter.tint(color))
+    }
+}
+
+@Composable
+private fun TimerStartButton(state: WidgetTimerState, color: ColorProvider, buttonSize: Dp = 48.dp) {
     if (state == WidgetTimerState.Idle) {
-        Box(GlanceModifier.size(48.dp).clickable(actionStartActivity<WidgetTimerActivity>()),
+        Box(GlanceModifier.size(buttonSize).clickable(actionStartActivity<WidgetTimerActivity>()),
             contentAlignment = Alignment.Center) {
             Image(ImageProvider(android.R.drawable.ic_media_play), contentDescription = "开始任务计时",
                 modifier = GlanceModifier.size(24.dp), colorFilter = ColorFilter.tint(color))

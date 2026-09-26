@@ -56,12 +56,33 @@ pub struct AppConfig {
     pub nickname: Option<String>,
     pub default_due_date: Option<String>,
     pub default_insertion: Option<String>,
+    pub complete_subtasks_with_parent: Option<bool>, // 缺失时默认不联动
+    pub complete_parent_with_subtasks: Option<bool>, // 缺失时默认不联动
     pub time_tracking_enabled: Option<bool>, // 缺失时前端默认开启，本机偏好不参与数据同步
 }
 
 #[cfg(test)]
 mod preference_tests {
     use super::AppConfig;
+
+    #[test]
+    fn subtask_preferences_default_off_and_round_trip_independently() {
+        let old: AppConfig = serde_json::from_str("{}").unwrap();
+        assert!(!old.complete_subtasks_with_parent.unwrap_or(false));
+        assert!(!old.complete_parent_with_subtasks.unwrap_or(false));
+        for children in [false, true] {
+            for parent in [false, true] {
+                let config = AppConfig {
+                    complete_subtasks_with_parent: Some(children),
+                    complete_parent_with_subtasks: Some(parent),
+                    ..AppConfig::default()
+                };
+                let restored: AppConfig = serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+                assert_eq!(restored.complete_subtasks_with_parent, Some(children));
+                assert_eq!(restored.complete_parent_with_subtasks, Some(parent));
+            }
+        }
+    }
 
     #[test]
     fn old_config_keeps_timing_enabled() {

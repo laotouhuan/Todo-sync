@@ -1234,7 +1234,7 @@ fun TodoItemRow(
                                                 completedAt = if (isChecked) nowIso() else null
                                             )
 
-                                            val allCompleted = newSubs.isNotEmpty() && newSubs.all { s -> s.completed }
+                                            val allCompleted = viewModel.configManager.completeParentWithSubtasks && newSubs.isNotEmpty() && newSubs.all { s -> s.completed }
                                             val parentCompleted = if (allCompleted && !todo.completed) true else todo.completed
                                             val parentCompletedAt = if (allCompleted && !todo.completed) nowInstant() else todo.completedAt
 

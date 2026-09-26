@@ -13,6 +13,7 @@ class TodoApplication : Application() {
         super.onCreate()
         instance = this
         com.todo.app.notification.NotificationHelper.createChannels(this)
+        com.todo.app.widget.WidgetDailySync.schedule(this)
     }
 
     companion object {

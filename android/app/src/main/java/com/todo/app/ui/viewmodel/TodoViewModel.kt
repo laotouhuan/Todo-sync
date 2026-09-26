@@ -45,8 +45,10 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     fun dismissShortTimerNotice() { _discardedShortTimers.value = 0 }
 
     suspend fun savePreferences(dueDate: String, insertion: String, timing: Boolean,
-        endRecords: List<com.todo.app.data.model.TimeEntry>? = null): Result<Unit> {
-        return repository.saveTimingPreferences(dueDate, insertion, timing, endRecords).map { discarded ->
+        endRecords: List<com.todo.app.data.model.TimeEntry>? = null,
+        completeSubtasks: Boolean = configManager.completeSubtasksWithParent,
+        completeParent: Boolean = configManager.completeParentWithSubtasks): Result<Unit> {
+        return repository.saveTimingPreferences(dueDate, insertion, timing, endRecords, completeSubtasks, completeParent).map { discarded ->
             _discardedShortTimers.value += discarded
         }
     }

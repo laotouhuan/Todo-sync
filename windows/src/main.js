@@ -1384,7 +1384,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
                 todo.updated_at = new Date().toISOString();
                 
                 const allCompleted = todo.subtasks.length > 0 && todo.subtasks.every(s => s.completed);
-                if (allCompleted && !todo.completed) {
+                if (appState.appConfig.complete_parent_with_subtasks === true && allCompleted && !todo.completed) {
                     todo.completed = true;
                     todo.completed_at = new Date().toISOString();
                 }
@@ -1474,10 +1474,12 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
             t.completed = !t.completed;
             if (t.completed) {
                 t.completed_at = new Date().toISOString();
-                if (t.subtasks && t.subtasks.length > 0) {
+                if (appState.appConfig.complete_subtasks_with_parent === true && t.subtasks && t.subtasks.length > 0) {
                     t.subtasks.forEach(s => {
-                        s.completed = true;
-                        s.completed_at = s.completed_at || new Date().toISOString();
+                        if (!s.completed) {
+                            s.completed = true;
+                            s.completed_at = new Date().toISOString();
+                        }
                     });
                 }
             } else {
@@ -2169,7 +2171,7 @@ async function saveEditModal() {
         }
 
         const allCompleted = draft.subtasks.length > 0 && draft.subtasks.every(s => s.completed);
-        if (allCompleted && !draft.completed) {
+        if (appState.appConfig.complete_parent_with_subtasks === true && allCompleted && !draft.completed) {
             draft.completed = true;
             draft.completed_at = new Date().toISOString();
         }
@@ -4075,6 +4077,8 @@ function initApp() {
             const insertionEl = document.getElementById('setting-default-insertion');
             if (insertionEl) insertionEl.value = config.default_insertion || 'top';
             document.getElementById('setting-time-tracking').checked = config.time_tracking_enabled !== false;
+            document.getElementById('setting-complete-subtasks').checked = config.complete_subtasks_with_parent === true;
+            document.getElementById('setting-complete-parent').checked = config.complete_parent_with_subtasks === true;
             labelManager.refresh();
             
             const shareContainer = document.getElementById('share-output-container');
@@ -4145,6 +4149,8 @@ function initApp() {
                 nickname: document.getElementById('setting-nickname') ? document.getElementById('setting-nickname').value.trim() || null : null,
                 default_due_date: document.getElementById('setting-default-due-date') ? document.getElementById('setting-default-due-date').value : 'none',
                 default_insertion: document.getElementById('setting-default-insertion') ? document.getElementById('setting-default-insertion').value : 'top',
+                complete_subtasks_with_parent: document.getElementById('setting-complete-subtasks').checked,
+                complete_parent_with_subtasks: document.getElementById('setting-complete-parent').checked,
                 time_tracking_enabled: document.getElementById('setting-time-tracking').checked
             };
 

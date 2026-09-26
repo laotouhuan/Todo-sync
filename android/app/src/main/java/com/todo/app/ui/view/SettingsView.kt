@@ -67,6 +67,8 @@ fun SettingsView(viewModel: TodoViewModel) {
 
     var defaultDueDate by remember { mutableStateOf(viewModel.configManager.defaultDueDate) }
     var defaultInsertion by remember { mutableStateOf(viewModel.configManager.defaultInsertion) }
+    var completeSubtasks by remember { mutableStateOf(viewModel.configManager.completeSubtasksWithParent) }
+    var completeParent by remember { mutableStateOf(viewModel.configManager.completeParentWithSubtasks) }
     var timing by remember { mutableStateOf(viewModel.configManager.timeTrackingEnabled) }
     val personalData by viewModel.todoData.collectAsState()
     val dataLoadError by viewModel.dataLoadError.collectAsState()
@@ -107,7 +109,7 @@ fun SettingsView(viewModel: TodoViewModel) {
         savingPreferences = true
         coroutineScope.launch {
             try {
-                val result = viewModel.savePreferences(defaultDueDate, defaultInsertion, timing, endRecords)
+                val result = viewModel.savePreferences(defaultDueDate, defaultInsertion, timing, endRecords, completeSubtasks, completeParent)
                 if (result.isSuccess) {
                     closingTimers = null; preferenceError = ""
                     snackbarHostState.showSnackbar("偏好习惯已保存")
@@ -257,6 +259,15 @@ fun SettingsView(viewModel: TodoViewModel) {
                                         )
                                     }
                                 }
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("大任务打勾时，自动勾选未完成的子步骤", Modifier.weight(1f))
+                                    Switch(completeSubtasks, { completeSubtasks = it }, enabled = !savingPreferences)
+                                }
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("子步骤全部打勾时，自动勾选大任务", Modifier.weight(1f))
+                                    Switch(completeParent, { completeParent = it }, enabled = !savingPreferences)
+                                }
+                                Text("默认均不联动，仅对本机生效。", style = MaterialTheme.typography.bodySmall)
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Text("启用任务计时", Modifier.weight(1f))
                                     Switch(timing, { timing = it }, enabled = !savingPreferences)

@@ -7,6 +7,7 @@ activityCompose         = "1.9.3"
 composeBom              = "2024.10.01"
 navigationCompose       = "2.8.3"
 glance                  = "1.1.1"
+work                    = "2.7.1"
 kotlinxSerializationJson = "1.7.3"
 junit                   = "4.13.2"
 junitExt                = "1.2.1"
@@ -34,6 +35,7 @@ androidx-navigation-compose        = { group = "androidx.navigation",     name =
 
 # Jetpack Glance（AppWidget）
 androidx-glance-appwidget          = { group = "androidx.glance",         name = "glance-appwidget",       version.ref = "glance" }
+androidx-work-runtime-ktx          = { group = "androidx.work",           name = "work-runtime-ktx",       version.ref = "work" }
 androidx-glance-material3          = { group = "androidx.glance",         name = "glance-material3",       version.ref = "glance" }
 
 # Kotlin Serialization（JSON 读写）

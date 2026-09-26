@@ -366,6 +366,7 @@ fun EditTodoDialog(
                             onSubtasksChange = { subtasks = it },
                             editingSubtaskId = editingSubtaskId,
                             onEditingSubtaskIdChange = { editingSubtaskId = it },
+                            autoCompleteParent = viewModel.configManager.completeParentWithSubtasks,
                             parentCompleted = parentCompleted,
                             onParentCompletedChange = { parentCompleted = it },
                             parentCompletedAt = parentCompletedAt,
@@ -579,6 +580,7 @@ private fun EditTodoSubtasksSection(
     todo: Todo,
     subtasks: List<Subtask>,
     onSubtasksChange: (List<Subtask>) -> Unit,
+    autoCompleteParent: Boolean,
     editingSubtaskId: String?,
     onEditingSubtaskIdChange: (String?) -> Unit,
     parentCompleted: Boolean,
@@ -751,7 +753,7 @@ private fun EditTodoSubtasksSection(
                             }
                             onSubtasksChange(updatedSubtasks)
                             val allCompleted = updatedSubtasks.isNotEmpty() && updatedSubtasks.all { it.completed }
-                            if (allCompleted) {
+                            if (autoCompleteParent && allCompleted && !parentCompleted) {
                                 onParentCompletedChange(true)
                                 onParentCompletedAtChange(nowInstant())
                             }

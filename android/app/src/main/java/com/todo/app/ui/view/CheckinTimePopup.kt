@@ -10,7 +10,6 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.todo.app.data.model.formatCheckinDateTime
 import com.todo.app.data.model.parseIsoToLocalDateTime
-import java.time.LocalDate
 
 /**
  * 打卡时间编辑弹窗 — 统一组件。
@@ -55,7 +54,7 @@ fun CheckinTimePopup(
                     color = MaterialTheme.colorScheme.primary
                 )
 
-                val initialTime = remember(matchedDate) {
+                val initialTime = remember(dateStr, isChecked, matchedDate) {
                     if (isChecked && matchedDate != null && matchedDate.contains('T')) {
                         try {
                             val ldt = parseIsoToLocalDateTime(matchedDate)
@@ -75,18 +74,15 @@ fun CheckinTimePopup(
                     }
                 }
 
-                var inputDate by remember(matchedDate) {
+                var inputDate by remember(dateStr, isChecked, matchedDate) {
                     if (isChecked && matchedDate != null) {
                         mutableStateOf(matchedDate.take(10))
                     } else {
-                        val now = LocalDate.now()
-                        val mm = String.format("%02d", now.monthValue)
-                        val dd = String.format("%02d", now.dayOfMonth)
-                        mutableStateOf("${now.year}-$mm-$dd")
+                        mutableStateOf(dateStr)
                     }
                 }
 
-                var inputTime by remember(matchedDate) {
+                var inputTime by remember(dateStr, isChecked, matchedDate) {
                     mutableStateOf(if (initialTime.isEmpty()) "--:--" else initialTime)
                 }
 

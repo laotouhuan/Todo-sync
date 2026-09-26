@@ -7,17 +7,28 @@ import androidx.security.crypto.MasterKey
 
 import kotlinx.serialization.encodeToString
 class ConfigManager(val context: Context) {
+    val completeSubtasksWithParent: Boolean
+        get() = prefs.getBoolean("complete_subtasks_with_parent", false)
+    val completeParentWithSubtasks: Boolean
+        get() = prefs.getBoolean("complete_parent_with_subtasks", false)
+
     val timeTrackingEnabled: Boolean
         get() = prefs.getBoolean("time_tracking_enabled", true)
 
     // 等待实际写入结果，失败时恢复内存值，避免界面误报设置生效。
-    internal fun savePreferences(dueDate: String, insertion: String, timing: Boolean) {
+    internal fun savePreferences(dueDate: String, insertion: String, timing: Boolean, completeSubtasks: Boolean, completeParent: Boolean) {
         val oldDue = defaultDueDate
         val oldInsertion = defaultInsertion
         val oldTiming = timeTrackingEnabled
+        val oldSubtasks = completeSubtasksWithParent
+        val oldParent = completeParentWithSubtasks
         if (!prefs.edit().putString("default_due_date", dueDate).putString("default_insertion", insertion)
+                .putBoolean("complete_subtasks_with_parent", completeSubtasks)
+                .putBoolean("complete_parent_with_subtasks", completeParent)
                 .putBoolean("time_tracking_enabled", timing).commit()) {
             prefs.edit().putString("default_due_date", oldDue).putString("default_insertion", oldInsertion)
+                .putBoolean("complete_subtasks_with_parent", oldSubtasks)
+                .putBoolean("complete_parent_with_subtasks", oldParent)
                 .putBoolean("time_tracking_enabled", oldTiming).apply()
             error("偏好设置保存失败，请重试")
         }

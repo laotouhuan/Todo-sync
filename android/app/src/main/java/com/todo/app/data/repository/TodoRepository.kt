@@ -405,11 +405,12 @@ class TodoRepository(private val context: Context) {
     }
 
     suspend fun saveTimingPreferences(dueDate: String, insertion: String, timing: Boolean,
-        expected: List<com.todo.app.data.model.TimeEntry>?): Result<Int> = withContext(Dispatchers.IO) {
+        expected: List<com.todo.app.data.model.TimeEntry>?,
+        completeSubtasks: Boolean, completeParent: Boolean): Result<Int> = withContext(Dispatchers.IO) {
         val before = _todoData.value
         try {
             val discarded = personalStore.saveTimingPreferences(expected, {
-                configManager.savePreferences(dueDate, insertion, timing)
+                configManager.savePreferences(dueDate, insertion, timing, completeSubtasks, completeParent)
             })
             Result.success(discarded)
         } catch (e: Exception) {
@@ -688,9 +689,9 @@ class TodoRepository(private val context: Context) {
         val updatedTodo = todo.copy(
             completed = isCompletedNow,
             completedAt = if (isCompletedNow) nowInstant() else null,
-            subtasks = if (isCompletedNow) {
+            subtasks = if (isCompletedNow && configManager.completeSubtasksWithParent) {
                 todo.subtasks.map { s ->
-                    s.copy(completed = true, completedAt = s.completedAt ?: nowIso())
+                    if (s.completed) s else s.copy(completed = true, completedAt = nowIso())
                 }
             } else {
                 todo.subtasks

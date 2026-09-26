@@ -15,6 +15,7 @@ class BootReceiver : BroadcastReceiver() {
                 Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED)) {
             val app = context.applicationContext as? TodoApplication ?: return
             val repo = app.repository
+            com.todo.app.widget.WidgetDailySync.schedule(context, replace = true)
 
             val pendingResult = goAsync()
             CoroutineScope(Dispatchers.IO).launch {

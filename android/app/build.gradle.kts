@@ -88,6 +88,7 @@ dependencies {
 
     // Glance (Widget)
     implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.glance.material3)
 
     // Reorderable

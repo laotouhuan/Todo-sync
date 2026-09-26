@@ -807,7 +807,7 @@ describe('学习保存失败与串行队列', () => {
     it('实际编辑保存失败保留草稿及原标签，重试成功才关闭；协作写入保持来源隔离', async () => {
         let success = false, closed = 0; const notices = [];
         const original = {id:'task',content:'旧内容',label:'旧标签',subtasks:[],updated_at:'2026-09-10T00:00:00Z'};
-        const state = {todoData:{todos:[original]},activeSource:{type:'personal'},currentEditingTodo:structuredClone(original),currentEditingSubtasks:[]};
+        const state = {appConfig:{},todoData:{todos:[original]},activeSource:{type:'personal'},currentEditingTodo:structuredClone(original),currentEditingSubtasks:[]};
         const fields = {'edit-content':{value:'新内容'},'edit-learning-label':{value:'数学'}};
         const calls = [];
         const save = runInNewContext('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";'+declaration('saveEditModal')+';saveEditModal', {
