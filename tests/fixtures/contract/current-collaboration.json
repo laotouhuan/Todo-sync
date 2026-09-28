@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "last_updated": "2026-09-10T12:00:00Z",
+  "collaborations": [
+    {
+      "id": "1b2c3d4e-5f60-4a71-8b92-000000000051",
+      "name": "虚构共享清单",
+      "webdav_url": "https://example.invalid/dav/",
+      "webdav_username": "fixture-user",
+      "webdav_password": "NOT_A_REAL_PASSWORD",
+      "webdav_filepath": "fixtures/shared/todo_data.json",
+      "expire_at": null,
+      "updated_at": "2026-09-10T10:00:00Z",
+      "deleted": false
+    },
+    {
+      "id": "1b2c3d4e-5f60-4a71-8b92-000000000052",
+      "name": "已删除虚构清单",
+      "webdav_url": "https://example.invalid/dav/",
+      "webdav_username": "fixture-user",
+      "webdav_password": "NOT_A_REAL_PASSWORD",
+      "webdav_filepath": "fixtures/deleted/todo_data.json",
+      "expire_at": 1799011200,
+      "updated_at": "2026-09-10T11:00:00Z",
+      "deleted": true
+    }
+  ]
+}

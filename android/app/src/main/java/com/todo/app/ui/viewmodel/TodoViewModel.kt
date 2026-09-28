@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.todo.app.data.ConfigManager
 import com.todo.app.data.model.Todo
+import com.todo.app.data.model.HealthMetrics
+import com.todo.app.data.model.calculateHealthMetrics
 import com.todo.app.data.model.parseDateSyntax
 import com.todo.app.data.repository.TodoRepository
 import kotlinx.coroutines.flow.SharingStarted
@@ -16,25 +18,14 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 import java.util.UUID
-import java.time.LocalDate
-import java.time.OffsetDateTime
+import java.time.Instant
 import java.time.ZoneId
-import java.time.temporal.IsoFields
-import com.todo.app.data.model.calcTaskAgeDays
-import com.todo.app.data.model.TaskType
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
-
-data class HealthMetrics(
-    val currentAvgCompletedLife: Double = 0.0,
-    val currentAvgBacklogLife: Double = 0.0,
-    val baselineAvgCompletedLife: Double = 0.0,
-    val baselineAvgBacklogLife: Double = 0.0,
-    val baselineSleepingCountVal: Int = 0
-)
 
 class TodoViewModel(private val repository: TodoRepository, val configManager: ConfigManager) : ViewModel() {
     val timeTrackingEnabled: StateFlow<Boolean> = repository.timeTrackingEnabled
@@ -212,99 +203,13 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     )
 
     val healthMetrics: StateFlow<HealthMetrics> = activeTodos.map { todosList ->
-        val activeList = todosList.filter { 
-            !it.deleted && 
-            it.taskType != TaskType.WEEKLY_CHECKIN && 
-            it.taskType != TaskType.MONTHLY_CHECKIN &&
-            it.recurring != "daily_repeat"
-        }
-        val incompleteTodos = activeList.filter { !it.completed }
-        val completedTodos = activeList.filter { it.completed && !it.completedAt.isNullOrEmpty() }
-        
-        val nowTime = OffsetDateTime.now()
-        val localTodayStart = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toOffsetDateTime()
-
-        fun parseOffsetDateTimeSafe(dtStr: String?, defaultVal: OffsetDateTime): OffsetDateTime {
-            if (dtStr.isNullOrEmpty()) return defaultVal
-            return try {
-                OffsetDateTime.parse(dtStr)
-            } catch (_: Exception) {
-                try {
-                    OffsetDateTime.ofInstant(java.time.Instant.parse(dtStr), ZoneId.systemDefault())
-                } catch (_: Exception) {
-                    try {
-                        LocalDate.parse(dtStr.take(10)).atStartOfDay(ZoneId.systemDefault()).toOffsetDateTime()
-                    } catch (_: Exception) {
-                        defaultVal
-                    }
-                }
-            }
-        }
-
-        val currentAvgCompletedLife = if (completedTodos.isEmpty()) 0.0 else {
-            completedTodos.map { t ->
-                calcTaskAgeDays(t.createdAt, parseOffsetDateTimeSafe(t.completedAt, nowTime))
-            }.average()
-        }
-
-        val currentAvgBacklogLife = if (incompleteTodos.isEmpty()) 0.0 else {
-            val total = incompleteTodos.sumOf { calcTaskAgeDays(it.createdAt, nowTime).toDouble() }
-            total / incompleteTodos.size
-        }
-
-        var baselineCompletedSum = 0.0
-        var baselineCompletedCount = 0
-        var baselineIncompleteSum = 0.0
-        var baselineIncompleteCount = 0
-        var baselineSleepingCount = 0
-
-        activeList.forEach { t ->
-            val createdTime = parseOffsetDateTimeSafe(t.createdAt, nowTime)
-            if (createdTime.isBefore(localTodayStart)) {
-                val completedTime = if (t.completed && !t.completedAt.isNullOrEmpty()) {
-                    parseOffsetDateTimeSafe(t.completedAt, nowTime)
-                } else null
-
-                val wasCompletedBeforeToday = t.completed && (completedTime == null || completedTime.isBefore(localTodayStart))
-
-                if (wasCompletedBeforeToday) {
-                    if (completedTime != null) {
-                        val age = calcTaskAgeDays(t.createdAt, completedTime).toDouble()
-                        if (age >= 0) {
-                            baselineCompletedSum += age
-                            baselineCompletedCount++
-                        }
-                    }
-                } else {
-                    val age = calcTaskAgeDays(t.createdAt, localTodayStart).toDouble()
-                    if (age >= 0) {
-                        baselineIncompleteSum += age
-                        baselineIncompleteCount++
-                        if (age >= 7) {
-                            baselineSleepingCount++
-                        }
-                    }
-                }
-            }
-        }
-
-        val baseAvgCompleted = if (baselineCompletedCount == 0) currentAvgCompletedLife else baselineCompletedSum / baselineCompletedCount
-        val baseAvgBacklog = if (baselineIncompleteCount == 0) currentAvgBacklogLife else baselineIncompleteSum / baselineIncompleteCount
-
-        HealthMetrics(
-            currentAvgCompletedLife = currentAvgCompletedLife,
-            currentAvgBacklogLife = currentAvgBacklogLife,
-            baselineAvgCompletedLife = baseAvgCompleted,
-            baselineAvgBacklogLife = baseAvgBacklog,
-            baselineSleepingCountVal = baselineSleepingCount
-        )
+        calculateHealthMetrics(todosList, Instant.now(), ZoneId.systemDefault())
     }.flowOn(Dispatchers.Default)
-    .stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = HealthMetrics()
-    )
-
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = HealthMetrics()
+        )
     val isSyncing = repository.isSyncing
 
     private val _showSearchBar = MutableStateFlow(false)
@@ -447,6 +352,8 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
             try {
                 repository.syncWithCloud()
                 repository.syncCollaborations()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiEvent.emit("同步失败: ${e.message}")
             }

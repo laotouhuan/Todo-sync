@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "last_updated": "2026-09-10T12:00:00Z",
+  "todos": [
+    {
+      "id": "1b2c3d4e-5f60-4a71-8b92-000000000011",
+      "content": "当前格式样例任务",
+      "date": "2026-09-10",
+      "time": "18:30",
+      "completed": false,
+      "completed_at": null,
+      "created_at": "2026-09-10T09:00:00Z",
+      "updated_at": "2026-09-10T10:00:00Z",
+      "order": 1,
+      "deleted": false,
+      "recurring": "none",
+      "task_type": "normal",
+      "completed_dates": [],
+      "target_count": null,
+      "label": "学习",
+      "reminder": {
+        "reminder_date": "2026-09-10",
+        "reminder_time": "18:00",
+        "repeat_daily": false
+      },
+      "subtasks": [
+        {
+          "id": "1b2c3d4e-5f60-4a71-8b92-000000000012",
+          "content": "样例子任务",
+          "completed": true,
+          "completed_at": "2026-09-10T11:00:00Z"
+        }
+      ]
+    },
+    {
+      "id": "1b2c3d4e-5f60-4a71-8b92-000000000013",
+      "content": "打卡兼容样例",
+      "date": "2026-W37",
+      "time": null,
+      "completed": false,
+      "completed_at": null,
+      "created_at": "2026-09-10T09:30:00Z",
+      "updated_at": "2026-09-10T11:00:00Z",
+      "order": 2,
+      "deleted": false,
+      "recurring": "none",
+      "task_type": "weekly_checkin",
+      "completed_dates": ["2026-09-09", "2026-09-10T11:30:00Z"],
+      "target_count": 3,
+      "label": null,
+      "reminder": null,
+      "subtasks": []
+    }
+  ],
+  "reminder_settings": {
+    "updated_at": "2026-09-10T12:00:00Z",
+    "enabled": true,
+    "privacy_mode": false,
+    "global_rules": [
+      {
+        "id": "1b2c3d4e-5f60-4a71-8b92-000000000021",
+        "enabled": true,
+        "time": "20:00",
+        "condition": "any_remaining",
+        "task_scope": "today_only",
+        "title": "样例提醒",
+        "body": "还有任务待完成"
+      }
+    ]
+  },
+  "time_entries": [
+    {
+      "id": "1b2c3d4e-5f60-4a71-8b92-000000000031",
+      "created_at": "2026-09-10T10:00:00Z",
+      "updated_at": "2026-09-10T11:00:00Z",
+      "deleted": false,
+      "task_ref": {
+        "source_type": "personal",
+        "source_id": null,
+        "todo_id": "1b2c3d4e-5f60-4a71-8b92-000000000011"
+      },
+      "task_content_snapshot": "当前格式样例任务",
+      "label_snapshot": "学习",
+      "started_at": "2026-09-10T10:00:00Z",
+      "ended_at": "2026-09-10T11:00:00Z"
+    }
+  ],
+  "daily_reviews": [
+    {
+      "id": "1b2c3d4e-5f60-4a71-8b92-000000000041",
+      "date": "2026-09-10",
+      "created_at": "2026-09-10T12:00:00Z",
+      "updated_at": "2026-09-10T12:00:00Z",
+      "deleted": false,
+      "fact": "完成了样例任务",
+      "obstacle": "无",
+      "effective_action": "分段专注",
+      "next_step": "继续保持"
+    }
+  ]
+}

@@ -11,10 +11,10 @@ $success = $true
 Write-Host "`n🔍 Running Windows tests..." -ForegroundColor Yellow
 Push-Location (Join-Path $PSScriptRoot "windows")
 try {
-    Write-Host "  -> Running check-build..."
-    node tests/check-build.mjs
+    Write-Host "  -> Running npm run check..."
+    npm run check
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "❌ Windows check-build failed!" -ForegroundColor Red
+        Write-Host "❌ Windows npm run check failed!" -ForegroundColor Red
         $success = $false
     } else {
         Write-Host "  -> Running unit and logic tests..."

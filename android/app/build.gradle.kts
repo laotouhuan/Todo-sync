@@ -17,8 +17,8 @@ android {
         applicationId = "com.todo.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 36
-        versionName = "1.5.0"
+        versionCode = 37
+        versionName = "1.5.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -53,6 +53,11 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+    }
+    sourceSets {
+        getByName("test") {
+            resources.srcDir("../../tests/fixtures")
+        }
     }
 }
 

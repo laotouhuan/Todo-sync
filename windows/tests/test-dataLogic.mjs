@@ -3,266 +3,21 @@ import { runInNewContext } from 'node:vm';
 import * as learningHelpers from '../src/timeTracking.js';
 import * as dateHelpers from '../src/dateUtils.js';
 import { applyLabelChange, planLabelChange } from '../src/labelUtils.js';
-/**
- * 数据逻辑测试（合并、迁移、Schema 校验）
- * 测试 mergeTodoData 和 migrateAndNormalize 的核心逻辑
- *
- * 由于这两个函数定义在 main.js 中且依赖 Tauri 运行时，
- * 我们在此文件中复制它们的纯逻辑版本进行独立测试。
- *
- * 用法: node --test tests/test-dataLogic.mjs
- */
-
+import { generateUUID } from '../src/dateUtils.js';
+import {
+    getMonthlyCompletedCount,
+    getWeeklyCompletedCount,
+    hasTodoDataContentChanges,
+    mergeCollaborations,
+    mergeReminderSettings,
+    mergeTodoData,
+    migrateAndNormalize,
+    resolveCheckinConflict
+} from '../src/dataMerge.js';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { isWeekDate, isMonthDate, getISOWeekString } from '../src/dateUtils.js';
-
-// ====== 从 main.js 提取的纯逻辑函数（无 DOM/Tauri 依赖） ======
-
-function getWeeklyCompletedCount(todo) {
-    if (!todo.completed_dates || !todo.date) return 0;
-    return todo.completed_dates.filter(dStr => {
-        const parts = dStr.split('-');
-        if (parts.length !== 3) return false;
-        const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-        return getISOWeekString(date) === todo.date;
-    }).length;
-}
-
-function getMonthlyCompletedCount(todo) {
-    if (!todo.completed_dates || !todo.date) return 0;
-    return todo.completed_dates.filter(dStr => dStr.startsWith(todo.date)).length;
-}
-
-function migrateAndNormalize(todo) {
-    if (!todo) return todo;
-    // 1. 旧版 recurring 迁移
-    if (todo.recurring === 'daily') {
-        todo.recurring = 'daily_repeat';
-        todo.task_type = todo.task_type || 'normal';
-    } else if (todo.recurring === 'weekly') {
-        todo.recurring = 'none';
-        todo.task_type = 'weekly_checkin';
-    } else if (todo.recurring === 'monthly') {
-        todo.recurring = 'none';
-        todo.task_type = 'monthly_checkin';
-    }
-    // 3. 强制类型与日期的同步
-    if (todo.date && isWeekDate(todo.date)) {
-        todo.task_type = 'weekly_checkin';
-    } else if (todo.date && isMonthDate(todo.date)) {
-        todo.task_type = 'monthly_checkin';
-    }
-    // 2. 补全新字段默认值
-    todo.task_type = todo.task_type || 'normal';
-    todo.completed_dates = todo.completed_dates || [];
-    todo.target_count = Number.isSafeInteger(todo.target_count) && todo.target_count > 0
-        ? todo.target_count
-        : null;
-    if (todo.reminder === undefined) todo.reminder = null;
-    if (todo.subtasks) {
-        todo.subtasks.forEach(s => {
-            s.completed_at = s.completed_at || null;
-        });
-    } else {
-        todo.subtasks = [];
-    }
-    return todo;
-}
-
-function mergeReminderSettings(localData, cloudData) {
-    const ls = localData?.reminder_settings;
-    const cs = cloudData?.reminder_settings;
-    if (!ls && !cs) return { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] };
-    if (!ls) return structuredClone(cs);
-    if (!cs) return structuredClone(ls);
-
-    const lSettingsTime = Date.parse(ls.updated_at || '');
-    const cSettingsTime = Date.parse(cs.updated_at || '');
-    const hasLocalSettingsTime = Number.isFinite(lSettingsTime);
-    const hasCloudSettingsTime = Number.isFinite(cSettingsTime);
-    if (hasLocalSettingsTime || hasCloudSettingsTime) {
-        if (!hasLocalSettingsTime) return structuredClone(cs);
-        if (!hasCloudSettingsTime) return structuredClone(ls);
-        return structuredClone(cSettingsTime > lSettingsTime ? cs : ls);
-    }
-
-    if (stableSerialize(ls) === stableSerialize(cs)) return structuredClone(ls);
-    const localRules = Array.isArray(ls.global_rules) ? ls.global_rules : [];
-    const cloudRules = Array.isArray(cs.global_rules) ? cs.global_rules : [];
-    if (localRules.length > 0 && cloudRules.length === 0) return structuredClone(ls);
-    if (cloudRules.length > 0 && localRules.length === 0) return structuredClone(cs);
-
-    const lDataTime = Date.parse(localData?.last_updated || '');
-    const cDataTime = Date.parse(cloudData?.last_updated || '');
-    return structuredClone(
-        Number.isFinite(cDataTime) && (!Number.isFinite(lDataTime) || cDataTime > lDataTime) ? cs : ls
-    );
-}
-
-function todoDataContentSnapshot(data) {
-    return {
-        version: data?.version ?? 1,
-        todos: data?.todos || [],
-        reminder_settings: data?.reminder_settings || {
-            updated_at: null,
-            enabled: true,
-            privacy_mode: false,
-            global_rules: []
-        }
-    };
-}
-
-function canonicalizeForComparison(value) {
-    if (Array.isArray(value)) {
-        return value.map(canonicalizeForComparison);
-    }
-    if (value && typeof value === 'object') {
-        const result = {};
-        Object.keys(value).sort().forEach(key => {
-            result[key] = canonicalizeForComparison(value[key]);
-        });
-        return result;
-    }
-    return value;
-}
-
-function stableSerialize(value) {
-    return JSON.stringify(canonicalizeForComparison(value));
-}
-
-function hasTodoDataContentChanges(first, second) {
-    return stableSerialize(todoDataContentSnapshot(first)) !== stableSerialize(todoDataContentSnapshot(second));
-}
-
-function mergeTodoData(localData, cloudData) {
-    if (!localData || !localData.todos) {
-        if (cloudData && cloudData.todos) {
-            cloudData.todos.forEach(migrateAndNormalize);
-        }
-        const data = cloudData || { version: 1, last_updated: new Date().toISOString(), todos: [] };
-        if (!data.reminder_settings) {
-            data.reminder_settings = { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] };
-        }
-        return { data, changed: true };
-    }
-    if (!cloudData || !cloudData.todos) {
-        localData.todos.forEach(migrateAndNormalize);
-        if (!localData.reminder_settings) {
-            localData.reminder_settings = { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] };
-        }
-        return { data: localData, changed: false };
-    }
-
-    localData.todos.forEach(migrateAndNormalize);
-    cloudData.todos.forEach(migrateAndNormalize);
-
-    const localMap = new Map(localData.todos.map(t => [t.id, t]));
-    const cloudMap = new Map(cloudData.todos.map(t => [t.id, t]));
-    const mergedTodos = [];
-    let changed = false;
-
-    for (const [id, lTodo] of localMap) {
-        const cTodo = cloudMap.get(id);
-        if (cTodo) {
-            const lTime = new Date(lTodo.updated_at || lTodo.created_at || 0).getTime();
-            const cTime = new Date(cTodo.updated_at || cTodo.created_at || 0).getTime();
-            let merged;
-            if (cTime > lTime) {
-                merged = JSON.parse(JSON.stringify(cTodo));
-                changed = true;
-            } else {
-                merged = JSON.parse(JSON.stringify(lTodo));
-            }
-            const lDates = lTodo.completed_dates || [];
-            const cDates = cTodo.completed_dates || [];
-            const allDateParts = [...new Set([
-                ...lDates.map(d => d.split('T')[0]),
-                ...cDates.map(d => d.split('T')[0])
-            ])];
-
-            const mergedDates = [];
-            allDateParts.forEach(datePart => {
-                const checkinL = lDates.find(d => d.startsWith(datePart));
-                const checkinC = cDates.find(d => d.startsWith(datePart));
-
-                if (checkinL && checkinC) {
-                    if (checkinL.length >= checkinC.length) {
-                        mergedDates.push(checkinL);
-                    } else {
-                        mergedDates.push(checkinC);
-                    }
-                } else if (checkinL) {
-                    if (checkinL.length > 10) {
-                        const tCheck = new Date(checkinL).getTime();
-                        if (tCheck > cTime) {
-                            mergedDates.push(checkinL);
-                        }
-                    } else {
-                        mergedDates.push(checkinL);
-                    }
-                } else if (checkinC) {
-                    if (checkinC.length > 10) {
-                        const tCheck = new Date(checkinC).getTime();
-                        if (tCheck > lTime) {
-                            mergedDates.push(checkinC);
-                        }
-                    } else {
-                        mergedDates.push(checkinC);
-                    }
-                }
-            });
-            mergedDates.sort();
-
-            if (JSON.stringify(merged.completed_dates) !== JSON.stringify(mergedDates)) {
-                merged.completed_dates = mergedDates;
-                merged.updated_at = new Date().toISOString();
-                changed = true;
-            }
-
-            // 重新计算周/月打卡任务完成状态
-            if (merged.task_type === 'weekly_checkin' || merged.task_type === 'monthly_checkin') {
-                const currentPeriodCount = merged.task_type === 'weekly_checkin'
-                    ? getWeeklyCompletedCount(merged)
-                    : getMonthlyCompletedCount(merged);
-                const shouldBeCompleted = merged.target_count && currentPeriodCount >= merged.target_count;
-                if (merged.completed !== shouldBeCompleted) {
-                    merged.completed = shouldBeCompleted;
-                    merged.completed_at = shouldBeCompleted ? (merged.completed_at || new Date().toISOString()) : null;
-                    merged.updated_at = new Date().toISOString();
-                    changed = true;
-                }
-            }
-            mergedTodos.push(merged);
-        } else {
-            mergedTodos.push(lTodo);
-        }
-    }
-    for (const [id, cTodo] of cloudMap) {
-        if (!localMap.has(id)) {
-            mergedTodos.push(cTodo);
-            changed = true;
-        }
-    }
-    mergedTodos.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    const mergedReminderSettings = mergeReminderSettings(localData, cloudData);
-    const mergedData = {
-        version: localData.version || 1,
-        last_updated: new Date().toISOString(),
-        todos: mergedTodos,
-        reminder_settings: mergedReminderSettings
-    };
-    return {
-        data: mergedData,
-        changed: changed || hasTodoDataContentChanges(mergedData, localData),
-        cloudChanged: hasTodoDataContentChanges(mergedData, cloudData)
-    };
-}
-
-import { generateUUID } from '../src/dateUtils.js';
-
 function makeTodo(overrides = {}) {
     return {
         id: overrides.id || generateUUID(),
@@ -294,6 +49,105 @@ function makeData(todos = [], overrides = {}) {
     }
     return data;
 }
+
+function readContractFixture(name) {
+    const fixturePath = resolve(import.meta.dirname, '..', '..', 'tests', 'fixtures', 'contract', name);
+    return JSON.parse(readFileSync(fixturePath, 'utf8'));
+}
+
+describe('共享数据契约样例', () => {
+    it('旧版个人数据经生产迁移后补齐默认值', () => {
+        const legacy = readContractFixture('legacy-personal.json');
+        const result = mergeTodoData(null, legacy).data;
+        const todo = result.todos[0];
+
+        assert.equal(todo.recurring, 'daily_repeat');
+        assert.equal(todo.task_type, 'normal');
+        assert.equal(todo.completed, false);
+        assert.equal(todo.deleted, false);
+        assert.equal(todo.reminder, null);
+        assert.equal(todo.subtasks[0].completed_at, null);
+        assert.deepEqual(result.reminder_settings, {
+            updated_at: null, enabled: true, privacy_mode: false, global_rules: []
+        });
+        assert.deepEqual(result.time_entries, []);
+        assert.deepEqual(result.daily_reviews, []);
+    });
+
+    it('当前个人数据合并后保留提醒、计时、复盘及两种打卡日期格式', () => {
+        const current = readContractFixture('current-personal.json');
+        const result = mergeTodoData(current, makeData([])).data;
+        const task = result.todos.find(item => item.id === '1b2c3d4e-5f60-4a71-8b92-000000000011');
+        const checkin = result.todos.find(item => item.id === '1b2c3d4e-5f60-4a71-8b92-000000000013');
+
+        assert.equal(result.todos.length, 2);
+        assert.deepEqual(checkin.completed_dates, ['2026-09-09', '2026-09-10T11:30:00Z']);
+        assert.equal(task.reminder.reminder_time, '18:00');
+        assert.equal(result.reminder_settings.global_rules.length, 1);
+        assert.equal(result.time_entries.length, 1);
+        assert.equal(result.time_entries[0].label_snapshot, '学习');
+        assert.equal(result.daily_reviews.length, 1);
+        assert.equal(result.daily_reviews[0].fact, '完成了样例任务');
+    });
+
+    it('当前协作配置合并后保留软删除标记', () => {
+        const current = readContractFixture('current-collaboration.json');
+        const result = mergeCollaborations(current, { version: 1, last_updated: '', collaborations: [] });
+
+        assert.equal(result.data.collaborations.length, 2);
+        assert.equal(result.data.collaborations.find(item => item.deleted).id,
+            '1b2c3d4e-5f60-4a71-8b92-000000000052');
+    });
+
+    it('当前样例的必填字段、日期和本地时刻符合两份 Schema 结构', () => {
+        const todoSchema = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', '..', 'todo_data.schema.json'), 'utf8'));
+        const collabSchema = JSON.parse(readFileSync(resolve(import.meta.dirname, '..', '..', 'collaborations.schema.json'), 'utf8'));
+        const personal = readContractFixture('current-personal.json');
+        const collaborations = readContractFixture('current-collaboration.json');
+        const requireFields = (value, fields, label) => {
+            assert.ok(value && typeof value === 'object' && !Array.isArray(value), `${label} 必须是对象`);
+            for (const field of fields) assert.ok(field in value, `${label} 缺少必填字段 ${field}`);
+        };
+        const isTimestamp = value => typeof value === 'string' &&
+            Number.isFinite(Date.parse(value)) && /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
+        const validTaskDate = value => value === null ||
+            /^(\d{4}-\d{2}-\d{2}|\d{4}-W\d{2}|\d{4}-\d{2})$/.test(value);
+
+        requireFields(personal, todoSchema.required, '个人数据');
+        assert.equal(typeof personal.version, 'number');
+        assert.ok(isTimestamp(personal.last_updated));
+        for (const [index, todo] of personal.todos.entries()) {
+            requireFields(todo, todoSchema.properties.todos.items.required, `任务 ${index}`);
+            assert.ok(validTaskDate(todo.date), `任务 ${index} 的日期格式无效`);
+            assert.ok(todo.time === null || /^\d{2}:\d{2}$/.test(todo.time), `任务 ${index} 的时刻格式无效`);
+            assert.ok(todo.completed_dates.every(value =>
+                /^\d{4}-\d{2}-\d{2}$/.test(value) || isTimestamp(value)), `任务 ${index} 的打卡日期格式无效`);
+            assert.ok(isTimestamp(todo.created_at));
+            assert.ok(isTimestamp(todo.updated_at));
+            for (const subtask of todo.subtasks) {
+                requireFields(subtask, todoSchema.properties.todos.items.properties.subtasks.items.required, '子任务');
+                assert.ok(subtask.completed_at === null || isTimestamp(subtask.completed_at));
+            }
+        }
+        for (const entry of personal.time_entries) {
+            requireFields(entry, todoSchema.properties.time_entries.items.required, '计时记录');
+            requireFields(entry.task_ref, todoSchema.properties.time_entries.items.properties.task_ref.required, '计时任务引用');
+            assert.ok(isTimestamp(entry.started_at) && isTimestamp(entry.created_at) && isTimestamp(entry.updated_at));
+        }
+        for (const review of personal.daily_reviews) {
+            requireFields(review, todoSchema.properties.daily_reviews.items.required, '每日复盘');
+            assert.match(review.date, /^\d{4}-\d{2}-\d{2}$/);
+            assert.ok(isTimestamp(review.created_at) && isTimestamp(review.updated_at));
+        }
+
+        requireFields(collaborations, collabSchema.required, '协作配置');
+        for (const item of collaborations.collaborations) {
+            requireFields(item, collabSchema.properties.collaborations.items.required, '协作来源');
+            assert.ok(item.expire_at === null || Number.isInteger(item.expire_at));
+            assert.ok(isTimestamp(item.updated_at));
+        }
+    });
+});
 
 // ====== migrateAndNormalize 测试 ======
 describe('migrateAndNormalize', () => {
@@ -671,7 +525,7 @@ describe('数据契约 Schema 校验', () => {
 
 describe('实际页面的同步 ID 注入回归', () => {
     const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
-    const names = ['escapeHtml', 'migrateAndNormalize', 'renderHealth', 'renderCollabListInSettings'];
+    const names = ['escapeHtml', 'renderHealth', 'renderCollabListInSettings'];
     const declarations = parseSource(source, { ecmaVersion: 'latest', sourceType: 'module' }).body
         .filter(n => n.type === 'FunctionDeclaration' && names.includes(n.id.name))
         .map(n => source.slice(n.start, n.end)).join('\n');
@@ -702,7 +556,7 @@ describe('实际页面的同步 ID 注入回归', () => {
         const state = { healthThroughputDays: 7, collaborations: [] };
         const todos = [];
         const api = runInNewContext(declarations + ';({migrateAndNormalize,renderHealth,renderCollabListInSettings})', {
-            ...dateHelpers, ...learningHelpers, document, appState: state, getActiveTodos: () => todos, Date
+            ...dateHelpers, ...learningHelpers, migrateAndNormalize, document, appState: state, getActiveTodos: () => todos, Date
         });
         return { api, state, todos, document, htmlWrites };
     }
@@ -737,42 +591,108 @@ describe('实际页面的同步 ID 注入回归', () => {
     });
 });
 
-// 直接执行实际源文件中的合并函数，避免只验证测试内的旧副本。
-describe('学习数据实际合并入口', () => {
-    const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
-    const names = ['mergeTodoData', 'migrateAndNormalize', 'mergeReminderSettings', 'resolveCheckinConflict', 'todoDataContentSnapshot', 'canonicalizeForComparison', 'stableSerialize', 'hasTodoDataContentChanges', 'deepClone'];
-    const declarations = parseSource(source, {ecmaVersion:'latest', sourceType:'module'}).body.filter(n => n.type === 'FunctionDeclaration' && names.includes(n.id.name)).map(n => source.slice(n.start,n.end)).join('\n');
-    const api = runInNewContext(declarations + ';({mergeTodoData,migrateAndNormalize,hasTodoDataContentChanges})', {...dateHelpers,...learningHelpers,structuredClone,Date});
-    it('旧数据默认值及任务标签迁移', () => {
-        assert.equal(api.migrateAndNormalize({content:'任务',label:' 数学 '}).label,'数学');
-        const out=api.mergeTodoData({version:1,todos:[]},null).data;
-        assert.equal(out.time_entries.length,0); assert.equal(out.daily_reviews.length,0);
-    });
-    it('实际迁移函数拒绝非正整数及注入文本作为打卡目标', () => {
-        for (const target_count of ['<b>注入</b>', 1.5, 0, -1, Infinity]) {
-            assert.equal(api.migrateAndNormalize({ content: '测试', target_count }).target_count, null);
+describe('生产数据合并模块', () => {
+    it('任务标签冲突后只保留获胜版本的候选标签，交换合并方向结果一致', () => {
+        const old = { ...makeTodo({ id: 'task' }), label: '数学习' };
+        const newer = { ...old, updated_at: '2026-06-02T00:00:00Z', label: '数学' };
+        const local = makeData([old]);
+        const cloud = makeData([newer, { ...old, id: 'other', label: '阅读' }]);
+
+        for (const [first, second] of [[local, cloud], [cloud, local]]) {
+            const result = mergeTodoData(structuredClone(first), structuredClone(second));
+            assert.equal(result.data.todos.find(todo => todo.id === 'task').label, '数学');
+            assert.deepEqual(learningHelpers.availableLabels(result.data.todos), ['数学', '阅读']);
         }
-        assert.equal(api.migrateAndNormalize({ content: '测试', target_count: 4 }).target_count, 4);
+        const result = mergeTodoData(structuredClone(local), structuredClone(cloud));
+        assert.equal(result.changed, true);
+        assert.equal(hasTodoDataContentChanges(result.data, local), true);
     });
-    it('任务标签冲突沿用实际合并结果，候选不收集被覆盖的版本', () => {
-        const old = { id:'task', content:'任务', created_at:'2026-09-10T00:00:00Z', updated_at:'2026-09-10T01:00:00Z', label:'数学习' };
-        const newer = { ...old, updated_at:'2026-09-10T02:00:00Z', label:'数学' };
-        const local = {version:1,todos:[old]}, remote = {version:1,todos:[newer,{...old,id:'other',label:'阅读'}]};
-        const result = api.mergeTodoData(local,remote).data;
-        assert.deepEqual(learningHelpers.availableLabels(result.todos),['数学','阅读']);
-        assert.equal(api.hasTodoDataContentChanges(local,result),true);
-        assert.deepEqual(learningHelpers.availableLabels(api.mergeTodoData(remote,local).data.todos),['数学','阅读']);
+
+    it('异 ID 同日复盘经生产入口归一，新增计时会触发同步', () => {
+        const oldReview = {
+            id: 'review-local', date: '2026-09-10', fact: '旧记录',
+            created_at: '2026-09-10T00:00:00Z', updated_at: '2026-09-10T00:00:00Z'
+        };
+        const newReview = { ...oldReview, id: 'review-cloud', fact: '新记录', updated_at: '2026-09-10T01:00:00Z' };
+        const entry = {
+            id: 'entry', task_ref: { todo_id: 'task' }, started_at: '2026-09-10T00:00:00Z',
+            ended_at: '2026-09-10T00:30:00Z', created_at: '2026-09-10T00:00:00Z',
+            updated_at: '2026-09-10T00:30:00Z'
+        };
+        const local = { ...makeData(), daily_reviews: [oldReview], time_entries: [] };
+        const cloud = { ...makeData(), daily_reviews: [newReview], time_entries: [entry] };
+
+        for (const [first, second] of [[local, cloud], [cloud, local]]) {
+            const result = mergeTodoData(structuredClone(first), structuredClone(second));
+            assert.equal(result.data.daily_reviews.length, 1);
+            assert.equal(result.data.daily_reviews[0].id, newReview.id);
+            assert.equal(result.data.daily_reviews[0].fact, newReview.fact);
+            assert.equal(result.data.time_entries.length, 1);
+            assert.equal(result.data.time_entries[0].id, entry.id);
+        }
+        const result = mergeTodoData(structuredClone(local), structuredClone(cloud));
+        assert.equal(result.changed, true);
+        assert.equal(hasTodoDataContentChanges(result.data, local), true);
+
+        // 让复盘在两端相同，单独确认新增计时能让合并入口要求本地保存。
+        const withSameReview = { ...local, daily_reviews: [newReview] };
+        const timingOnly = mergeTodoData(structuredClone(withSameReview), structuredClone(cloud));
+        assert.equal(timingOnly.changed, true);
+        assert.equal(timingOnly.data.time_entries[0].id, entry.id);
     });
-    it('异 ID 同日复盘归一，新增计时触发双向同步', () => {
-        const a={version:1,todos:[],daily_reviews:[{id:'a',date:'2026-09-10',fact:'旧',updated_at:'2026-09-10T00:00:00Z'}]};
-        const b={version:1,todos:[],daily_reviews:[{id:'b',date:'2026-09-10',fact:'新',updated_at:'2026-09-10T01:00:00Z'}],time_entries:[{id:'t',task_ref:{todo_id:'x'},started_at:'2026-09-10T00:00:00Z',updated_at:'2026-09-10T00:00:00Z'}]};
-        const out=api.mergeTodoData(a,b);
-        assert.equal(out.data.daily_reviews.length,1);assert.equal(out.data.daily_reviews[0].fact,'新');
-        assert.equal(out.data.time_entries.length,1);assert.equal(out.changed,true);
-        assert.equal(api.hasTodoDataContentChanges(out.data,a),true);
+
+    it('归一化生产迁移函数修剪标签并把空完成状态归一为 false', () => {
+        const todo = migrateAndNormalize({ content: '任务', label: ' 数学 ', completed: null });
+        assert.equal(todo.label, '数学');
+        assert.equal(todo.completed, false);
+        assert.equal(todo.reminder, null);
+        assert.deepEqual(todo.subtasks, []);
+    });
+
+    it('没有目标次数时仍把打卡任务完成状态归一为布尔值', () => {
+        const local = makeData([makeTodo({
+            id: 'checkin-without-target', task_type: 'weekly_checkin', date: '2026-W37',
+            target_count: null, completed: true, completed_dates: []
+        })]);
+        const cloud = makeData([makeTodo({
+            id: 'checkin-without-target', task_type: 'weekly_checkin', date: '2026-W37',
+            target_count: null, completed: true, completed_dates: []
+        })]);
+        const result = mergeTodoData(local, cloud);
+        assert.equal(result.data.todos[0].completed, false);
+        assert.equal(typeof result.data.todos[0].completed, 'boolean');
+    });
+
+    it('纯计时或复盘变化会被内容比较识别', () => {
+        const empty = makeData([]);
+        const withEntry = { ...empty, time_entries: [{ id: 'entry', task_ref: { todo_id: 'task' } }] };
+        const withReview = { ...empty, daily_reviews: [{ id: 'review', date: '2026-09-10', fact: '记录' }] };
+        assert.equal(hasTodoDataContentChanges(empty, withEntry), true);
+        assert.equal(hasTodoDataContentChanges(empty, withReview), true);
+    });
+
+    it('协作合并保留较新的软删除记录', () => {
+        const active = { id: 'source', name: '清单', updated_at: '2026-09-10T01:00:00Z', deleted: false };
+        const tombstone = { ...active, updated_at: '2026-09-10T02:00:00Z', deleted: true };
+        const result = mergeCollaborations(
+            { version: 1, last_updated: '', collaborations: [active] },
+            { version: 1, last_updated: '', collaborations: [tombstone] }
+        );
+        assert.equal(result.data.collaborations.length, 1);
+        assert.equal(result.data.collaborations[0].deleted, true);
+    });
+
+    it('独立提醒设置合并沿用新的有效时间戳', () => {
+        const local = { reminder_settings: { updated_at: '2026-09-10T01:00:00Z', global_rules: [] } };
+        const cloud = { reminder_settings: { updated_at: '2026-09-10T02:00:00Z', global_rules: [{ id: 'rule' }] } };
+        assert.deepEqual(mergeReminderSettings(local, cloud), cloud.reminder_settings);
+    });
+
+    it('纯日期销卡记录在单端缺席时仍按任务更新时间裁决', () => {
+        assert.equal(resolveCheckinConflict('2026-09-10', null, 0, 0), '2026-09-10');
+        assert.equal(resolveCheckinConflict(null, '2026-09-10', 0, 0), '2026-09-10');
     });
 });
-
 describe('学习保存失败与串行队列', () => {
     const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
     const tree = parseSource(source, {ecmaVersion:'latest',sourceType:'module'});

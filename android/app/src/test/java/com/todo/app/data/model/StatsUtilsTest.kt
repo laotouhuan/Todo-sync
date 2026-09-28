@@ -2,11 +2,141 @@ package com.todo.app.data.model
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
 
 class StatsUtilsTest {
+
+    private fun healthTodo(
+        name: String,
+        createdAt: String,
+        completed: Boolean = false,
+        completedAt: String? = null,
+        deleted: Boolean = false,
+        taskType: String = TaskType.NORMAL,
+        recurring: String = "none"
+    ) = Todo.create(name).copy(
+        createdAt = createdAt,
+        completed = completed,
+        completedAt = completedAt,
+        deleted = deleted,
+        taskType = taskType,
+        recurring = recurring
+    )
+
+    @Test
+    fun calculateHealthMetricsReturnsDefaultsForEmptyList() {
+        assertEquals(
+            HealthMetrics(),
+            calculateHealthMetrics(emptyList(), Instant.parse("2026-09-10T12:00:00Z"), ZoneId.of("UTC"))
+        )
+    }
+
+    @Test
+    fun calculateHealthMetricsExcludesDeletedCheckinAndDailyRepeatTodos() {
+        val now = Instant.parse("2026-09-10T12:00:00Z")
+        val active = healthTodo("active", "2026-09-01T00:00:00Z")
+        val excluded = listOf(
+            healthTodo("deleted", "2026-08-01T00:00:00Z", deleted = true),
+            healthTodo("weekly", "2026-08-01T00:00:00Z", taskType = TaskType.WEEKLY_CHECKIN),
+            healthTodo("monthly", "2026-08-01T00:00:00Z", taskType = TaskType.MONTHLY_CHECKIN),
+            healthTodo("daily", "2026-08-01T00:00:00Z", recurring = "daily_repeat")
+        )
+
+        val metrics = calculateHealthMetrics(listOf(active) + excluded, now, ZoneId.of("UTC"))
+
+        assertEquals(9.0, metrics.currentAvgBacklogLife, 0.0)
+        assertEquals(9.0, metrics.baselineAvgBacklogLife, 0.0)
+        assertEquals(1, metrics.baselineSleepingCountVal)
+    }
+
+    @Test
+    fun calculateHealthMetricsSeparatesCompletionsBeforeAndAfterLocalMidnight() {
+        val beforeMidnight = healthTodo(
+            "before", "2026-09-02T00:00:00Z", completed = true, completedAt = "2026-09-09T23:59:00Z"
+        )
+        val afterMidnight = healthTodo(
+            "after", "2026-09-02T00:00:00Z", completed = true, completedAt = "2026-09-10T00:01:00Z"
+        )
+
+        val metrics = calculateHealthMetrics(
+            listOf(beforeMidnight, afterMidnight),
+            Instant.parse("2026-09-10T12:00:00Z"),
+            ZoneId.of("UTC")
+        )
+
+        assertEquals(7.5, metrics.currentAvgCompletedLife, 0.0)
+        assertEquals(7.0, metrics.baselineAvgCompletedLife, 0.0)
+        assertEquals(8.0, metrics.baselineAvgBacklogLife, 0.0)
+        assertEquals(1, metrics.baselineSleepingCountVal)
+    }
+
+    @Test
+    fun calculateHealthMetricsUsesSuppliedZoneForLocalDayBoundary() {
+        val beforeLocalMidnight = healthTodo("before", "2026-09-09T16:00:00Z")
+        val afterLocalMidnight = healthTodo("after", "2026-09-10T16:10:00Z")
+
+        val metrics = calculateHealthMetrics(
+            listOf(beforeLocalMidnight, afterLocalMidnight),
+            Instant.parse("2026-09-10T16:30:00Z"),
+            ZoneId.of("Asia/Shanghai")
+        )
+
+        assertEquals(0.5, metrics.currentAvgBacklogLife, 0.0)
+        assertEquals(1.0, metrics.baselineAvgBacklogLife, 0.0)
+    }
+
+    @Test
+    fun calculateHealthMetricsPreservesDateOnlyAndMalformedTimestampFallbacks() {
+        val dateOnlyCompletion = healthTodo(
+            "date only", "2026-09-01T00:00:00Z", completed = true, completedAt = "2026-09-08"
+        )
+        val malformedCompletion = healthTodo(
+            "malformed completion", "2026-09-01T00:00:00Z", completed = true, completedAt = "not-a-time"
+        )
+        val malformedCreation = healthTodo("malformed creation", "not-a-date")
+
+        val metrics = calculateHealthMetrics(
+            listOf(dateOnlyCompletion, malformedCompletion, malformedCreation),
+            Instant.parse("2026-09-10T12:00:00Z"),
+            ZoneId.of("UTC")
+        )
+
+        assertEquals(8.0, metrics.currentAvgCompletedLife, 0.0)
+        assertEquals(7.0, metrics.baselineAvgCompletedLife, 0.0)
+        assertEquals(9.0, metrics.baselineAvgBacklogLife, 0.0)
+        assertEquals(-1.0, calculateHealthMetrics(
+            listOf(malformedCreation), Instant.parse("2026-09-10T12:00:00Z"), ZoneId.of("UTC")
+        ).currentAvgBacklogLife, 0.0)
+    }
+
+    @Test
+    fun calculateHealthMetricsFallsBackToCurrentAveragesWhenBaselineHasNoSamples() {
+        val todayTodo = healthTodo("today", "2026-09-10T01:00:00Z")
+        val metrics = calculateHealthMetrics(
+            listOf(todayTodo), Instant.parse("2026-09-10T12:00:00Z"), ZoneId.of("UTC")
+        )
+
+        assertEquals(metrics.currentAvgCompletedLife, metrics.baselineAvgCompletedLife, 0.0)
+        assertEquals(metrics.currentAvgBacklogLife, metrics.baselineAvgBacklogLife, 0.0)
+        assertEquals(0, metrics.baselineSleepingCountVal)
+    }
+
+    @Test
+    fun calculateHealthMetricsCountsExactlySevenDaysAsSleeping() {
+        val atThreshold = healthTodo("at threshold", "2026-09-03T00:00:00Z")
+        val belowThreshold = healthTodo("below threshold", "2026-09-03T00:01:00Z")
+
+        val metrics = calculateHealthMetrics(
+            listOf(atThreshold, belowThreshold),
+            Instant.parse("2026-09-10T12:00:00Z"),
+            ZoneId.of("UTC")
+        )
+
+        assertEquals(1, metrics.baselineSleepingCountVal)
+    }
 
     @Test
     fun testCalcTaskAgeDays() {

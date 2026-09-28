@@ -36,7 +36,8 @@
           },
           "webdav_password": {
             "type": "string",
-            "description": "协作方的 WebDAV 应用密码"
+            "default": "",
+            "description": "仅供本机使用的凭据兼容字段。云端及共享文件夹中的配置必须写为空字符串；密码不得参与跨设备合并。新设备需重新导入分享码。"
           },
           "webdav_filepath": {
             "type": "string",

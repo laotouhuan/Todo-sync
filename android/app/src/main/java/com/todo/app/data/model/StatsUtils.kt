@@ -24,13 +24,17 @@ fun categorizeByTimeSlot(isoTimestamp: String?): String {
  * @param now Current date reference
  * @returns Age in days, or -1 if invalid
  */
-fun calcTaskAgeDays(createdAt: String?, now: OffsetDateTime = OffsetDateTime.now()): Long {
+fun calcTaskAgeDays(
+    createdAt: String?,
+    now: OffsetDateTime = OffsetDateTime.now(),
+    zone: ZoneId = ZoneId.systemDefault()
+): Long {
     if (createdAt.isNullOrEmpty()) return -1
     return try {
         val createdDateTime = try {
             OffsetDateTime.parse(createdAt)
         } catch (e: Exception) {
-            OffsetDateTime.ofInstant(Instant.parse(createdAt), ZoneId.systemDefault())
+            OffsetDateTime.ofInstant(Instant.parse(createdAt), zone)
         }
         val duration = Duration.between(createdDateTime, now)
         val days = duration.toDays()
@@ -38,6 +42,110 @@ fun calcTaskAgeDays(createdAt: String?, now: OffsetDateTime = OffsetDateTime.now
     } catch (e: Exception) {
         -1
     }
+}
+
+data class HealthMetrics(
+    val currentAvgCompletedLife: Double = 0.0,
+    val currentAvgBacklogLife: Double = 0.0,
+    val baselineAvgCompletedLife: Double = 0.0,
+    val baselineAvgBacklogLife: Double = 0.0,
+    val baselineSleepingCountVal: Int = 0
+)
+
+private fun parseHealthDateTime(
+    value: String?,
+    fallback: OffsetDateTime,
+    zone: ZoneId
+): OffsetDateTime {
+    if (value.isNullOrEmpty()) return fallback
+    return try {
+        OffsetDateTime.parse(value)
+    } catch (_: Exception) {
+        try {
+            OffsetDateTime.ofInstant(Instant.parse(value), zone)
+        } catch (_: Exception) {
+            try {
+                LocalDate.parse(value.take(10)).atStartOfDay(zone).toOffsetDateTime()
+            } catch (_: Exception) {
+                fallback
+            }
+        }
+    }
+}
+
+/** 使用固定参考时刻和时区计算清单健康指标。 */
+fun calculateHealthMetrics(todos: List<Todo>, now: Instant, zone: ZoneId): HealthMetrics {
+    val nowTime = now.atZone(zone).toOffsetDateTime()
+    val localTodayStart = nowTime.toLocalDate().atStartOfDay(zone).toOffsetDateTime()
+    val activeList = todos.filter {
+        !it.deleted &&
+            it.taskType != TaskType.WEEKLY_CHECKIN &&
+            it.taskType != TaskType.MONTHLY_CHECKIN &&
+            it.recurring != "daily_repeat"
+    }
+    val incompleteTodos = activeList.filter { !it.completed }
+    val completedTodos = activeList.filter { it.completed && !it.completedAt.isNullOrEmpty() }
+
+    val currentAvgCompletedLife = if (completedTodos.isEmpty()) 0.0 else {
+        completedTodos.map { todo ->
+            calcTaskAgeDays(todo.createdAt, parseHealthDateTime(todo.completedAt, nowTime, zone), zone)
+        }.average()
+    }
+
+    val currentAvgBacklogLife = if (incompleteTodos.isEmpty()) 0.0 else {
+        val total = incompleteTodos.sumOf { calcTaskAgeDays(it.createdAt, nowTime, zone).toDouble() }
+        total / incompleteTodos.size
+    }
+
+    var baselineCompletedSum = 0.0
+    var baselineCompletedCount = 0
+    var baselineIncompleteSum = 0.0
+    var baselineIncompleteCount = 0
+    var baselineSleepingCount = 0
+
+    activeList.forEach { todo ->
+        val createdTime = parseHealthDateTime(todo.createdAt, nowTime, zone)
+        if (createdTime.isBefore(localTodayStart)) {
+            val completedTime = if (todo.completed && !todo.completedAt.isNullOrEmpty()) {
+                parseHealthDateTime(todo.completedAt, nowTime, zone)
+            } else null
+
+            val wasCompletedBeforeToday = todo.completed &&
+                (completedTime == null || completedTime.isBefore(localTodayStart))
+
+            if (wasCompletedBeforeToday) {
+                if (completedTime != null) {
+                    val age = calcTaskAgeDays(todo.createdAt, completedTime, zone).toDouble()
+                    if (age >= 0) {
+                        baselineCompletedSum += age
+                        baselineCompletedCount++
+                    }
+                }
+            } else {
+                val age = calcTaskAgeDays(todo.createdAt, localTodayStart, zone).toDouble()
+                if (age >= 0) {
+                    baselineIncompleteSum += age
+                    baselineIncompleteCount++
+                    if (age >= 7) {
+                        baselineSleepingCount++
+                    }
+                }
+            }
+        }
+    }
+
+    val baselineAvgCompleted = if (baselineCompletedCount == 0) currentAvgCompletedLife
+        else baselineCompletedSum / baselineCompletedCount
+    val baselineAvgBacklog = if (baselineIncompleteCount == 0) currentAvgBacklogLife
+        else baselineIncompleteSum / baselineIncompleteCount
+
+    return HealthMetrics(
+        currentAvgCompletedLife = currentAvgCompletedLife,
+        currentAvgBacklogLife = currentAvgBacklogLife,
+        baselineAvgCompletedLife = baselineAvgCompleted,
+        baselineAvgBacklogLife = baselineAvgBacklog,
+        baselineSleepingCountVal = baselineSleepingCount
+    )
 }
 
 /**

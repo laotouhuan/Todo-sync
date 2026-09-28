@@ -352,7 +352,7 @@ Windows 构建门禁与测试位于 `windows/tests/`；Android 测试见 §9.3�
 
 ### 9.5 全平台一键测试脚本 (★ 推荐)
 
-为了避免在测试时重复审核多个平台的命令，在项目根目录下提供了一个 PowerShell 脚本：[run-tests.ps1](file:///d:/aaa/project/to-do%20list/run-tests.ps1)。
+为了避免在测试时重复审核多个平台的命令，在项目根目录下提供了一个 PowerShell 脚本：[run-tests.ps1](run-tests.ps1)。
 
 该脚本按顺序运行 Windows 前端和 Android 端的测试门禁；`JAVA_HOME` 未设置时，使用下文记录的本机 JDK 路径。脚本不执行 Rust 编译检查，涉及 Rust 的改动需另行运行 `cargo check`。
 
@@ -384,16 +384,16 @@ Windows 构建门禁与测试位于 `windows/tests/`；Android 测试见 §9.3�
 
 ### 11.1 Windows 端版本修改文件
 必须同步修改以下 3 个文件中的版本号：
-1. **[package.json](file:///d:/aaa/project/to-do%20list/windows/package.json)**：
+1. **[package.json](windows/package.json)**：
    * 修改 `"version": "x.y.z"`
-2. **[Cargo.toml](file:///d:/aaa/project/to-do%20list/windows/src-tauri/Cargo.toml)**：
+2. **[Cargo.toml](windows/src-tauri/Cargo.toml)**：
    * 修改 `[package]` 下的 `version = "x.y.z"`
-3. **[tauri.conf.json](file:///d:/aaa/project/to-do%20list/windows/src-tauri/tauri.conf.json)**：
+3. **[tauri.conf.json](windows/src-tauri/tauri.conf.json)**：
    * 修改 `"version": "x.y.z"`
 
 ### 11.2 Android 端版本修改文件
 必须修改以下文件以更新 APP 内部版本及校验：
-1. **[build.gradle.kts](file:///d:/aaa/project/to-do%20list/android/app/build.gradle.kts)**：
+1. **[build.gradle.kts](android/app/build.gradle.kts)**：
    * 修改 `versionName = "x.y.z"`（用于界面显示和自动更新的版本对比）
    * 增加 `versionCode = N`（内部版本代码，必须为每次发布递增的整数）
 

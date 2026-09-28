@@ -368,6 +368,51 @@ export function getLastMonthString(date = new Date()) {
 // ====== Stats Helpers ======
 
 /**
+ * 计算日、周或月统计周期内的完成总量和进度。
+ * @param {Array<object>} todos 已按所选周期筛选的任务
+ * @param {'day'|'week'|'month'} period 统计周期
+ * @param {string} targetPeriod 所选日期、ISO 周或月份字符串
+ * @returns {{ totalCount: number, completedCount: number, progress: number }}
+ */
+export function calculateStatsPeriodProgress(todos, period, targetPeriod) {
+    let totalCount = 0;
+    let completedCount = 0;
+
+    todos.forEach(todo => {
+        if (todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin') {
+            let periodCheckinCount = 0;
+            const completedDates = todo.completed_dates || [];
+            completedDates.forEach(dateValue => {
+                if (period === 'day') {
+                    if (dateValue.startsWith(targetPeriod)) periodCheckinCount++;
+                } else if (period === 'week') {
+                    const checkDate = new Date(dateValue);
+                    if (!isNaN(checkDate.getTime()) && getISOWeekString(checkDate) === targetPeriod) {
+                        periodCheckinCount++;
+                    }
+                } else if (dateValue.startsWith(targetPeriod)) {
+                    periodCheckinCount++;
+                }
+            });
+
+            if (todo.target_count !== null) {
+                completedCount += Math.min(todo.target_count, periodCheckinCount);
+                totalCount += todo.target_count;
+            } else {
+                completedCount += periodCheckinCount;
+                totalCount += periodCheckinCount;
+            }
+        } else {
+            totalCount += 1;
+            if (todo.completed) completedCount += 1;
+        }
+    });
+
+    const progress = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
+    return { totalCount, completedCount, progress };
+}
+
+/**
  * Categorize completed task by local time.
  * @param {string} isoTimestamp 
  * @returns {string} 'morning' | 'afternoon' | 'evening' | 'night' | 'unknown'

@@ -81,6 +81,18 @@ internal fun Todo.statsVisualStyle(): StatsTaskVisualStyle = when {
     else -> StatsTaskVisualStyle(Color(0xFF10B981), "circle")
 }
 
+internal fun matchesStatsTypeFilter(todo: Todo, checkedFilters: Set<String>): Boolean {
+    val isDaily = todo.recurring == "daily_repeat"
+    val isWeekly = todo.taskType == TaskType.WEEKLY_CHECKIN
+    val isMonthly = todo.taskType == TaskType.MONTHLY_CHECKIN
+    val isNormal = todo.taskType == TaskType.NORMAL && todo.recurring != "daily_repeat"
+
+    return (isNormal && checkedFilters.contains("normal")) ||
+        (isDaily && checkedFilters.contains("daily")) ||
+        (isWeekly && checkedFilters.contains("weekly")) ||
+        (isMonthly && checkedFilters.contains("monthly"))
+}
+
 @Composable
 private fun MakeupIcon(shape: String, color: Color, dotRadius: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
@@ -208,31 +220,11 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
 
     // Apply global category filter to periodTodos
     val filteredTodos = remember(periodTodos, checkedFilters) {
-        periodTodos.filter { t ->
-            val isDaily = t.recurring == "daily_repeat"
-            val isWeekly = t.taskType == TaskType.WEEKLY_CHECKIN
-            val isMonthly = t.taskType == TaskType.MONTHLY_CHECKIN
-            val isNormal = t.taskType == TaskType.NORMAL && t.recurring != "daily_repeat"
-
-            (isNormal && checkedFilters.contains("normal")) ||
-            (isDaily && checkedFilters.contains("daily")) ||
-            (isWeekly && checkedFilters.contains("weekly")) ||
-            (isMonthly && checkedFilters.contains("monthly"))
-        }
+        periodTodos.filter { matchesStatsTypeFilter(it, checkedFilters) }
     }
 
     val timelineTodos = remember(todos, checkedFilters) {
-        todos.filter { t ->
-            val isDaily = t.recurring == "daily_repeat"
-            val isWeekly = t.taskType == TaskType.WEEKLY_CHECKIN
-            val isMonthly = t.taskType == TaskType.MONTHLY_CHECKIN
-            val isNormal = t.taskType == TaskType.NORMAL && t.recurring != "daily_repeat"
-
-            (isNormal && checkedFilters.contains("normal")) ||
-            (isDaily && checkedFilters.contains("daily")) ||
-            (isWeekly && checkedFilters.contains("weekly")) ||
-            (isMonthly && checkedFilters.contains("monthly"))
-        }
+        todos.filter { matchesStatsTypeFilter(it, checkedFilters) }
     }
 
     val periodProgress = remember(filteredTodos, period, targetDate) {

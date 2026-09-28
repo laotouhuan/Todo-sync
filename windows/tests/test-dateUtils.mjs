@@ -18,7 +18,7 @@ import {
     validateAndNormalizeTime, formatLocalTime, parseIsoToLocalDateTime,
     combineLocalDateAndTimeToISO, formatCheckinDateTimeTooltip,
     sortFunc, parseInputSyntax, createTodo, groupTodosByDate,
-    categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade, generateUUID
+    categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade, calculateStatsPeriodProgress, generateUUID
 } from '../src/dateUtils.js';
 
 describe('generateUUID', () => {
@@ -485,6 +485,89 @@ describe('groupTodosByDate', () => {
 });
 
 // ====== Stats Helpers ======
+describe('calculateStatsPeriodProgress', () => {
+    const task = overrides => ({
+        task_type: 'normal',
+        recurring: 'none',
+        completed: false,
+        completed_dates: [],
+        target_count: null,
+        ...overrides
+    });
+
+    it('空列表返回零总量、零完成量和零进度', () => {
+        assert.deepEqual(calculateStatsPeriodProgress([], 'day', '2026-06-24'), {
+            totalCount: 0,
+            completedCount: 0,
+            progress: 0
+        });
+    });
+
+    it('普通和每日重复任务各按一项计数，并四舍五入百分比', () => {
+        const result = calculateStatsPeriodProgress([
+            task({ completed: true }),
+            task(),
+            task({ recurring: 'daily_repeat', completed: false })
+        ], 'day', '2026-06-24');
+
+        assert.deepEqual(result, { totalCount: 3, completedCount: 1, progress: 33 });
+    });
+
+    it('日统计按日期前缀计入纯日期和带时间打卡，并封顶目标次数', () => {
+        const result = calculateStatsPeriodProgress([
+            task({
+                task_type: 'weekly_checkin',
+                target_count: 2,
+                completed_dates: ['2026-06-24', '2026-06-24T13:00:00Z', '2026-06-23']
+            }),
+            task({
+                task_type: 'monthly_checkin',
+                completed_dates: ['2026-06-24', '2026-06-24T23:59:00-08:00']
+            }),
+            task({ task_type: 'weekly_checkin', target_count: 3, completed_dates: [] })
+        ], 'day', '2026-06-24');
+
+        assert.deepEqual(result, { totalCount: 7, completedCount: 4, progress: 57 });
+    });
+
+    it('周统计忽略无效日期、排除周期外记录并封顶目标次数', () => {
+        const result = calculateStatsPeriodProgress([
+            task({
+                task_type: 'weekly_checkin',
+                target_count: 1,
+                completed_dates: ['2026-06-24', '2026-06-25T23:00:00-10:00', '2026-06-19', 'invalid']
+            }),
+            task({
+                task_type: 'monthly_checkin',
+                completed_dates: ['2026-06-24', '2026-06-19', 'invalid']
+            })
+        ], 'week', '2026-W26');
+
+        assert.deepEqual(result, { totalCount: 2, completedCount: 2, progress: 100 });
+    });
+
+    it('月统计保留文本日期前缀规则并忽略周期外记录', () => {
+        const result = calculateStatsPeriodProgress([
+            task({
+                task_type: 'monthly_checkin',
+                target_count: 2,
+                completed_dates: [
+                    '2026-06-01',
+                    '2026-06-30T23:30:00-08:00',
+                    '2026-06-15T12:00:00Z',
+                    '2026-05-31T23:59:00-08:00'
+                ]
+            }),
+            task({
+                task_type: 'weekly_checkin',
+                completed_dates: ['2026-06-24', '2026-05-24']
+            })
+        ], 'month', '2026-06');
+
+        assert.deepEqual(result, { totalCount: 3, completedCount: 3, progress: 100 });
+    });
+});
+
 describe('categorizeByTimeSlot', () => {
     it('上午 6-12', () => {
         assert.equal(categorizeByTimeSlot('2026-07-08T06:00:00'), 'morning');

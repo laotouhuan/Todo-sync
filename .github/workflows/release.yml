@@ -34,14 +34,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const fs = require('fs');
-          const version = JSON.parse(fs.readFileSync('windows/src-tauri/tauri.conf.json', 'utf8')).version;
-          const android = fs.readFileSync('android/app/build.gradle.kts', 'utf8').match(/versionName\s*=\s*"([^"]+)"/);
-          if (!android || android[1] !== version) throw new Error('Windows 与 Android 版本号不一致');
-          if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME !== `v${version}`) throw new Error('发布标签与应用版本号不一致');
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
-          NODE
+          node --test windows/tests/test-releaseVersion.mjs
+          node scripts/check-release-version.mjs
 
       # 签名文件只在临时 Runner 中恢复，不提交到仓库，也不上传为 Artifact。
       - name: Restore Android signing key

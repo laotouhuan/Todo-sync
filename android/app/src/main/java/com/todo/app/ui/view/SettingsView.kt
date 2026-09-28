@@ -404,7 +404,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                                 }
 
                                 TextDivider("生成我的共享授权口令")
-                                Text("仅分享给可信朋友。授权码包含 WebDAV 凭据，接收者可直接访问该凭据允许访问的文件；只读和有效期限制仅在本应用内生效。撤销访问需在网盘中更换或撤销应用密码。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("仅分享给可信朋友。授权码包含 WebDAV 凭据，接收者可直接访问该凭据允许访问的文件；只读和有效期限制仅在本应用内生效。撤销访问需在网盘中更换或撤销应用密码。协作密码仅保存在本机；其他设备同步清单信息后，需重新导入分享码才能访问。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.height(8.dp))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),

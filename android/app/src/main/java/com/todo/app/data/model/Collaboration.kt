@@ -9,7 +9,7 @@ data class CollaborationSource(
     var name: String,
     @SerialName("webdav_url") val webdavUrl: String,
     @SerialName("webdav_username") val webdavUsername: String,
-    @SerialName("webdav_password") val webdavPassword: String,
+    @SerialName("webdav_password") val webdavPassword: String = "",
     @SerialName("webdav_filepath") val webdavFilepath: String,
     @SerialName("expire_at") val expireAt: Long? = null, // Unix 时间戳（秒），null 表示永久
     @SerialName("updated_at") val updatedAt: String = "", // 用于冲突合并的 ISO 8601 时间戳

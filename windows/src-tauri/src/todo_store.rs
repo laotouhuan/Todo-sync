@@ -17,6 +17,9 @@ use aes_gcm::{
 use sha2::{Digest, Sha256};
 use rand::Rng;
 
+#[path = "collaboration_credentials.rs"]
+mod collaboration_credentials;
+
 // 常量定义
 const MAX_BACKUP_COUNT: usize = 5;
 const LOCK_RETRY_COUNT: usize = 20;
@@ -32,6 +35,7 @@ pub struct CollaborationSource {
     pub name: String,
     pub webdav_url: String,
     pub webdav_username: String,
+    #[serde(default)]
     pub webdav_password: String,
     pub webdav_filepath: String,
     pub expire_at: Option<i64>, // Unix 时间戳，None 表示永久
@@ -100,6 +104,296 @@ mod preference_tests {
     }
 }
 
+#[cfg(test)]
+mod legacy_collaboration_migration_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // 仅用于临时文件测试，不使用本机真实配置或凭据。
+    const TEST_KEY: [u8; 32] = [7; 32];
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+            let path = std::env::temp_dir().join(format!("todo-collab-migration-{}-{unique}", std::process::id()));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn legacy_config() -> serde_json::Value {
+        serde_json::json!({
+            "sync_path": "",
+            "webdav_password": "legacy-password",
+            "collaborations": [
+                {"id": "same", "name": "legacy copy", "deleted": false},
+                {"id": "new", "name": "new source", "extension": {"kept": true}}
+            ]
+        })
+    }
+
+    fn run_migration(
+        config_path: &Path,
+        collaborations_path: &Path,
+        fail_target_write: bool,
+        fail_config_write: bool,
+    ) -> Result<AppConfig, String> {
+        let raw_config: serde_json::Value = serde_json::from_slice(&fs::read(config_path).unwrap()).unwrap();
+        migrate_legacy_config_value(
+            config_path,
+            raw_config,
+            Some(collaborations_path),
+            |path, legacy_items| {
+                merge_legacy_collaborations_at_path(path, legacy_items, |path, contents| {
+                    if fail_target_write {
+                        return Err("injected collaborations write failure".to_string());
+                    }
+                    atomic_write(path, contents)
+                })
+            },
+            |path, config| {
+                if fail_config_write {
+                    return Err("injected config write failure".to_string());
+                }
+                save_migrated_config_atomic(&TEST_KEY, path, config)
+            },
+        )
+    }
+
+    #[test]
+    fn resolves_sync_and_default_collaboration_paths() {
+        let temp = TestDirectory::new();
+        let app_data = temp.0.join("app-data");
+        let sync_dir = temp.0.join("sync");
+
+        let sync_path = collaborations_path_from_sync_path(sync_dir.to_str(), None).unwrap();
+        let default_path = collaborations_path_from_sync_path(None, Some(&app_data)).unwrap();
+
+        assert_eq!(sync_path, sync_dir.join("collaborations.json"));
+        assert_eq!(default_path, app_data.join("collaborations.json"));
+        assert!(sync_dir.is_dir());
+        assert!(app_data.is_dir());
+    }
+
+    #[test]
+    fn empty_legacy_list_is_removed_without_creating_collaboration_data() {
+        let temp = TestDirectory::new();
+        let config_path = temp.0.join("config.json");
+        let collaborations_path = temp.0.join("collaborations.json");
+        let raw_config = serde_json::json!({"collaborations": [], "sync_path": null});
+
+        migrate_legacy_config_value(
+            &config_path,
+            raw_config,
+            None,
+            |_, _| panic!("empty legacy list must not write collaboration data"),
+            |path, config| {
+                save_migrated_config_atomic(&TEST_KEY, path, config)
+            },
+        ).unwrap();
+
+        assert!(!collaborations_path.exists());
+        let cleaned: serde_json::Value = serde_json::from_slice(&fs::read(config_path).unwrap()).unwrap();
+        assert!(cleaned.get("collaborations").is_none());
+    }
+
+    #[test]
+    fn migration_preserves_existing_records_and_is_safe_to_retry() {
+        let temp = TestDirectory::new();
+        let config_path = temp.0.join("config.json");
+        let collaborations_path = temp.0.join("collaborations.json");
+        fs::write(&config_path, serde_json::to_vec_pretty(&legacy_config()).unwrap()).unwrap();
+        fs::write(&collaborations_path, serde_json::to_vec_pretty(&serde_json::json!({
+            "version": 1,
+            "last_updated": "existing timestamp",
+            "extension_root": "preserve",
+            "collaborations": [
+                {"id": "same", "name": "existing copy", "deleted": true, "extension": "keep"}
+            ]
+        })).unwrap()).unwrap();
+
+        let migrated = run_migration(&config_path, &collaborations_path, false, true);
+        assert!(migrated.is_err());
+        assert!(serde_json::from_slice::<serde_json::Value>(&fs::read(&config_path).unwrap()).unwrap()["collaborations"].is_array());
+
+        run_migration(&config_path, &collaborations_path, false, false).unwrap();
+        let target: serde_json::Value = serde_json::from_slice(&fs::read(&collaborations_path).unwrap()).unwrap();
+        let records = target["collaborations"].as_array().unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["name"], "existing copy");
+        assert_eq!(records[0]["deleted"], true);
+        assert_eq!(records[0]["extension"], "keep");
+        assert_eq!(records[1]["updated_at"].as_str().unwrap().len() > 0, true);
+        assert_eq!(records[1]["deleted"], false);
+        assert_eq!(records[1]["extension"]["kept"], true);
+        assert_eq!(target["extension_root"], "preserve");
+
+        let cleaned: serde_json::Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+        assert!(cleaned.get("collaborations").is_none());
+        let stored = cleaned["webdav_password"].as_str().unwrap();
+        assert!(stored.starts_with("ENC:"));
+        assert_eq!(decrypt_password_with_key(&TEST_KEY, stored), "legacy-password");
+    }
+
+    #[test]
+    fn target_write_failure_keeps_legacy_configuration_unchanged() {
+        let temp = TestDirectory::new();
+        let config_path = temp.0.join("config.json");
+        let collaborations_path = temp.0.join("collaborations.json");
+        let original_config = serde_json::to_vec_pretty(&legacy_config()).unwrap();
+        let original_target = br#"{"version":1,"last_updated":"keep","collaborations":[]}"#.to_vec();
+        fs::write(&config_path, &original_config).unwrap();
+        fs::write(&collaborations_path, &original_target).unwrap();
+
+        assert!(run_migration(&config_path, &collaborations_path, true, false).is_err());
+        assert_eq!(fs::read(&config_path).unwrap(), original_config);
+        assert_eq!(fs::read(&collaborations_path).unwrap(), original_target);
+    }
+
+    #[test]
+    fn invalid_target_is_not_overwritten_or_removed_from_legacy_config() {
+        let temp = TestDirectory::new();
+        let config_path = temp.0.join("config.json");
+        let collaborations_path = temp.0.join("collaborations.json");
+        let original_config = serde_json::to_vec_pretty(&legacy_config()).unwrap();
+        let invalid_target = b"{invalid json".to_vec();
+        fs::write(&config_path, &original_config).unwrap();
+        fs::write(&collaborations_path, &invalid_target).unwrap();
+
+        assert!(run_migration(&config_path, &collaborations_path, false, false).is_err());
+        assert_eq!(fs::read(&config_path).unwrap(), original_config);
+        assert_eq!(fs::read(&collaborations_path).unwrap(), invalid_target);
+    }
+
+    #[test]
+    fn full_load_migrates_sources_and_passwords_without_reimporting() {
+        for encrypted in [false, true] {
+            let temp = TestDirectory::new();
+            let config_path = temp.0.join("config.json");
+            let mut raw = legacy_config();
+            raw["sync_path"] = serde_json::Value::Null;
+            if encrypted {
+                raw["webdav_password"] = serde_json::json!(encrypt_password_with_key(&TEST_KEY, "legacy-password"));
+            }
+            fs::write(&config_path, serde_json::to_vec(&raw).unwrap()).unwrap();
+
+            let config = load_config_at_path(&config_path, &TEST_KEY);
+            assert_eq!(config.webdav_password.as_deref(), Some("legacy-password"));
+            let saved = fs::read(&config_path).unwrap();
+            let disk: serde_json::Value = serde_json::from_slice(&saved).unwrap();
+            assert!(disk.get("collaborations").is_none());
+            assert!(disk["webdav_password"].as_str().unwrap().starts_with("ENC:"));
+            if encrypted {
+                assert_eq!(disk["webdav_password"], raw["webdav_password"]);
+            }
+            let target_path = temp.0.join("collaborations.json");
+            let target = fs::read(&target_path).unwrap();
+            let records: serde_json::Value = serde_json::from_slice(&target).unwrap();
+            assert_eq!(records["collaborations"].as_array().unwrap().len(), 2);
+
+            let reloaded = load_config_at_path(&config_path, &TEST_KEY);
+            assert_eq!(reloaded.webdav_password.as_deref(), Some("legacy-password"));
+            assert_eq!(fs::read(&config_path).unwrap(), saved);
+            assert_eq!(fs::read(&target_path).unwrap(), target);
+        }
+    }
+
+    #[test]
+    fn failed_migration_survives_settings_save_and_sync_path_recovery() {
+        for encrypted in [false, true] {
+            let temp = TestDirectory::new();
+            let config_path = temp.0.join("config.json");
+            let bad_path = temp.0.join("collaborations.json");
+            let mut raw = legacy_config();
+            raw["sync_path"] = serde_json::Value::Null;
+            if encrypted {
+                raw["webdav_password"] = serde_json::json!(encrypt_password_with_key(&TEST_KEY, "legacy-password"));
+            }
+            let original = serde_json::to_vec(&raw).unwrap();
+            fs::write(&config_path, &original).unwrap();
+            fs::write(&bad_path, "invalid json").unwrap();
+
+            let mut config = load_config_at_path(&config_path, &TEST_KEY);
+            assert_eq!(config.webdav_password.as_deref(), Some("legacy-password"));
+            // 加载失败不会为了加密明文密码而覆盖旧源。
+            assert_eq!(fs::read(&config_path).unwrap(), original);
+            config.nickname = Some("修改设置".to_string());
+            save_config_at_path(&config_path, &TEST_KEY, &config).unwrap();
+            let saved: serde_json::Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+            assert_eq!(saved["collaborations"], raw["collaborations"]);
+            assert_eq!(saved["nickname"], "修改设置");
+            assert!(saved["webdav_password"].as_str().unwrap().starts_with("ENC:"));
+
+            // 与 set_sync_path 相同：再次加载失败后改目录，再经普通保存入口提交。
+            let mut recovered = load_config_at_path(&config_path, &TEST_KEY);
+            let new_dir = temp.0.join("new-sync");
+            recovered.sync_path = Some(new_dir.to_string_lossy().into_owned());
+            save_config_at_path(&config_path, &TEST_KEY, &recovered).unwrap();
+            let pending: serde_json::Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+            assert_eq!(pending["collaborations"], raw["collaborations"]);
+
+            let migrated = load_config_at_path(&config_path, &TEST_KEY);
+            assert_eq!(migrated.webdav_password.as_deref(), Some("legacy-password"));
+            let cleaned: serde_json::Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+            assert!(cleaned.get("collaborations").is_none());
+            let target: serde_json::Value = serde_json::from_slice(&fs::read(new_dir.join("collaborations.json")).unwrap()).unwrap();
+            assert_eq!(target["collaborations"].as_array().unwrap().len(), 2);
+            assert_eq!(fs::read_to_string(&bad_path).unwrap(), "invalid json");
+        }
+    }
+
+    #[test]
+    fn full_load_retries_real_target_and_config_write_failures() {
+        for block_config in [false, true] {
+            let temp = TestDirectory::new();
+            let config_path = temp.0.join("config.json");
+            let target_path = temp.0.join("collaborations.json");
+            let mut raw = legacy_config();
+            raw["sync_path"] = serde_json::Value::Null;
+            let original = serde_json::to_vec(&raw).unwrap();
+            fs::write(&config_path, &original).unwrap();
+            let blocked_temp = if block_config { config_path.with_extension("tmp") } else { target_path.with_extension("tmp") };
+            fs::create_dir(&blocked_temp).unwrap();
+
+            let config = load_config_at_path(&config_path, &TEST_KEY);
+            assert_eq!(config.webdav_password.as_deref(), Some("legacy-password"));
+            assert_eq!(fs::read(&config_path).unwrap(), original);
+            if block_config {
+                assert!(save_config_at_path(&config_path, &TEST_KEY, &config).is_err());
+                assert_eq!(fs::read(&config_path).unwrap(), original);
+            }
+            fs::remove_dir(&blocked_temp).unwrap();
+            let loaded = load_config_at_path(&config_path, &TEST_KEY);
+            assert_eq!(loaded.webdav_password.as_deref(), Some("legacy-password"));
+            let cleaned: serde_json::Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+            assert!(cleaned.get("collaborations").is_none());
+            let target: serde_json::Value = serde_json::from_slice(&fs::read(&target_path).unwrap()).unwrap();
+            assert_eq!(target["collaborations"].as_array().unwrap().len(), 2);
+        }
+    }
+
+    #[test]
+    fn plain_password_without_legacy_sources_is_encrypted_on_load() {
+        let temp = TestDirectory::new();
+        let path = temp.0.join("config.json");
+        fs::write(&path, r#"{"webdav_password":"legacy-password"}"#).unwrap();
+        let loaded = load_config_at_path(&path, &TEST_KEY);
+        assert_eq!(loaded.webdav_password.as_deref(), Some("legacy-password"));
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(saved["webdav_password"].as_str().unwrap().starts_with("ENC:"));
+        assert!(saved.get("collaborations").is_none());
+        assert_eq!(load_config_at_path(&path, &TEST_KEY).webdav_password, loaded.webdav_password);
+    }
+}
+
 pub fn get_config_path(app: &AppHandle) -> Result<PathBuf, String> {
     let path = app.path().app_data_dir()
         .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
@@ -130,11 +424,14 @@ fn derive_local_key(app: &AppHandle) -> [u8; 32] {
 /// 加密密码字符串，返回 "ENC:<base64(iv + ciphertext_with_tag)>" 格式。
 /// 空字符串不加密，直接返回空字符串。
 fn encrypt_password(app: &AppHandle, plaintext: &str) -> String {
+    encrypt_password_with_key(&derive_local_key(app), plaintext)
+}
+
+fn encrypt_password_with_key(key: &[u8; 32], plaintext: &str) -> String {
     if plaintext.is_empty() {
         return String::new();
     }
-    let key_bytes = derive_local_key(app);
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes).expect("Invalid key length");
+    let cipher = Aes256Gcm::new_from_slice(key).expect("Invalid key length");
     let mut rng = rand::thread_rng();
     let mut iv = [0u8; 12];
     rng.fill(&mut iv);
@@ -150,6 +447,10 @@ fn encrypt_password(app: &AppHandle, plaintext: &str) -> String {
 /// 解密密码字符串。若以 "ENC:" 开头则解密；否则视为明文旧数据直接返回。
 /// 解密失败时返回空字符串（防止 panic）。
 fn decrypt_password(app: &AppHandle, stored: &str) -> String {
+    decrypt_password_with_key(&derive_local_key(app), stored)
+}
+
+fn decrypt_password_with_key(key: &[u8; 32], stored: &str) -> String {
     if stored.is_empty() {
         return String::new();
     }
@@ -163,8 +464,7 @@ fn decrypt_password(app: &AppHandle, stored: &str) -> String {
             return String::new();
         }
         let (iv, ciphertext) = packed.split_at(12);
-        let key_bytes = derive_local_key(app);
-        let cipher = Aes256Gcm::new_from_slice(&key_bytes).expect("Invalid key length");
+        let cipher = Aes256Gcm::new_from_slice(key).expect("Invalid key length");
         let nonce = Nonce::from_slice(iv);
         match cipher.decrypt(nonce, ciphertext) {
             Ok(plaintext) => String::from_utf8(plaintext).unwrap_or_default(),
@@ -217,15 +517,28 @@ fn get_iso_timestamp() -> String {
 
 pub fn get_collaborations_path(app: &AppHandle) -> Result<PathBuf, String> {
     let config = load_config(app);
-    if let Some(p) = config.sync_path {
+    if let Some(sync_path) = config.sync_path.as_deref() {
+        collaborations_path_from_sync_path(Some(sync_path), None)
+    } else {
+        let app_data_dir = app.path().app_data_dir()
+            .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+        collaborations_path_from_sync_path(None, Some(&app_data_dir))
+    }
+}
+
+fn collaborations_path_from_sync_path(
+    sync_path: Option<&str>,
+    app_data_dir: Option<&Path>,
+) -> Result<PathBuf, String> {
+    if let Some(p) = sync_path {
         let pb = PathBuf::from(p);
         fs::create_dir_all(&pb).map_err(|e| format!("Failed to create sync dir: {e}"))?;
         Ok(pb.join("collaborations.json"))
     } else {
-        let path = app.path().app_data_dir()
-            .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
-        fs::create_dir_all(&path).map_err(|e| format!("Failed to create data dir: {e}"))?;
-        Ok(path.join("collaborations.json"))
+        let app_data_dir = app_data_dir
+            .ok_or_else(|| "Failed to resolve app data directory".to_string())?;
+        fs::create_dir_all(app_data_dir).map_err(|e| format!("Failed to create data dir: {e}"))?;
+        Ok(app_data_dir.join("collaborations.json"))
     }
 }
 
@@ -234,14 +547,28 @@ pub fn read_collaborations_file(app: &AppHandle) -> Result<String, String> {
     if !path.exists() {
         return Ok("{\"version\":1,\"last_updated\":\"\",\"collaborations\":[]}".to_string());
     }
-    let _guard = acquire_lock(&path, false)?;
-    fs::read_to_string(&path).map_err(|e| e.to_string())
+    let _guard = acquire_lock(&path, true)?;
+    let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let private_path = collaboration_credentials_path(app)?;
+    let shared = collaboration_credentials::save_and_redact(&data, &private_path, &derive_local_key(app))?;
+    if shared != data {
+        atomic_write(&path, &shared)?;
+    }
+    collaboration_credentials::restore(&shared, &private_path)
 }
 
 pub fn write_collaborations_file(app: &AppHandle, data: &str) -> Result<(), String> {
     let path = get_collaborations_path(app)?;
     let _guard = acquire_lock(&path, true)?;
-    atomic_write(&path, data)
+    let private_path = collaboration_credentials_path(app)?;
+    let shared = collaboration_credentials::save_and_redact(data, &private_path, &derive_local_key(app))?;
+    atomic_write(&path, &shared)
+}
+
+fn collaboration_credentials_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let directory = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    Ok(directory.join("collaboration-credentials.json"))
 }
 
 pub fn load_config(app: &AppHandle) -> AppConfig {
@@ -249,69 +576,57 @@ pub fn load_config(app: &AppHandle) -> AppConfig {
         Ok(p) => p,
         Err(_) => return AppConfig::default(),
     };
-    let data = match fs::read_to_string(&path) {
+    load_config_at_path(&path, &derive_local_key(app))
+}
+
+// 测试与正式加载共用完整流程，仅由调用方提供路径和本机密钥。
+fn load_config_at_path(path: &Path, key: &[u8; 32]) -> AppConfig {
+    let data = match fs::read_to_string(path) {
         Ok(d) => d,
         Err(_) => return AppConfig::default(),
     };
 
-    // 尝试解析为 JSON Value 来处理老配置迁移
-    if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&data) {
-        if let Some(collabs_val) = val.get_mut("collaborations") {
-            if let Some(collabs) = collabs_val.as_array() {
-                if !collabs.is_empty() {
-                    // 写入新的 collaborations.json
-                    let mut new_collab_data = serde_json::json!({
-                        "version": 1,
-                        "last_updated": get_iso_timestamp(),
-                        "collaborations": []
-                    });
-                    
-                    if let Some(arr) = new_collab_data["collaborations"].as_array_mut() {
-                        let now_iso = get_iso_timestamp();
-                        for item in collabs {
-                            let mut mapped_item = item.clone();
-                            if mapped_item.get("updated_at").is_none() {
-                                mapped_item["updated_at"] = serde_json::json!(now_iso);
-                            }
-                            if mapped_item.get("deleted").is_none() {
-                                mapped_item["deleted"] = serde_json::json!(false);
-                            }
-                            arr.push(mapped_item);
-                        }
-                    }
+    // 尝试解析为 JSON Value 来处理老配置迁移。
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&data) {
+        if value.get("collaborations").is_some() {
+            let sync_path = value.get("sync_path").and_then(serde_json::Value::as_str);
+            let app_data_dir = path.parent();
+            let collab_path = match app_data_dir {
+                Some(dir) if value["collaborations"].as_array().map_or(false, |items| !items.is_empty()) => {
+                    collaborations_path_from_sync_path(sync_path, Some(dir)).map(Some)
+                }
+                _ => Ok(None),
+            };
 
-                    if let Ok(collab_path) = get_collaborations_path(app) {
-                        // 合并现有数据
-                        if collab_path.exists() {
-                            if let Ok(existing_str) = fs::read_to_string(&collab_path) {
-                                if let Ok(mut existing_val) = serde_json::from_str::<serde_json::Value>(&existing_str) {
-                                    if let Some(existing_arr) = existing_val["collaborations"].as_array_mut() {
-                                        if let Some(new_arr) = new_collab_data["collaborations"].as_array() {
-                                            for item in new_arr {
-                                                if !existing_arr.iter().any(|existing_item| existing_item["id"].as_str() == item["id"].as_str()) {
-                                                    existing_arr.push(item.clone());
-                                                }
-                                            }
-                                        }
-                                        new_collab_data = existing_val;
-                                    }
-                                }
-                            }
-                        }
-                        if let Ok(data_str) = serde_json::to_string_pretty(&new_collab_data) {
-                            let _ = write_collaborations_file(app, &data_str);
-                        }
-                    }
+            let migration = collab_path.and_then(|collab_path| {
+                migrate_legacy_config_value(
+                    path,
+                    value,
+                    collab_path.as_deref(),
+                    |target_path, legacy_items| {
+                        merge_legacy_collaborations_at_path(target_path, legacy_items, |target, contents| {
+                            let private_path = path.parent().ok_or("无法定位本机凭据目录")?
+                                .join("collaboration-credentials.json");
+                            let shared = collaboration_credentials::save_and_redact(contents, &private_path, key)?;
+                            atomic_write(target, &shared)
+                        })
+                    },
+                    |config_path, config| save_migrated_config_atomic(key, config_path, config),
+                )
+            });
+
+            return match migration {
+                Ok(mut config) => {
+                    decrypt_config_password(key, &mut config);
+                    config
                 }
-            }
-            // 移出 config 中的 collaborations 字段并重新保存
-            if let Some(obj) = val.as_object_mut() {
-                obj.remove("collaborations");
-                if let Ok(cleaned_config) = serde_json::from_value::<AppConfig>(serde_json::Value::Object(obj.clone())) {
-                    let _ = save_config(app, &cleaned_config);
-                    return cleaned_config;
+                Err(error) => {
+                    log::error!("旧协作配置迁移失败，保留原配置以便重试：{error}");
+                    let mut config = serde_json::from_str::<AppConfig>(&data).unwrap_or_default();
+                    decrypt_config_password(key, &mut config);
+                    config
                 }
-            }
+            };
         }
     }
 
@@ -322,13 +637,13 @@ pub fn load_config(app: &AppHandle) -> AppConfig {
         if !stored_pass.is_empty() {
             if stored_pass.starts_with("ENC:") {
                 // 已加密，解密为内存中的明文
-                config.webdav_password = Some(decrypt_password(app, stored_pass));
+                config.webdav_password = Some(decrypt_password_with_key(key, stored_pass));
             } else {
                 // 明文旧数据，加密后回写磁盘（迁移）
-                let encrypted = encrypt_password(app, stored_pass);
+                let encrypted = encrypt_password_with_key(key, stored_pass);
                 let mut disk_config = config.clone();
                 disk_config.webdav_password = Some(encrypted);
-                let _ = save_config_raw(app, &disk_config);
+                let _ = save_config_value_at_path(path, &disk_config);
                 // config 中保持明文供调用方使用
             }
         }
@@ -337,25 +652,126 @@ pub fn load_config(app: &AppHandle) -> AppConfig {
     config
 }
 
-/// 原始保存：直接将 AppConfig 序列化后写入磁盘，不做加密处理。
-/// 仅在内部迁移逻辑中使用（调用方已自行处理加密）。
-fn save_config_raw(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
-    let path = get_config_path(app)?;
-    let data = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    fs::write(&path, data).map_err(|e| e.to_string())
+fn decrypt_config_password(key: &[u8; 32], config: &mut AppConfig) {
+    if let Some(stored_pass) = config.webdav_password.as_deref() {
+        if stored_pass.starts_with("ENC:") {
+            config.webdav_password = Some(decrypt_password_with_key(key, stored_pass));
+        }
+    }
+}
+
+fn merge_legacy_collaborations_at_path(
+    path: &Path,
+    legacy_items: &[serde_json::Value],
+    write_file: impl FnOnce(&Path, &str) -> Result<(), String>,
+) -> Result<(), String> {
+    let _guard = acquire_lock(path, true)?;
+    let mut target = if path.exists() {
+        let existing = fs::read_to_string(path).map_err(|e| format!("Failed to read collaborations file: {e}"))?;
+        let parsed: serde_json::Value = serde_json::from_str(&existing)
+            .map_err(|e| format!("Failed to parse collaborations file: {e}"))?;
+        if !parsed["collaborations"].is_array() {
+            return Err("Invalid collaborations file: collaborations must be an array".to_string());
+        }
+        parsed
+    } else {
+        serde_json::json!({
+            "version": 1,
+            "last_updated": get_iso_timestamp(),
+            "collaborations": []
+        })
+    };
+
+    let existing_items = target["collaborations"].as_array_mut()
+        .ok_or_else(|| "Invalid collaborations file: collaborations must be an array".to_string())?;
+    let now = get_iso_timestamp();
+    for item in legacy_items {
+        let mut mapped_item = item.clone();
+        if mapped_item.get("updated_at").is_none() {
+            mapped_item["updated_at"] = serde_json::json!(now);
+        }
+        if mapped_item.get("deleted").is_none() {
+            mapped_item["deleted"] = serde_json::json!(false);
+        }
+        if !existing_items.iter().any(|existing| existing["id"].as_str() == mapped_item["id"].as_str()) {
+            existing_items.push(mapped_item);
+        }
+    }
+
+    let serialized = serde_json::to_string_pretty(&target).map_err(|e| e.to_string())?;
+    write_file(path, &serialized)
+}
+
+fn migrate_legacy_config_value(
+    config_path: &Path,
+    mut raw_config: serde_json::Value,
+    collaborations_path: Option<&Path>,
+    write_collaborations: impl FnOnce(&Path, &[serde_json::Value]) -> Result<(), String>,
+    persist_config: impl FnOnce(&Path, &AppConfig) -> Result<(), String>,
+) -> Result<AppConfig, String> {
+    let legacy_items = raw_config.get("collaborations")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if !legacy_items.is_empty() {
+        let path = collaborations_path.ok_or_else(|| "Failed to resolve collaborations file path".to_string())?;
+        write_collaborations(path, &legacy_items)?;
+    }
+
+    let object = raw_config.as_object_mut()
+        .ok_or_else(|| "Invalid config: expected a JSON object".to_string())?;
+    object.remove("collaborations");
+    let config = serde_json::from_value::<AppConfig>(serde_json::Value::Object(object.clone()))
+        .map_err(|e| format!("Failed to parse migrated config: {e}"))?;
+    persist_config(config_path, &config)?;
+    Ok(config)
+}
+
+fn save_migrated_config_atomic(key: &[u8; 32], path: &Path, config: &AppConfig) -> Result<(), String> {
+    let disk_config = config_for_storage(key, config);
+    let serialized = serde_json::to_string_pretty(&disk_config).map_err(|e| e.to_string())?;
+    let _guard = acquire_lock(path, true)?;
+    atomic_write(path, &serialized)
+}
+
+// 普通保存和密码回写均保留迁移源；只有成功迁移的提交入口可以移除它。
+fn save_config_value_at_path(path: &Path, disk_config: &AppConfig) -> Result<(), String> {
+    let _guard = acquire_lock(path, true)?;
+    let mut value = serde_json::to_value(disk_config).map_err(|e| e.to_string())?;
+    match fs::read_to_string(path) {
+        Ok(contents) => {
+            let previous: serde_json::Value = serde_json::from_str(&contents)
+                .map_err(|_| "配置文件无法解析，已保留原文件，未保存设置".to_string())?;
+            if let Some(legacy) = previous.get("collaborations") {
+                value["collaborations"] = legacy.clone();
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("Failed to read config: {error}")),
+    }
+    let data = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
+    atomic_write(path, &data)
 }
 
 /// 保存配置：密码字段会在写入前自动加密。
 /// 调用方传入的 config.webdav_password 应为明文。
 pub fn save_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    save_config_at_path(&get_config_path(app)?, &derive_local_key(app), config)
+}
+
+fn save_config_at_path(path: &Path, key: &[u8; 32], config: &AppConfig) -> Result<(), String> {
+    save_config_value_at_path(path, &config_for_storage(key, config))
+}
+
+fn config_for_storage(key: &[u8; 32], config: &AppConfig) -> AppConfig {
     let mut disk_config = config.clone();
     // 加密密码后写入磁盘
     if let Some(ref pass) = disk_config.webdav_password {
         if !pass.is_empty() && !pass.starts_with("ENC:") {
-            disk_config.webdav_password = Some(encrypt_password(app, pass));
+            disk_config.webdav_password = Some(encrypt_password_with_key(key, pass));
         }
     }
-    save_config_raw(app, &disk_config)
+    disk_config
 }
 
 #[tauri::command]
@@ -505,6 +921,8 @@ fn build_collaborations_webdav_conn(config: &AppConfig) -> Result<WebDavConn, St
 
 #[tauri::command]
 pub async fn sync_collaborations_to_cloud(app: AppHandle, data: String) -> Result<(), String> {
+    // 在最终网络出口统一剥离密码，包括旧客户端格式和已删除记录。
+    let data = collaboration_credentials::shared(&data)?;
     let config = load_config(&app);
     let conn = build_collaborations_webdav_conn(&config)?;
     let client = app.state::<WebdavHttpClient>().inner().0.clone();
@@ -533,7 +951,8 @@ pub async fn fetch_collaborations_from_cloud(app: AppHandle) -> Result<String, S
         .send().await.map_err(|e| e.to_string())?;
 
     if resp.status().is_success() {
-        resp.text().await.map_err(|e| e.to_string())
+        let data = resp.text().await.map_err(|e| e.to_string())?;
+        collaboration_credentials::shared(&data)
     } else if resp.status().as_u16() == 404 {
         let last_slash = conn.target.rfind('/').unwrap_or(0);
         if last_slash > 0 {
@@ -808,6 +1227,9 @@ fn find_collaboration_source(app: &AppHandle, collab_id: &str) -> Result<Collabo
             }
             // 解密磁盘上的加密密码
             c.webdav_password = decrypt_password(app, &c.webdav_password);
+            if c.webdav_password.is_empty() {
+                return Err("请在此设备重新导入该清单的分享码，以启用访问".into());
+            }
             return Ok(c);
         }
     }
