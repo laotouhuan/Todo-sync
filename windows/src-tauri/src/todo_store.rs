@@ -7,6 +7,7 @@ use std::time::Duration;
 use fs2::FileExt;
 
 use crate::{WebdavHttpClient, GithubHttpClient};
+use crate::CollaborationHttpClient;
 use base64::Engine;
 use std::time::SystemTime;
 
@@ -19,6 +20,8 @@ use rand::Rng;
 
 #[path = "collaboration_credentials.rs"]
 mod collaboration_credentials;
+#[path = "collaboration_access.rs"]
+mod collaboration_access;
 
 // 常量定义
 const MAX_BACKUP_COUNT: usize = 5;
@@ -548,6 +551,10 @@ pub fn read_collaborations_file(app: &AppHandle) -> Result<String, String> {
         return Ok("{\"version\":1,\"last_updated\":\"\",\"collaborations\":[]}".to_string());
     }
     let _guard = acquire_lock(&path, true)?;
+    read_collaborations_unlocked(app, &path)
+}
+
+fn read_collaborations_unlocked(app: &AppHandle, path: &Path) -> Result<String, String> {
     let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let private_path = collaboration_credentials_path(app)?;
     let shared = collaboration_credentials::save_and_redact(&data, &private_path, &derive_local_key(app))?;
@@ -560,6 +567,10 @@ pub fn read_collaborations_file(app: &AppHandle) -> Result<String, String> {
 pub fn write_collaborations_file(app: &AppHandle, data: &str) -> Result<(), String> {
     let path = get_collaborations_path(app)?;
     let _guard = acquire_lock(&path, true)?;
+    write_collaborations_unlocked(app, &path, data)
+}
+
+fn write_collaborations_unlocked(app: &AppHandle, path: &Path, data: &str) -> Result<(), String> {
     let private_path = collaboration_credentials_path(app)?;
     let shared = collaboration_credentials::save_and_redact(data, &private_path, &derive_local_key(app))?;
     atomic_write(&path, &shared)
@@ -1296,142 +1307,102 @@ pub fn decrypt_share_code(
     Ok(v)
 }
 
-#[tauri::command]
-pub fn generate_share_code(app: AppHandle, expire_days: Option<u32>) -> Result<(String, String), String> {
-    let config = load_config(&app);
+fn share_payload(config: &AppConfig, exp: i64) -> Result<collaboration_access::SharePayload, String> {
     if config.sync_mode.as_deref() != Some("webdav") {
         return Err("请先配置 WebDAV 同步模式".into());
     }
-    let user = config.webdav_username.as_deref().filter(|s| !s.is_empty())
-        .ok_or("WebDAV 账号为空")?;
-    let pass = config.webdav_password.as_deref().filter(|s| !s.is_empty())
-        .ok_or("WebDAV 密码为空")?;
-    let url = config.webdav_url.as_deref().unwrap_or("https://dav.jianguoyun.com/dav/");
-    let path = config.webdav_filepath.as_deref()
-        .filter(|s| !s.is_empty()).unwrap_or("我的坚果云/to-do/todo_data.json");
-    let exp: i64 = match expire_days {
-        Some(d) => SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as i64
-            + (d as i64) * 86400,
-        None => 0,
-    };
-    
-    // 1. 生成 12 位随机提取密钥 (A-Z, a-z, 0-9)
-    let charset: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let mut rng = rand::thread_rng();
-    let key_str: String = (0..12)
-        .map(|_| {
-            let idx = rng.gen_range(0..charset.len());
-            charset[idx] as char
-        })
-        .collect();
-
-    // 2. 从密钥字符串派生 256 位密钥 (SHA-256)
-    let mut hasher = Sha256::new();
-    hasher.update(key_str.as_bytes());
-    let key_bytes = hasher.finalize();
-
-    // 3. 构建待加密的明文 JSON
-    let json = serde_json::json!({ "url": url, "user": user, "pass": pass, "path": path, "exp": exp });
-    let plaintext = serde_json::to_string(&json).unwrap();
-
-    // 4. AES-GCM-256 加密
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes).map_err(|e| e.to_string())?;
-    
-    // 生成 12 字节随机 IV
-    let mut iv = [0u8; 12];
-    rng.fill(&mut iv);
-    let nonce = Nonce::from_slice(&iv);
-
-    let ciphertext_with_tag = cipher.encrypt(nonce, plaintext.as_bytes())
-        .map_err(|e| format!("加密错误: {}", e))?;
-
-    // 5. 拼接结构: IV (12 字节) + Ciphertext + Tag
-    let mut packed = Vec::with_capacity(iv.len() + ciphertext_with_tag.len());
-    packed.extend_from_slice(&iv);
-    packed.extend_from_slice(&ciphertext_with_tag);
-
-    // 6. Base64 编码并加上 tdsync:// 前缀
-    let base64_str = base64::engine::general_purpose::STANDARD.encode(&packed);
-    let share_code = format!("tdsync://{}", base64_str);
-
-    Ok((share_code, key_str))
+    Ok(collaboration_access::SharePayload {
+        url: config.webdav_url.clone().unwrap_or_else(|| "https://dav.jianguoyun.com/dav/".into()),
+        user: config.webdav_username.clone().unwrap_or_default(),
+        pass: config.webdav_password.clone().unwrap_or_default(),
+        path: config.webdav_filepath.clone().unwrap_or_else(|| "我的坚果云/to-do/todo_data.json".into()),
+        exp,
+    })
 }
 
 #[tauri::command]
-pub fn import_share_code(
+pub async fn generate_share_code(app: AppHandle, expire_days: Option<u32>) -> Result<(String, String), String> {
+    let exp = expire_days.map(|d| SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default().as_secs() as i64 + i64::from(d) * 86400).unwrap_or(0);
+    let snapshot = share_payload(&load_config(&app), exp)?;
+    let expected = snapshot.clone();
+    let client = app.state::<CollaborationHttpClient>().inner().0.clone();
+    collaboration_access::generate(&client, snapshot, ||
+        share_payload(&load_config(&app), exp).map(|current| current == expected).unwrap_or(false)
+    ).await
+}
+
+#[tauri::command]
+pub async fn import_share_code(
     app: AppHandle,
     code: String,
     key: String,
     name: String
 ) -> Result<CollaborationSource, String> {
-    // 1. 解密
-    let decrypted = decrypt_share_code(code, key)?;
-    let url = decrypted["url"].as_str().ok_or("缺少 url")?.to_string();
-    let user = decrypted["user"].as_str().ok_or("缺少 user")?.to_string();
-    let pass = decrypted["pass"].as_str().ok_or("缺少 pass")?.to_string();
-    let path = decrypted["path"].as_str().ok_or("缺少 path")?.to_string();
-    let exp = decrypted["exp"].as_i64().unwrap_or(0);
-    if !url.starts_with("https://") { return Err("URL 必须使用 https".into()); }
-
-    // 2. 加锁读取现有的 collaborations.json
-    let collab_path = get_collaborations_path(&app)?;
-    let mut collab_data = if collab_path.exists() {
-        let content = read_collaborations_file(&app)?;
-        serde_json::from_str::<serde_json::Value>(&content).unwrap_or(serde_json::json!({
-            "version": 1,
-            "last_updated": "",
-            "collaborations": []
-        }))
-    } else {
-        serde_json::json!({
-            "version": 1,
-            "last_updated": "",
-            "collaborations": []
-        })
-    };
-
-    let collabs = collab_data["collaborations"].as_array_mut().ok_or("数据损坏")?;
-    
-    // 3. 查重并合并 (LWW)
-    let now_iso = get_iso_timestamp();
-    let mut result = None;
-    if let Some(existing) = collabs.iter_mut().find(|c| {
-        c["webdav_url"].as_str() == Some(&url)
-            && c["webdav_username"].as_str() == Some(&user)
-            && c["webdav_filepath"].as_str() == Some(&path)
-    }) {
-        existing["webdav_password"] = serde_json::json!(encrypt_password(&app, &pass));
-        existing["expire_at"] = if exp == 0 { serde_json::Value::Null } else { serde_json::json!(exp) };
-        existing["updated_at"] = serde_json::json!(now_iso);
-        existing["deleted"] = serde_json::json!(false);
-        existing["name"] = serde_json::json!(name);
-        
-        let src: CollaborationSource = serde_json::from_value(existing.clone()).map_err(|e| e.to_string())?;
-        result = Some(src);
-    } else {
-        let src = CollaborationSource {
-            id: uuid::Uuid::new_v4().to_string(),
-            name,
-            webdav_url: url,
-            webdav_username: user,
-            webdav_password: encrypt_password(&app, &pass),
-            webdav_filepath: path,
-            expire_at: if exp == 0 { None } else { Some(exp) },
-            updated_at: now_iso.clone(),
-            deleted: false,
+    if name.trim().is_empty() { return Err("请为协作清单命名".into()); }
+    let payload = collaboration_access::decode(code, key)?;
+    let client = app.state::<CollaborationHttpClient>().inner().0.clone();
+    collaboration_access::import(&client, payload, |payload| {
+        let collaboration_access::SharePayload { url, user, pass, path, exp } = payload;
+        // 验证后重新读取最新文件；同一把锁覆盖整个提交。
+        let collab_path = get_collaborations_path(&app)?;
+        let _guard = acquire_lock(&collab_path, true)?;
+        let mut collab_data = if collab_path.exists() {
+            let content = read_collaborations_unlocked(&app, &collab_path)?;
+            serde_json::from_str::<serde_json::Value>(&content).unwrap_or(serde_json::json!({
+                "version": 1,
+                "last_updated": "",
+                "collaborations": []
+            }))
+        } else {
+            serde_json::json!({
+                "version": 1,
+                "last_updated": "",
+                "collaborations": []
+            })
         };
-        collabs.push(serde_json::to_value(&src).unwrap());
-        result = Some(src);
-    }
 
-    collab_data["last_updated"] = serde_json::json!(now_iso);
-    
-    // 4. 写回 collaborations.json
-    let data_str = serde_json::to_string_pretty(&collab_data).map_err(|e| e.to_string())?;
-    write_collaborations_file(&app, &data_str)?;
+        let collabs = collab_data["collaborations"].as_array_mut().ok_or("数据损坏")?;
 
-    Ok(result.unwrap())
+        // 3. 查重并合并 (LWW)
+        let now_iso = get_iso_timestamp();
+        let result = if let Some(existing) = collabs.iter_mut().find(|c| {
+            c["webdav_url"].as_str() == Some(&url)
+                && c["webdav_username"].as_str() == Some(&user)
+                && c["webdav_filepath"].as_str() == Some(&path)
+        }) {
+            existing["webdav_password"] = serde_json::json!(encrypt_password(&app, &pass));
+            existing["expire_at"] = if exp == 0 { serde_json::Value::Null } else { serde_json::json!(exp) };
+            existing["updated_at"] = serde_json::json!(now_iso);
+            existing["deleted"] = serde_json::json!(false);
+            existing["name"] = serde_json::json!(name);
+
+            let src: CollaborationSource = serde_json::from_value(existing.clone()).map_err(|e| e.to_string())?;
+            src
+        } else {
+            let src = CollaborationSource {
+                id: uuid::Uuid::new_v4().to_string(),
+                name,
+                webdav_url: url,
+                webdav_username: user,
+                webdav_password: encrypt_password(&app, &pass),
+                webdav_filepath: path,
+                expire_at: if exp == 0 { None } else { Some(exp) },
+                updated_at: now_iso.clone(),
+                deleted: false,
+            };
+            collabs.push(serde_json::to_value(&src).unwrap());
+            src
+        };
+
+        collab_data["last_updated"] = serde_json::json!(now_iso);
+
+        // 4. 写回 collaborations.json
+        let data_str = serde_json::to_string_pretty(&collab_data).map_err(|e| e.to_string())?;
+        write_collaborations_unlocked(&app, &collab_path, &data_str)?;
+
+        Ok(result)
+    }).await
 }
 
 #[tauri::command]
@@ -1472,37 +1443,8 @@ pub fn delete_collaboration(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn read_collaboration_todos(app: AppHandle, collab_id: String) -> Result<CollabReadResult, String> {
     let collab = find_collaboration_source(&app, &collab_id)?;
-    let target = build_collab_url(&collab);
-    let client = app.state::<WebdavHttpClient>().inner().0.clone();
-    let resp = client.get(&target)
-        .basic_auth(&collab.webdav_username, Some(&collab.webdav_password))
-        .send().await.map_err(|e| format!("网络错误：{e}"))?;
-    let server_time = resp.headers().get("date")
-        .and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-    
-    // 过期校验（用服务器时间）
-    if let Some(exp) = collab.expire_at {
-        if !server_time.is_empty() {
-            if let Ok(dt) = httpdate::parse_http_date(&server_time) {
-                let secs = dt.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
-                if secs > exp { return Err("EXPIRED".into()); }
-            } else {
-                return Err("无法验证服务器安全时间，授权已锁定".into());
-            }
-        } else {
-            return Err("无法验证服务器安全时间，授权已锁定".into());
-        }
-    }
-    
-    match resp.status().as_u16() {
-        200..=299 => Ok(CollabReadResult {
-            data: resp.text().await.map_err(|e| e.to_string())?,
-            server_time
-        }),
-        401 => Err("凭据无效或已被撤销".into()),
-        404 => Err("对方待办数据文件不存在".into()),
-        s => Err(format!("WebDAV 错误：{s}")),
-    }
+    let client = app.state::<CollaborationHttpClient>().inner().0.clone();
+    collaboration_access::read(&client, &collab).await
 }
 
 #[tauri::command]
@@ -1511,33 +1453,12 @@ pub async fn write_collaboration_todo(
 ) -> Result<(), String> {
     let collab = find_collaboration_source(&app, &collab_id)?;
     let target = build_collab_url(&collab);
-    let client = app.state::<WebdavHttpClient>().inner().0.clone();
-    
-    // 1. 拉取
-    let resp = client.get(&target)
-        .basic_auth(&collab.webdav_username, Some(&collab.webdav_password))
-        .send().await.map_err(|e| format!("拉取失败：{e}"))?;
-        
-    // 过期校验
-    if let Some(exp) = collab.expire_at {
-        if let Some(dh) = resp.headers().get("date").and_then(|v| v.to_str().ok()) {
-            if let Ok(dt) = httpdate::parse_http_date(dh) {
-                let s = dt.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
-                if s > exp { return Err("EXPIRED".into()); }
-            } else {
-                return Err("无法验证服务器安全时间，授权已锁定".into());
-            }
-        } else {
-            return Err("无法验证服务器安全时间，授权已锁定".into());
-        }
-    }
-    
-    if !resp.status().is_success() { return Err(format!("拉取失败：{}", resp.status())); }
-    let body = resp.text().await.map_err(|e| e.to_string())?;
-    
+    let client = app.state::<CollaborationHttpClient>().inner().0.clone();
+    let body = collaboration_access::read(&client, &collab).await?.data;
+
     // 2. 追加
     let mut doc: serde_json::Value = serde_json::from_str(&body)
-        .unwrap_or(serde_json::json!({"version":1,"last_updated":"","todos":[]}));
+        .map_err(|_| "对方待办文件格式无效，请检查同步文件")?;
     let new_todo: serde_json::Value = serde_json::from_str(&todo_json)
         .map_err(|e| format!("todo JSON 无效：{e}"))?;
         
@@ -1549,19 +1470,16 @@ pub async fn write_collaboration_todo(
         todos.push(new_todo);
     }
     
-    doc["last_updated"] = serde_json::Value::String(
-        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap().as_secs().to_string()
-    );
+    doc["last_updated"] = serde_json::Value::String(get_iso_timestamp());
     
     // 3. 上传
     let updated = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
     let put = client.put(&target)
         .basic_auth(&collab.webdav_username, Some(&collab.webdav_password))
         .header("Content-Type", "application/json; charset=utf-8")
-        .body(updated).send().await.map_err(|e| format!("上传失败：{e}"))?;
+        .body(updated).send().await.map_err(|_| "无法连接对方服务器，请检查地址和网络后重试。")?;
         
-    if put.status().is_success() { Ok(()) } else { Err(format!("上传失败：{}", put.status())) }
+    collaboration_access::http_status(put.status().as_u16())
 }
 
 fn build_collab_url(collab: &CollaborationSource) -> String {

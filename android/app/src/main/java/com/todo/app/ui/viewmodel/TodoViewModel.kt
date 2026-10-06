@@ -56,15 +56,19 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
 
     val collaborations: StateFlow<List<com.todo.app.data.model.CollaborationSource>> = repository.collaborations
 
-    fun importCollaboration(code: String, key: String, name: String) {
-        viewModelScope.launch {
-            val res = repository.importCollaboration(code, key, name)
-            if (res.isFailure) {
-                _uiEvent.emit("导入失败: ${res.exceptionOrNull()?.message ?: "未知错误"}")
-            } else {
-                _uiEvent.emit("协作清单导入成功")
+    suspend fun importCollaboration(code: String, key: String, name: String): Boolean {
+        val res = repository.importCollaboration(code, key, name)
+        if (res.isFailure) {
+            val error = res.exceptionOrNull()?.message ?: "未知错误"
+            _uiEvent.emit("导入失败: ${if (error == "EXPIRED") "授权已过期，请联系对方重新生成。" else error}")
+        } else {
+            val source = res.getOrThrow()
+            if ((_activeSource.value as? ActiveSource.Collaboration)?.collab?.id == source.id) {
+                switchToCollaboration(source)
             }
+            _uiEvent.emit("协作清单已验证并导入")
         }
+        return res.isSuccess
     }
 
     fun deleteCollaboration(id: String) {
@@ -86,8 +90,10 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
 
     private val _collabError = MutableStateFlow<String?>(null)
     val collabError: StateFlow<String?> = _collabError.asStateFlow()
+    private var collabRequest = 0L
 
     fun switchToPersonal() {
+        collabRequest++
         _activeSource.value = ActiveSource.Personal
         _collabData.value = null
         _collabError.value = null
@@ -101,11 +107,13 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     }
 
     fun loadCollabData(collab: com.todo.app.data.model.CollaborationSource) {
+        if ((_activeSource.value as? ActiveSource.Collaboration)?.collab != collab) return
+        val request = ++collabRequest
         viewModelScope.launch {
             _collabLoading.value = true
             _collabError.value = null
             val result = repository.readCollaborationTodos(collab)
-            if ((_activeSource.value as? ActiveSource.Collaboration)?.collab?.id != collab.id) return@launch
+            if (request != collabRequest || (_activeSource.value as? ActiveSource.Collaboration)?.collab != collab) return@launch
             if (result.isSuccess) {
                 _collabData.value = result.getOrNull()?.todos
             } else {
@@ -360,7 +368,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         }
     }
 
-    fun generateShareCode(expireDays: Int?): Pair<String, String> {
+    suspend fun generateShareCode(expireDays: Int?): Pair<String, String> {
         return repository.generateShareCode(expireDays)
     }
 

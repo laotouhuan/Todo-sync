@@ -17,7 +17,7 @@ class CollaborationExpiryTest {
 
     @Test
     fun finiteAuthorizationRequiresParseableServerTime() {
-        val locked = "无法校验网络安全时间，授权已锁定"
+        val locked = "无法验证授权有效期，请稍后重试。"
         assertEquals(locked, collaborationExpiryFailure(serverEpoch, ""))
         assertEquals(locked, collaborationExpiryFailure(serverEpoch, "invalid"))
     }

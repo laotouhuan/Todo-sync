@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -55,7 +57,7 @@ import com.todo.app.data.model.evaluateReminderRule
 import com.todo.app.data.model.renderReminderTemplate
 import java.util.UUID
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsView(viewModel: TodoViewModel) {
     var serverUrl by remember { mutableStateOf(viewModel.configManager.webDavUrl) }
@@ -78,6 +80,17 @@ fun SettingsView(viewModel: TodoViewModel) {
 
     var shareCodeOutput by remember { mutableStateOf("") }
     var shareKeyOutput by remember { mutableStateOf("") }
+    var generatingShare by remember { mutableStateOf(false) }
+    var importingShare by remember { mutableStateOf(false) }
+    var shareRevision by remember { mutableStateOf(0) }
+    fun clearShareOutput() {
+        shareRevision++
+        shareCodeOutput = ""
+        shareKeyOutput = ""
+    }
+    fun hasUnsavedConnection() = serverUrl != viewModel.configManager.webDavUrl ||
+        username != viewModel.configManager.username || appPassword != viewModel.configManager.appPassword ||
+        filePath != viewModel.configManager.filePath
     var shareExpireDays by remember { mutableStateOf(0) } // 0: 永久, 7: 7天, 30: 30天
 
     var importCodeInput by remember { mutableStateOf("") }
@@ -230,7 +243,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                         ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text("默认截止日期 (新建无 @ 待办时)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                                Row(
+                                FlowRow(
                                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
@@ -246,7 +259,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                                 Spacer(modifier = Modifier.height(16.dp))
 
                                 Text("新待办默认插入位置", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                                Row(
+                                FlowRow(
                                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
@@ -267,12 +280,12 @@ fun SettingsView(viewModel: TodoViewModel) {
                                     Text("子步骤全部打勾时，自动勾选大任务", Modifier.weight(1f))
                                     Switch(completeParent, { completeParent = it }, enabled = !savingPreferences)
                                 }
-                                Text("默认均不联动，仅对本机生效。", style = MaterialTheme.typography.bodySmall)
+                                Text("默认均不联动，仅对本机生效。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Text("启用任务计时", Modifier.weight(1f))
                                     Switch(timing, { timing = it }, enabled = !savingPreferences)
                                 }
-                                Text("显示计时入口、计时记录和时长统计；关闭后保留已有数据。仅对本机生效。", style = MaterialTheme.typography.bodySmall)
+                                Text("显示计时入口、计时记录和时长统计；关闭后保留已有数据。仅对本机生效。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                         Spacer(modifier = Modifier.height(24.dp))
@@ -391,27 +404,35 @@ fun SettingsView(viewModel: TodoViewModel) {
                                             coroutineScope.launch { snackbarHostState.showSnackbar("请输入协作清单名字") }
                                             return@Button
                                         }
-                                        viewModel.importCollaboration(code, key, name)
-                                        importCodeInput = ""
-                                        importKeyInput = ""
-                                        importNameInput = ""
+                                        importingShare = true
+                                        coroutineScope.launch {
+                                            try {
+                                                if (viewModel.importCollaboration(code, key, name)) {
+                                                    importCodeInput = ""
+                                                    importKeyInput = ""
+                                                    importNameInput = ""
+                                                }
+                                            } finally {
+                                                importingShare = false
+                                            }
+                                        }
                                     },
+                                    enabled = !importingShare,
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = buttonShape,
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary)
                                 ) {
-                                    Text("导入口令并绑定")
+                                    Text(if (importingShare) "正在验证…" else "导入口令并绑定")
                                 }
 
                                 TextDivider("生成我的共享授权口令")
                                 Text("仅分享给可信朋友。授权码包含 WebDAV 凭据，接收者可直接访问该凭据允许访问的文件；只读和有效期限制仅在本应用内生效。撤销访问需在网盘中更换或撤销应用密码。协作密码仅保存在本机；其他设备同步清单信息后，需重新导入分享码才能访问。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.height(8.dp))
-                                Row(
+                                Text("口令有效期：", style = MaterialTheme.typography.bodyMedium)
+                                FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Text("口令有效期：", style = MaterialTheme.typography.bodyMedium)
                                     val expireLabels = listOf("永久", "7天", "30天")
                                     val expireValues = listOf(0, 7, 30)
                                     expireValues.forEachIndexed { idx, days ->
@@ -425,29 +446,41 @@ fun SettingsView(viewModel: TodoViewModel) {
                                 Spacer(Modifier.height(8.dp))
                                 Button(
                                     onClick = {
-                                        if (!viewModel.configManager.isConfigured()) {
+                                        if (hasUnsavedConnection()) {
                                             coroutineScope.launch {
-                                                snackbarHostState.showSnackbar("请先在同步页配置并保存您的 WebDAV 账号")
+                                                snackbarHostState.showSnackbar("连接设置有未保存修改，请先保存")
                                             }
                                             return@Button
                                         }
-                                        try {
-                                            val expireDaysVal = if (shareExpireDays > 0) shareExpireDays else null
-                                            val (code, key) = viewModel.generateShareCode(expireDaysVal)
-                                            shareCodeOutput = code
-                                            shareKeyOutput = key
-                                        } catch (e: Exception) {
-                                            coroutineScope.launch {
-                                                snackbarHostState.showSnackbar("生成口令失败: ${e.message}")
+                                        clearShareOutput()
+                                        val revision = shareRevision
+                                        generatingShare = true
+                                        coroutineScope.launch {
+                                            try {
+                                                val expireDaysVal = if (shareExpireDays > 0) shareExpireDays else null
+                                                val (code, key) = viewModel.generateShareCode(expireDaysVal)
+                                                if (revision == shareRevision && !hasUnsavedConnection()) {
+                                                    shareCodeOutput = code
+                                                    shareKeyOutput = key
+                                                }
+                                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                                throw e
+                                            } catch (e: Exception) {
+                                                val message = if (e.message == "EXPIRED") "授权已过期，请联系对方重新生成。" else e.message
+                                                snackbarHostState.showSnackbar("生成口令失败: $message")
+                                            } finally {
+                                                generatingShare = false
                                             }
                                         }
                                     },
+                                    enabled = !generatingShare,
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = buttonShape,
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                                 ) {
-                                    Text("生成授权口令")
+                                    Text(if (generatingShare) "正在验证…" else "生成授权口令")
                                 }
+                                Text("更换应用密码后请重新生成，并通知接收方重新导入。密码首尾若含空白，请确认它确实属于密码。", style = MaterialTheme.typography.bodySmall)
                                 
                                 if (shareCodeOutput.isNotEmpty()) {
                                     Spacer(Modifier.height(8.dp))
@@ -506,21 +539,21 @@ fun SettingsView(viewModel: TodoViewModel) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 OutlinedTextField(
                                     value = serverUrl,
-                                    onValueChange = { serverUrl = it },
+                                    onValueChange = { serverUrl = it; clearShareOutput() },
                                     label = { Text("WebDAV 服务器地址") },
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 OutlinedTextField(
                                     value = username,
-                                    onValueChange = { username = it },
+                                    onValueChange = { username = it; clearShareOutput() },
                                     label = { Text("坚果云账号 (邮箱)") },
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 OutlinedTextField(
                                     value = appPassword,
-                                    onValueChange = { appPassword = it },
+                                    onValueChange = { appPassword = it; clearShareOutput() },
                                     label = { Text("第三方应用密码") },
                                     visualTransformation = PasswordVisualTransformation(),
                                     modifier = Modifier.fillMaxWidth()
@@ -528,7 +561,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 OutlinedTextField(
                                     value = filePath,
-                                    onValueChange = { filePath = it },
+                                    onValueChange = { filePath = it; clearShareOutput() },
                                     label = { Text("云端文件路径") },
                                     modifier = Modifier.fillMaxWidth()
                                 )
@@ -539,6 +572,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                         Button(
                             onClick = {
                                 viewModel.saveConfig(serverUrl, username, appPassword, filePath)
+                                clearShareOutput()
                                 coroutineScope.launch {
                                     snackbarHostState.showSnackbar("连接配置已保存")
                                 }
@@ -565,7 +599,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                                     },
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = buttonShape,
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary)
                                 ) {
                                     Icon(Icons.Filled.List, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
@@ -611,7 +645,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                                         snackbarHostState.showSnackbar("强制拉取已触发，请稍后回首页查看")
                                     }
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)
                             ) { Text("确认覆盖") }
                         },
                         dismissButton = {
@@ -741,7 +775,7 @@ private fun ReminderSettingsPanel(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("开启提醒功能", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("开启提醒功能", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Switch(
                     checked = enabled,
                     onCheckedChange = { isChecked ->
@@ -801,7 +835,10 @@ private fun ReminderSettingsPanel(
                         onDismissRequest = { showPermissionDialog = false },
                         title = { Text("提醒权限检测", fontWeight = FontWeight.Bold) },
                         text = {
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(
+                                modifier = Modifier.verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
                                 Text(
                                     "为保证提醒能准时到达，请确保以下系统权限已开启：",
                                     style = MaterialTheme.typography.bodySmall,
@@ -920,7 +957,7 @@ private fun ReminderSettingsPanel(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .background(
-                                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                                        MaterialTheme.colorScheme.surfaceVariant,
                                                         shape = RoundedCornerShape(8.dp)
                                                     )
                                                     .padding(10.dp)
@@ -935,8 +972,8 @@ private fun ReminderSettingsPanel(
                                                     Spacer(Modifier.height(4.dp))
                                                     Text(
                                                         "💡 说明：若直达位置不精准，请根据上述文字路径在设置中找到【自启动】并开启。",
-                                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                                                        color = MaterialTheme.colorScheme.primary
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                                     )
                                                 }
                                             }
@@ -1025,7 +1062,7 @@ private fun ReminderSettingsPanel(
                             viewModel.updateReminderSettings(reminderSettings.copy(globalRules = updatedList))
                         },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary)
                     ) {
                         Text("+ 新增规则")
                     }
@@ -1033,7 +1070,7 @@ private fun ReminderSettingsPanel(
                     Button(
                         onClick = { showPresetDialog = true },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary, contentColor = MaterialTheme.colorScheme.onTertiary)
                     ) {
                         Text("💡 导入预设")
                     }
@@ -1181,6 +1218,7 @@ private fun ReminderSettingsPanel(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GlobalRuleCard(
     rule: com.todo.app.data.model.GlobalReminderRule,
@@ -1220,7 +1258,7 @@ private fun GlobalRuleCard(
                         onCheckedChange = { onUpdate(rule.copy(enabled = it)) }
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text(rule.time, fontWeight = FontWeight.Bold)
+                    Text(rule.time, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
                 }
 
                 Row {
@@ -1241,10 +1279,10 @@ private fun GlobalRuleCard(
                     label = "提醒时间",
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
 
-                Text("触发判定条件", style = MaterialTheme.typography.bodySmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("触发判定条件", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val condOpts = listOf("none_completed" to "未完成任何", "any_remaining" to "存在未完成", "unconditional" to "无条件")
                     condOpts.forEach { (valStr, label) ->
                         FilterChip(
@@ -1253,15 +1291,15 @@ private fun GlobalRuleCard(
                                 localCondition = valStr
                                 updateSmartBody(valStr, localTaskScope)
                             },
-                            label = { Text(label, fontSize = 11.sp) }
+                            label = { Text(label) }
                         )
                     }
                 }
 
                 if (localCondition != "unconditional") {
-                    Spacer(Modifier.height(6.dp))
-                    Text("任务类型筛选", style = MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("任务类型筛选", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         val scopeOpts = listOf("all" to "全部任务", "today_only" to "仅今日任务（含逾期）", "recurring_only" to "仅打卡")
                         scopeOpts.forEach { (valStr, label) ->
                             FilterChip(
@@ -1270,26 +1308,26 @@ private fun GlobalRuleCard(
                                     localTaskScope = valStr
                                     updateSmartBody(localCondition, valStr)
                                 },
-                                label = { Text(label, fontSize = 11.sp) }
+                                label = { Text(label) }
                             )
                         }
                     }
                     Text(
                         text = "💡 说明：所有统计均基于【今日视角】，计算今日的任务情况",
-                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                        color = androidx.compose.ui.graphics.Color(0xFF10B981),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp)
                     )
                 }
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = localTitle,
                     onValueChange = { localTitle = it },
                     label = { Text("通知标题 (留空默认 Todo)") },
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
                 var showVarMenu by remember { mutableStateOf(false) }
 
                 Box(modifier = Modifier.fillMaxWidth()) {
@@ -1323,14 +1361,12 @@ private fun GlobalRuleCard(
                         varList.forEach { (code, label) ->
                             DropdownMenuItem(
                                 text = {
-                                    Row(
+                                    Column(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
-                                        Text(code, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                                        Text(code, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 },
                                 onClick = {
@@ -1363,13 +1399,14 @@ private fun GlobalRuleCard(
                     )
 
                     Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                         shape = RoundedCornerShape(6.dp),
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                     ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Text("✨ 实时效果渲染预览：", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                            Text(previewText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("✨ 实时效果渲染预览：", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                            Text(previewText, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }

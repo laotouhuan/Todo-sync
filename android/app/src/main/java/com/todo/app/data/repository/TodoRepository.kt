@@ -52,7 +52,7 @@ internal fun generateShareCodeKey(random: java.security.SecureRandom = java.secu
 
 internal fun collaborationExpiryFailure(expireAt: Long?, serverTime: String): String? {
     if (expireAt == null) return null
-    if (serverTime.isEmpty()) return "无法校验网络安全时间，授权已锁定"
+    if (serverTime.isEmpty()) return "无法验证授权有效期，请稍后重试。"
 
     return try {
         val epochSeconds = java.time.ZonedDateTime.parse(
@@ -61,7 +61,7 @@ internal fun collaborationExpiryFailure(expireAt: Long?, serverTime: String): St
         ).toEpochSecond()
         if (epochSeconds > expireAt) "EXPIRED" else null
     } catch (_: Exception) {
-        "无法校验网络安全时间，授权已锁定"
+        "无法验证授权有效期，请稍后重试。"
     }
 }
 
@@ -832,8 +832,8 @@ class TodoRepository(private val context: Context) {
                 last_updated = nowIso()
             )
             val json = jsonFormat.encodeToString(updated)
-            val ok = client.uploadFile(collab.webdavFilepath, json)
-            if (ok) Result.success(Unit) else Result.failure(Exception("上传失败"))
+            client.uploadCollaborationFile(collab.webdavFilepath, json)
+            Result.success(Unit)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.e(TAG, "writeCollaborationTodo failed", e)
@@ -841,91 +841,43 @@ class TodoRepository(private val context: Context) {
         }
     }
 
-    fun generateShareCode(expireDays: Int?): Pair<String, String> {
+    private fun sharePayload(expTime: Long = 0L) = com.todo.app.data.model.ShareCodePayload(
+        url = configManager.webDavUrl, user = configManager.username,
+        pass = configManager.appPassword, path = configManager.filePath, exp = expTime
+    )
+
+    suspend fun generateShareCode(expireDays: Int?): Pair<String, String> = withContext(Dispatchers.IO) {
         val expTime = if (expireDays != null && expireDays > 0) {
             (System.currentTimeMillis() / 1000) + expireDays * 86400L
         } else {
             0L
         }
-        val payload = com.todo.app.data.model.ShareCodePayload(
-            url = configManager.webDavUrl,
-            user = configManager.username,
-            pass = configManager.appPassword,
-            path = configManager.filePath,
-            exp = expTime
-        )
-        val json = jsonFormat.encodeToString(payload)
-        val key = generateShareCodeKey()
-
-        // Derivate key via SHA-256
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-        val keyBytes = digest.digest(key.trim().toByteArray(Charsets.UTF_8))
-        val secretKeySpec = javax.crypto.spec.SecretKeySpec(keyBytes, "AES")
-
-        // Generate random 12-byte IV
-        val iv = ByteArray(12)
-        java.security.SecureRandom().nextBytes(iv)
-
-        // AES-GCM-256 encrypt
-        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-        val gcmParameterSpec = javax.crypto.spec.GCMParameterSpec(128, iv)
-        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, secretKeySpec, gcmParameterSpec)
-        
-        val ciphertextWithTag = cipher.doFinal(json.toByteArray(Charsets.UTF_8))
-
-        // Pack IV + ciphertext + tag
-        val packed = ByteArray(12 + ciphertextWithTag.size)
-        System.arraycopy(iv, 0, packed, 0, 12)
-        System.arraycopy(ciphertextWithTag, 0, packed, 12, ciphertextWithTag.size)
-
-        val base64 = android.util.Base64.encodeToString(packed, android.util.Base64.NO_WRAP)
-        return Pair("tdsync://$base64", key)
+        val payload = sharePayload(expTime)
+        CollaborationShareFlow().generate(payload, { sharePayload(expTime) == payload }, ::encryptSharePayload)
     }
 
-    fun decryptShareCode(code: String, keyStr: String): String {
-        val cleanCode = code.removePrefix("tdsync://")
-        val packed = android.util.Base64.decode(cleanCode, android.util.Base64.DEFAULT)
-        
-        if (packed.size < 12 + 16) {
-            throw Exception("授权码数据损坏")
-        }
+    private fun encryptSharePayload(payload: com.todo.app.data.model.ShareCodePayload): Pair<String, String> =
+        ShareCodeCodec.encrypt(payload)
 
-        // 1. 解析出 IV (12字节) 和 密文+Tag
-        val iv = packed.sliceArray(0 until 12)
-        val ciphertextWithTag = packed.sliceArray(12 until packed.size)
-
-        // 2. 从密钥字符串派生密钥 (SHA-256)
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-        val keyBytes = digest.digest(keyStr.trim().toByteArray(Charsets.UTF_8))
-
-        // 3. AES-GCM-256 解密
-        val secretKeySpec = javax.crypto.spec.SecretKeySpec(keyBytes, "AES")
-        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-        val gcmParameterSpec = javax.crypto.spec.GCMParameterSpec(128, iv)
-        cipher.init(javax.crypto.Cipher.DECRYPT_MODE, secretKeySpec, gcmParameterSpec)
-        
-        val decryptedBytes = cipher.doFinal(ciphertextWithTag)
-        return String(decryptedBytes, Charsets.UTF_8)
-    }
+    fun decryptShareCode(code: String, keyStr: String): String = ShareCodeCodec.decrypt(code, keyStr)
 
     suspend fun importCollaboration(code: String, key: String, name: String): Result<com.todo.app.data.model.CollaborationSource> = withContext(Dispatchers.IO) {
         try {
-            val plaintext = decryptShareCode(code, key)
-            val json = Json { ignoreUnknownKeys = true }
-            val payload = json.decodeFromString<com.todo.app.data.model.ShareCodePayload>(plaintext)
-
-            if (!payload.url.startsWith("https://")) {
-                return@withContext Result.failure(Exception("URL 必须使用 https"))
+            val payload = try {
+                val plaintext = decryptShareCode(code.trim(), key)
+                jsonFormat.decodeFromString<com.todo.app.data.model.ShareCodePayload>(plaintext)
+            } catch (_: Exception) {
+                error("分享码或提取密钥不正确，请重新复制完整内容。")
             }
-
-            mutex.withLock {
-                collaborationDataFile.importSource(payload, name, ::enqueueCollaborationSync)
-                    .onFailure { Log.e(TAG, "Import collaboration failed", it) }
+            require(name.isNotBlank()) { "请为协作清单命名" }
+            CollaborationShareFlow().importValidated(payload) {
+                mutex.withLock {
+                    collaborationDataFile.importSource(payload, name, ::enqueueCollaborationSync)
+                }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.e(TAG, "Import collaboration failed", e)
             Result.failure(e)
         }
     }

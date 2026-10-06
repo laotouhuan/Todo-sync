@@ -7,11 +7,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.todo.app.data.model.*
 import com.todo.app.ui.viewmodel.TodoViewModel
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LabelManagerView(viewModel: TodoViewModel) {
     val data by viewModel.todoData.collectAsState()
@@ -44,28 +46,42 @@ fun LabelManagerView(viewModel: TodoViewModel) {
         }
         HorizontalDivider()
         Text(label ?: "未分类", style = MaterialTheme.typography.titleMedium)
-        if (notice.isNotEmpty()) Text(notice)
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        if (notice.isNotEmpty()) Text(notice, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             TextButton(onClick = { selected = members.map { it.id }.toSet() }) { Text("全选") }
             TextButton(onClick = { selected = emptySet() }) { Text("清除选择") }
-            Text("已选 ${selected.size} 个")
+            Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.CenterStart) {
+                Text("已选 ${selected.size} 个", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
-        Row {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             TextButton(enabled = selected.isNotEmpty(), onClick = { propose("批量修改标签", false) }) { Text("批量修改") }
             TextButton(enabled = selected.isNotEmpty(), onClick = { propose("移除所选任务标签", false, true) }) { Text("移除标签") }
         }
-        if (label != null) Row {
+        if (label != null) FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             TextButton(enabled = members.isNotEmpty(), onClick = { propose("重命名 / 合并标签", true) }) { Text("重命名 / 合并") }
             TextButton(enabled = members.isNotEmpty(), onClick = { propose("清空标签（不删除任务）", true, true) }) { Text("清空标签") }
         }
-        if (members.isEmpty()) Text("此标签暂无任务")
+        if (members.isEmpty()) Text("此标签暂无任务", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         members.forEach { todo ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(todo.id in selected, { checked -> selected = if (checked) selected + todo.id else selected - todo.id })
                 TextButton(onClick = { detail = todo }, modifier = Modifier.weight(1f)) {
                     Column(Modifier.fillMaxWidth()) {
-                        Text("${if (todo.completed) "✓ " else ""}${todo.content}")
-                        Text("${todo.date ?: "无日期"} · ${if (todo.completed) "已完成" else "未完成"}", style = MaterialTheme.typography.bodySmall)
+                        Text("${if (todo.completed) "✓ " else ""}${todo.content}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Start)
+                        Text("${todo.date ?: "无日期"} · ${if (todo.completed) "已完成" else "未完成"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Start)
                     }
                 }
             }
@@ -81,9 +97,10 @@ fun LabelManagerView(viewModel: TodoViewModel) {
                     }
                 }
                 val normalized = Learning.label(target)
-                Text("个人清单 · ${pending.expected.size} 个任务 → ${normalized ?: "未分类"}")
-                if (pending.wholeLabel && normalized != null && normalized != pending.label && groups.any { it.label == normalized }) Text("将合并到已有标签")
-                Text("相关计时记录将在统计中按新标签归类，计时时长不变。", style = MaterialTheme.typography.bodySmall)
+                Text("个人清单 · ${pending.expected.size} 个任务 → ${normalized ?: "未分类"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (pending.wholeLabel && normalized != null && normalized != pending.label && groups.any { it.label == normalized }) Text("将合并到已有标签", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("确认后立即保存。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("相关计时记录将在统计中按新标签归类，计时时长不变。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
             }
         }, confirmButton = { TextButton(enabled = !busy, onClick = {
@@ -103,9 +120,9 @@ fun LabelManagerView(viewModel: TodoViewModel) {
     detail?.let { todo ->
         AlertDialog(onDismissRequest = { detail = null }, title = { Text("任务详情") }, text = {
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                Text(todo.content)
-                Text("${todo.date ?: "无日期"} ${todo.time ?: ""} · ${if (todo.completed) "已完成" else "未完成"}")
-                todo.subtasks.forEach { Text("${if (it.completed) "✓" else "○"} ${it.content}") }
+                Text(todo.content, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Start)
+                Text("${todo.date ?: "无日期"} ${todo.time ?: ""} · ${if (todo.completed) "已完成" else "未完成"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Start)
+                todo.subtasks.forEach { Text("${if (it.completed) "✓" else "○"} ${it.content}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Start) }
             }
         }, confirmButton = { TextButton(onClick = { detail = null }) { Text("关闭") } })
     }

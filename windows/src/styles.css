@@ -2339,13 +2339,16 @@ input:checked + .slider:before {
 .settings-large-modal {
   width: calc(100% - 24px);
   max-width: 540px;
+  height: min(560px, 90vh);
   padding: 20px 22px;
 }
 
 .settings-container {
   display: flex;
   gap: 16px;
-  min-height: 330px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .settings-sidebar {
@@ -2357,6 +2360,7 @@ input:checked + .slider:before {
   padding-right: 8px;
   user-select: none;
   flex-shrink: 0;
+  overflow-y: auto;
 }
 
 .settings-tab-btn {
@@ -2374,6 +2378,7 @@ input:checked + .slider:before {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .settings-tab-btn:hover {
@@ -2393,7 +2398,8 @@ input:checked + .slider:before {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  max-height: 340px;
+  min-width: 0;
+  min-height: 0;
   padding-right: 6px;
 }
 
@@ -2408,6 +2414,8 @@ input:checked + .slider:before {
 
 .settings-panel {
   display: none;
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .settings-panel.active {
@@ -2828,3 +2836,194 @@ textarea {
 .label-task > button { flex: 1; text-align: left; overflow-wrap: anywhere; min-width: 100px; }
 #panel-labels > input { width: 100%; box-sizing: border-box; }
 [data-timing-section][hidden] { display: none !important; }
+
+/* 设置及其独立弹窗共用基础控件样式，不改变共用弹窗背景。 */
+:is(#settings-modal, .settings-dialog) {
+  color: var(--text-primary);
+  font-size: .875rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+#settings-modal h3, .settings-footer {
+  flex-shrink: 0;
+}
+
+#settings-modal .settings-footer {
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 0;
+}
+
+#settings-modal .input-group {
+  gap: 8px;
+  min-width: 0;
+}
+
+#settings-modal :is(.settings-panel, #reminder-detail-container, #setting-webdav-group) > .input-group {
+  margin-bottom: 16px;
+}
+
+#settings-modal .input-group label {
+  color: var(--text-primary);
+  font-size: inherit;
+}
+
+#settings-modal .settings-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+#settings-modal :is(.settings-check-row, .label-task) input[type=checkbox] {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 3px 0 0;
+}
+
+:is(#settings-modal, .settings-dialog) input[type=checkbox] {
+  accent-color: var(--accent-color);
+}
+
+:is(#settings-modal, .settings-dialog) :is(input:not([type=checkbox]):not([type=hidden]), select, textarea) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, .25);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+:is(#settings-modal, .settings-dialog) select {
+  appearance: auto;
+  color-scheme: dark;
+}
+
+:is(#settings-modal, .settings-dialog) select option {
+  background: var(--select-option-bg);
+  color: var(--text-primary);
+}
+
+:is(#settings-modal, .settings-dialog) input::placeholder,
+:is(#settings-modal, .settings-dialog) textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: .8;
+}
+
+:is(#settings-modal, .settings-dialog) :is(input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+#settings-modal .switch input:focus-visible + .slider {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+:is(#settings-modal, .settings-dialog) :is(.modal-btn, .learning-button) {
+  min-height: 36px;
+  margin: 0;
+  padding: 7px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+:is(#settings-modal, .settings-dialog) :is(.modal-btn, .learning-button):hover:not(:disabled) {
+  background: rgba(255, 255, 255, .12);
+}
+
+:is(#settings-modal, .settings-dialog) .modal-btn.primary {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+:is(#settings-modal, .settings-dialog) .modal-btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+:is(#settings-modal, .settings-dialog) :is(.modal-btn, .learning-button):disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+#settings-modal .learning-button[aria-pressed=true] {
+  background: rgba(123, 97, 255, .16);
+  border-color: var(--accent-color);
+}
+
+:is(#settings-modal, .settings-dialog) :is(.setting-hint, small) {
+  color: var(--text-secondary);
+  font-size: .8125rem;
+  line-height: 1.5;
+}
+
+#settings-modal .settings-inline-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#settings-modal .settings-inline-row > :is(input, select) {
+  flex: 1 1 120px;
+  width: auto;
+}
+
+#settings-modal .settings-inline-row > .modal-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+#settings-modal .settings-rule-actions {
+  margin: 8px 0;
+}
+
+#settings-modal .settings-compact-btn {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: .8125rem;
+}
+
+#settings-modal .settings-code-output {
+  max-height: 80px;
+  overflow-y: auto;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, .2);
+  font-size: .8125rem;
+  word-break: break-all;
+  user-select: all;
+}
+
+#panel-labels h3 { margin-bottom: 12px; }
+#panel-labels h4 { margin: 16px 0 8px; font-size: inherit; }
+#panel-labels .label-actions > * { min-width: 0; }
+#panel-labels .label-task {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+}
+#panel-labels .label-task > button {
+  min-width: 0;
+  text-align: left;
+}
+#panel-labels .label-task > small { grid-column: 2; }
+
+.settings-dialog p { margin: 10px 0; }
+.settings-dialog > input + select { margin-top: 8px; }
+.settings-dialog .learning-button + .learning-button { margin-left: 8px; }
+
+/* 备份弹窗从设置中打开时位于设置之上。 */
+#backup-modal { z-index: var(--z-modal-confirm); }

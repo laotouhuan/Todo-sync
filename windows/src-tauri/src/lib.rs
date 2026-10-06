@@ -18,6 +18,7 @@ const FILE_POLL_INTERVAL_MS: u64 = 5000;
 
 /// WebDAV 操作使用的共享 HTTP 客户端（15 秒超时）
 pub struct WebdavHttpClient(pub reqwest::Client);
+pub struct CollaborationHttpClient(pub reqwest::Client);
 
 /// GitHub API 操作使用的共享 HTTP 客户端（10 秒超时）
 pub struct GithubHttpClient(pub reqwest::Client);
@@ -232,6 +233,10 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(setup_shortcuts())
         .manage(webdav_client)
+        .manage(CollaborationHttpClient(reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .redirect(reqwest::redirect::Policy::none())
+            .build().expect("Failed to create collaboration HTTP client")))
         .manage(github_client)
         .setup(|app| {
             setup_tray(app)?;

@@ -390,13 +390,19 @@ async function loadData() {
     }
 }
 
+let collabLoadRequest = 0;
+
 async function loadCollabData(collabId) {
+    const request = ++collabLoadRequest;
+    const isCurrent = () => request === collabLoadRequest &&
+        appState.activeSource.type === 'collaboration' && appState.activeSource.id === collabId;
     appState.collabLoading = true;
     appState.collabError = null;
     render(); // 先触发一次渲染展示 Loading 状态
 
     try {
         const result = await invoke("read_collaboration_todos", { collabId: collabId });
+        if (!isCurrent()) return;
         const data = JSON.parse(result.data);
         if (data && data.todos) {
             data.todos.forEach(migrateAndNormalize);
@@ -404,6 +410,7 @@ async function loadCollabData(collabId) {
         appState.collabData = data || { version: 1, last_updated: new Date().toISOString(), todos: [] };
         appState.collabError = null;
     } catch (e) {
+        if (!isCurrent()) return;
         console.error("加载协作清单失败:", e);
         appState.collabData = null;
         if (e === "EXPIRED") {
@@ -412,8 +419,10 @@ async function loadCollabData(collabId) {
             appState.collabError = e || "加载协作清单失败，请检查网络或配置";
         }
     } finally {
-        appState.collabLoading = false;
-        render(); // 加载完成再次渲染
+        if (isCurrent()) {
+            appState.collabLoading = false;
+            render(); // 加载完成再次渲染
+        }
     }
 }
 
@@ -660,7 +669,7 @@ function renderGlobalRules(rules = []) {
                         <span style="font-size: 0.68rem; color: var(--text-secondary);">输入 <code style="color: var(--accent-color); background: rgba(255,255,255,0.1); padding: 0 3px; border-radius: 3px;">{</code> 可快捷插入变量</span>
                     </div>
                     <div style="position: relative;">
-                        <textarea class="rule-body-input" rows="2" style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px; color: var(--text-primary); font-family: inherit; font-size: 0.8rem; line-height: 1.4; resize: none; overflow-y: auto;" placeholder="自定义或使用预设内容，输入 { 可选择变量">${escapeHtml(rule.body || '')}</textarea>
+                        <textarea class="rule-body-input" rows="2" style="resize: none; overflow-y: auto;" placeholder="自定义或使用预设内容，输入 { 可选择变量">${escapeHtml(rule.body || '')}</textarea>
                         <div class="rule-var-autocomplete" style="display: none;"></div>
                     </div>
                     <div class="rule-live-preview" style="display: none;">
@@ -1046,7 +1055,8 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
             cell.title = dateStr;
             grid.appendChild(cell);
         }
-        checkinContainer.appendChild(grid);
+        // 与手机端一致：目标仅一次时不显示打卡方块。
+        if (targetCount !== 1) checkinContainer.appendChild(grid);
     } else if (todo.task_type === 'monthly_checkin') {
         const progressWrapper = document.createElement('div');
         progressWrapper.style.cssText = "display: flex; flex-direction: column; gap: 4px; margin-top: 4px;";
@@ -1071,15 +1081,16 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
             barRow.appendChild(progressText);
         }
 
-        const monthCalendarGrid = document.createElement('div');
-        monthCalendarGrid.className = 'checkin-grid-container compact-checkin-grid';
-        monthCalendarGrid.style.display = appState.expandedTaskIds.has(todo.id) ? 'grid' : 'none';
-        monthCalendarGrid.style.marginTop = '6px';
-
-        renderMonthCalendar(monthCalendarGrid, todo, false, highlightDate);
-
         progressWrapper.appendChild(barRow);
-        progressWrapper.appendChild(monthCalendarGrid);
+        if (targetCount !== 1) {
+            const monthCalendarGrid = document.createElement('div');
+            monthCalendarGrid.className = 'checkin-grid-container compact-checkin-grid';
+            monthCalendarGrid.style.display = appState.expandedTaskIds.has(todo.id) ? 'grid' : 'none';
+            monthCalendarGrid.style.marginTop = '6px';
+
+            renderMonthCalendar(monthCalendarGrid, todo, false, highlightDate);
+            progressWrapper.appendChild(monthCalendarGrid);
+        }
         checkinContainer.appendChild(progressWrapper);
     }
 
@@ -3652,6 +3663,7 @@ function initApp() {
             if (targetPanel) {
                 targetPanel.classList.add('active');
             }
+            document.getElementById('settings-tabs-content').scrollTop = 0;
         });
     });
 
@@ -3661,6 +3673,7 @@ function initApp() {
     const reminderHiddenInput = document.getElementById('setting-reminder-enabled');
 
     function applyReminderToggleVisual(enabled) {
+        document.getElementById('reminder-toggle-btn')?.setAttribute('aria-checked', String(enabled));
         if (reminderToggleTrack) {
             reminderToggleTrack.style.background = enabled ? 'var(--accent-color)' : 'rgba(255,255,255,0.1)';
             reminderToggleTrack.style.borderColor = enabled ? 'var(--accent-color)' : 'rgba(255,255,255,0.2)';
@@ -3715,6 +3728,7 @@ function initApp() {
             if (firstTab) firstTab.classList.add('active');
             const firstPanel = document.getElementById('panel-about');
             if (firstPanel) firstPanel.classList.add('active');
+            document.getElementById('settings-tabs-content').scrollTop = 0;
 
             // 恢复真实的提醒设置并更新 UI
             const rs = appState.todoData?.reminder_settings || { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] };
@@ -3846,6 +3860,7 @@ function initApp() {
             }
 
             await invoke("save_app_config", { config: newConfig });
+            clearShareOutput();
             appState.appConfig = newConfig;
             _lastRenderedHash = ''; learningUI.refresh(); render();
 
@@ -4003,20 +4018,51 @@ function initApp() {
     const shareCodeOutput = document.getElementById('share-code-output');
     const shareKeyOutput = document.getElementById('share-key-output');
     const copyShareKeyBtn = document.getElementById('copy-share-key-btn');
+    let shareRevision = 0;
+    function clearShareOutput() {
+        shareRevision++;
+        shareCodeOutput.textContent = '';
+        shareKeyOutput.textContent = '';
+        shareOutputContainer.style.display = 'none';
+    }
+    function hasUnsavedConnection() {
+        const config = appState.appConfig || {};
+        return settingSyncMode.value !== (config.sync_mode || 'local') ||
+            settingWebdavUrl.value !== (config.webdav_url ?? 'https://dav.jianguoyun.com/dav/') ||
+            settingWebdavUser.value !== (config.webdav_username ?? '') ||
+            settingWebdavPass.value !== (config.webdav_password ?? '') ||
+            settingWebdavFilepath.value !== (config.webdav_filepath ?? '我的坚果云/to-do/todo_data.json');
+    }
+    [settingSyncMode, settingWebdavUrl, settingWebdavUser, settingWebdavPass, settingWebdavFilepath]
+        .forEach(input => input?.addEventListener('input', clearShareOutput));
     
     if (generateShareBtn) {
         generateShareBtn.addEventListener('click', async () => {
+            if (generateShareBtn.disabled) return;
+            if (hasUnsavedConnection()) {
+                showToast('连接设置有未保存修改，请先保存');
+                return;
+            }
+            clearShareOutput();
+            const revision = shareRevision;
+            generateShareBtn.disabled = true;
+            const label = generateShareBtn.textContent;
+            generateShareBtn.textContent = '正在验证…';
             try {
                 const expVal = shareExpireSelect.value;
                 const expireDays = expVal ? parseInt(expVal, 10) : null;
                 const [code, key] = await invoke('generate_share_code', { expireDays: expireDays });
+                if (revision !== shareRevision || hasUnsavedConnection()) return;
                 
                 shareCodeOutput.textContent = code;
                 shareKeyOutput.textContent = key;
                 shareOutputContainer.style.display = 'flex';
-                showToast('授权口令生成成功，已显示在下方，双击可全选复制');
+                showToast('授权口令已验证并生成；更换应用密码后请重新生成并通知接收方导入');
             } catch (err) {
-                showToast('生成失败: ' + err);
+                showToast('生成失败: ' + (err === 'EXPIRED' ? '授权已过期，请联系对方重新生成。' : err));
+            } finally {
+                generateShareBtn.disabled = false;
+                generateShareBtn.textContent = label;
             }
         });
     }
@@ -4055,6 +4101,7 @@ function initApp() {
     
     if (importShareBtn) {
         importShareBtn.addEventListener('click', async () => {
+            if (importShareBtn.disabled) return;
             const code = importCodeInput.value.trim();
             const key = importKeyInput.value.trim();
             const name = importNameInput.value.trim();
@@ -4070,9 +4117,15 @@ function initApp() {
                 showToast('请为该协作清单命名');
                 return;
             }
+            importShareBtn.disabled = true;
+            const label = importShareBtn.textContent;
+            importShareBtn.textContent = '正在验证…';
             try {
-                await invoke('import_share_code', { code: code, key: key, name: name });
-                showToast('协作清单导入成功');
+                const imported = await invoke('import_share_code', { code: code, key: key, name: name });
+                showToast('协作清单已验证并导入');
+                if (appState.activeSource.type === 'collaboration' && appState.activeSource.id === imported.id) {
+                    await loadCollabData(imported.id);
+                }
                 
                 importCodeInput.value = '';
                 importKeyInput.value = '';
@@ -4095,7 +4148,10 @@ function initApp() {
                 renderCollabListInSettings();
                 updateSourceSelector();
             } catch (err) {
-                showToast('导入失败: ' + err);
+                showToast('导入失败: ' + (err === 'EXPIRED' ? '授权已过期，请联系对方重新生成。' : err));
+            } finally {
+                importShareBtn.disabled = false;
+                importShareBtn.textContent = label;
             }
         });
     }
@@ -4560,7 +4616,8 @@ function initApp() {
                 newTodo.label = orig.label || null;
                 newTodo.time = orig.time || null;
                 newTodo.recurring = orig.recurring || 'none';
-                newTodo.order = nowMs - orderOffset * 1000;
+                // 候选已按上期列表排序，递增排序值保持导入后的相同顺序。
+                newTodo.order = nowMs + orderOffset * 1000;
                 newTodo.created_at = new Date(nowMs - orderOffset * 10).toISOString();
                 orderOffset++;
                 newTodo.subtasks = orig.subtasks ? deepClone(orig.subtasks).map(s => {
