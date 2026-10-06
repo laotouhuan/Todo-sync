@@ -3648,6 +3648,9 @@ function initApp() {
     const settingWebdavUser = document.getElementById('setting-webdav-user');
     const settingWebdavPass = document.getElementById('setting-webdav-pass');
     const settingWebdavFilepath = document.getElementById('setting-webdav-filepath');
+    const clearShareOutput = initCollaborationSharing({
+        settingSyncMode, settingWebdavUrl, settingWebdavUser, settingWebdavPass, settingWebdavFilepath
+    });
 
     // 设置选项卡 Tab 物理切换逻辑
     const tabBtns = document.querySelectorAll('.settings-tab-btn');
@@ -3993,7 +3996,8 @@ function initApp() {
         }
     }
 
-    // ====== 协作共享相关事件绑定 ======
+// 协作事件在 DOM 就绪后初始化，显式接收连接输入框，避免跨作用域引用。
+function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWebdavUser, settingWebdavPass, settingWebdavFilepath }) {
     // 1. 清单源切换
     const sourceSelector = document.getElementById('source-selector');
     if (sourceSelector) {
@@ -4155,6 +4159,8 @@ function initApp() {
             }
         });
     }
+    return clearShareOutput;
+}
     // 版本号比较函数 (例如比较 "1.0.1" 和 "1.0.0")
     function compareVersions(v1, v2) {
         // 防御性检查：任意一个无效则视为相等
