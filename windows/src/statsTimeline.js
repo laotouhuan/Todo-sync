@@ -71,8 +71,8 @@ export function clockSegments(part) {
     return result;
 }
 
-export function collectTimerArcs(entries, source, period, target) {
-    const { start, end } = learningRange(period, target), conflicts = overlappingEntries(entries);
+export function collectTimerArcs(entries, source, period, target, conflicts = overlappingEntries(entries)) {
+    const { start, end } = learningRange(period, target);
     return entries.filter(e => !conflicts.has(e.id) && e.task_ref.source_type === source.type &&
         (e.task_ref.source_id ?? null) === (source.type === 'personal' ? null : source.id))
         .flatMap(splitTimeEntry).filter(p => p.date >= start && p.date < end).flatMap(clockSegments);

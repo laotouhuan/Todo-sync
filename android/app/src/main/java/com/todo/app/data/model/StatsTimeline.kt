@@ -41,9 +41,9 @@ object StatsTimeline {
             if (date >= start && date < end) SubtaskEvent(todo, s, date, time) else null
         } }
     }
-    fun arcs(entries: List<TimeEntry>, source: TaskReference, period: String, target: LocalDate, zone: ZoneId = ZoneId.systemDefault()): List<TimerArc> {
+    fun arcs(entries: List<TimeEntry>, source: TaskReference, period: String, target: LocalDate, zone: ZoneId = ZoneId.systemDefault(),
+        conflicts: Set<String> = Learning.overlaps(entries)): List<TimerArc> {
         val (start, end) = Learning.range(period, target)
-        val conflicts = Learning.overlaps(entries)
         return entries.filter { it.id !in conflicts && it.task_ref.source_type == source.source_type && it.task_ref.source_id == source.source_id }
             .flatMap { Learning.split(it, zone) }.filter { it.date >= start && it.date < end }.flatMap { part ->
                 val result = mutableListOf<TimerArc>(); var cursor = part.startedAt

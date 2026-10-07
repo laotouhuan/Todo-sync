@@ -115,6 +115,7 @@ fun TodoApp(viewModel: TodoViewModel) {
         topBar = {
             Column {
                 AppTopBar(viewModel = viewModel, currentRoute = currentRoute)
+                com.todo.app.ui.view.CollaborationSubmissionBanner(viewModel)
                 com.todo.app.ui.view.LearningBanner(viewModel)
             }
         },

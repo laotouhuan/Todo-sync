@@ -136,8 +136,7 @@ export function validateTimeEntry(entry, entries, now = Date.now()) {
     return null;
 }
 
-export function summarizeLearning(entries, start, end, label = undefined) {
-    const conflicts = overlappingEntries(entries);
+export function summarizeLearning(entries, start, end, label = undefined, conflicts = overlappingEntries(entries)) {
     const startTime = new Date(start + 'T00:00:00').getTime();
     const endTime = new Date(end + 'T00:00:00').getTime();
     const relevant = entries.filter(e => !e.deleted && Number.isFinite(Date.parse(e.started_at)) &&

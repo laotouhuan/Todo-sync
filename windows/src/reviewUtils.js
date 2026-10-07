@@ -12,12 +12,12 @@ export function reviewPreview(review) {
     return field ? `${field[1]}：${review[field[0]].split('\n').slice(0, 2).join('\n')}` : '';
 }
 
-export function exportReviews(data, period, target, includeLearning = true, tasks = (data.todos || []).map(todo => ({ todo, ref: taskReference(todo) }))) {
+export function exportReviews(data, period, target, includeLearning = true, tasks = (data.todos || []).map(todo => ({ todo, ref: taskReference(todo) })), conflicts = undefined) {
     const resolved = resolveLearningEntries(data.time_entries || [], tasks);
     const { start, end } = learningRange(period, target);
     const reviews = (data.daily_reviews || []).filter(r => !r.deleted && r.date >= start && r.date < end);
     const dates = new Set(reviews.map(r => r.date));
-    const totals = summarizeLearning(resolved, start, end);
+    const totals = summarizeLearning(resolved, start, end, undefined, conflicts);
     if (includeLearning) totals.parts.forEach(p => dates.add(p.date));
     if (!dates.size) throw new Error('这个时间范围没有可导出的内容');
     const lines = ['# 每日复盘', ''];
@@ -28,7 +28,7 @@ export function exportReviews(data, period, target, includeLearning = true, task
         else lines.push('当日未填写复盘', '');
         if (includeLearning) {
             const range = learningRange('day', date + 'T12:00:00');
-            const summary = summarizeLearning(resolved, range.start, range.end);
+            const summary = summarizeLearning(resolved, range.start, range.end, undefined, conflicts);
             lines.push('### 学习投入', '', `合计：${formatDuration(summary.duration)}，${summary.count} 次。`, '', '| 标签 | 时长 | 次数 |', '| --- | --- | --- |');
             for (const group of summary.groups) lines.push(`| ${group.label.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]/g, ' ')} | ${formatDuration(group.duration)} | ${group.count} |`);
             lines.push('');

@@ -25,12 +25,13 @@ import kotlin.math.*
 @Composable
 fun StatsTimelineLayer(viewModel: TodoViewModel, todos: List<Todo>, period: String, target: LocalDate, showTiming: Boolean,
     onEditTodo: (Todo) -> Unit, sweepProgress: () -> Float, fallbackTap: (Offset) -> Unit, fallbackLongPress: (Offset) -> Unit) {
-    val data by viewModel.todoData.collectAsState()
-    val tasks by viewModel.learningTasks.collectAsState()
+    val learning = currentLearningData(viewModel)
+    val data = learning.data
+    val tasks = learning.tasks
     val source by viewModel.activeSource.collectAsState()
     val ref = if (source is TodoViewModel.ActiveSource.Collaboration) TaskReference("", "collaboration", (source as TodoViewModel.ActiveSource.Collaboration).collab.id) else TaskReference("")
     val resolved = remember(data.timeEntries, tasks) { Learning.resolveEntries(data.timeEntries, tasks) }
-    val arcs = remember(resolved, ref, period, target) { StatsTimeline.arcs(resolved, ref, period, target) }
+    val arcs = remember(resolved, learning.conflicts, ref, period, target) { StatsTimeline.arcs(resolved, ref, period, target, conflicts = learning.conflicts) }
     val timerSweep = rememberClockSweep(showTiming, arcs)
     val steps = remember(todos, period, target) { StatsTimeline.subtasks(todos, period, target) }
     val density = LocalDensity.current
@@ -76,11 +77,13 @@ fun StatsTimelineLayer(viewModel: TodoViewModel, todos: List<Todo>, period: Stri
 
 @Composable
 fun TimelineLegend(viewModel: TodoViewModel, todos: List<Todo>, period: String, target: LocalDate, showTiming: Boolean, onEditTodo: (Todo) -> Unit) {
-    val timingEnabled by viewModel.timeTrackingEnabled.collectAsState()
-    val data by viewModel.todoData.collectAsState()
+    val personalTimingEnabled by viewModel.timeTrackingEnabled.collectAsState()
+    val timingEnabled = personalTimingEnabled || currentLearningData(viewModel).readOnly
+    val learning = currentLearningData(viewModel)
+    val data = learning.data
     val source by viewModel.activeSource.collectAsState()
     val ref = if (source is TodoViewModel.ActiveSource.Collaboration) TaskReference("", "collaboration", (source as TodoViewModel.ActiveSource.Collaboration).collab.id) else TaskReference("")
-    val arcs = remember(data.timeEntries, ref, period, target) { StatsTimeline.arcs(data.timeEntries, ref, period, target) }
+    val arcs = remember(data.timeEntries, learning.conflicts, ref, period, target) { StatsTimeline.arcs(data.timeEntries, ref, period, target, conflicts = learning.conflicts) }
     val undated = remember(todos, period, target) { StatsTimeline.subtasks(todos, period, target).filter { it.time == null } }
     if (showTiming && arcs.isEmpty()) Text("本时段暂无有效计时记录", style = MaterialTheme.typography.bodySmall)
     if (timingEnabled && !showTiming && arcs.isNotEmpty()) Text("可点击“显示计时”查看投入", style = MaterialTheme.typography.bodySmall)

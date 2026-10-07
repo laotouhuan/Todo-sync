@@ -49,7 +49,7 @@ export function bindClockTooltip(mark, title, lines, color, stroke = '#ffffff', 
     mark.addEventListener('click', hide);
 }
 
-export function renderTimeline({ svgEl, todos, entries, source, period, target, filters, openTodo, openRecord, openSubtask, timingEnabled = true }) {
+export function renderTimeline({ svgEl, todos, entries, source, period, target, filters, openTodo, openRecord, openSubtask, timingEnabled = true, conflicts = undefined }) {
     document.querySelectorAll('.timeline-detail').forEach(d => d.close());
     const card = document.getElementById('time-distribution');
     let header = card.querySelector('.timeline-header');
@@ -69,7 +69,7 @@ export function renderTimeline({ svgEl, todos, entries, source, period, target, 
     const type = t => t.recurring === 'daily_repeat' ? 'daily' : t.task_type === 'weekly_checkin' ? 'weekly' : t.task_type === 'monthly_checkin' ? 'monthly' : 'normal';
     const colors = { normal: '#10B981', daily: '#F59E0B', weekly: '#6366F1', monthly: '#F43F5E' };
     const steps = collectSubtaskEvents(todos.filter(t => filters[type(t)] !== false), period, target);
-    const arcs = timingEnabled ? collectTimerArcs(entries, source, period, target) : [];
+    const arcs = timingEnabled ? collectTimerArcs(entries, source, period, target, conflicts) : [];
     let note = card.querySelector('.timeline-note');
     if (!note) { note = node('p', ''); note.className = 'timeline-note'; card.append(note); }
     let undated = card.querySelector('.timeline-undated');

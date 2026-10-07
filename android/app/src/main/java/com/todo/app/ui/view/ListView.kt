@@ -312,6 +312,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
     var activeDraggingKey by remember { mutableStateOf<String?>(null) }
     val reorderState = rememberReorderableLazyListState(
         onMove = { from, to ->
+            if (viewModel.activeSource.value is TodoViewModel.ActiveSource.Collaboration) return@rememberReorderableLazyListState
             val toKey = to.key as? String ?: return@rememberReorderableLazyListState
 
             // Set hover state during drag (do NOT expand immediately)
@@ -332,6 +333,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
             }
         },
         onDragEnd = { _, _ ->
+            if (viewModel.activeSource.value is TodoViewModel.ActiveSource.Collaboration) return@rememberReorderableLazyListState
             val droppedHeader = hoveredHeaderKey
             hoveredHeaderKey = null
 
@@ -516,6 +518,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
 
             val reorderStateAllTodos = rememberReorderableLazyListState(
                 onMove = { from, to ->
+                    if (viewModel.activeSource.value is TodoViewModel.ActiveSource.Collaboration) return@rememberReorderableLazyListState
                     val fromKey = from.key as? String ?: return@rememberReorderableLazyListState
                     val toKey = to.key as? String ?: return@rememberReorderableLazyListState
 
@@ -538,6 +541,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                     }
                 },
                 onDragEnd = { _, _ ->
+                    if (viewModel.activeSource.value is TodoViewModel.ActiveSource.Collaboration) return@rememberReorderableLazyListState
                     val updatedList = mutableListOf<Todo>()
                     var currentNoDateIndex = 0.0
                     var currentFutureIndex = 0.0
@@ -610,7 +614,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
             if (selectedTab == 0) {
                 LazyColumn(
                     state = reorderState.listState,
-                    modifier = Modifier.reorderable(reorderState).fillMaxSize().padding(horizontal = 16.dp)
+                    modifier = (if (isReadOnly) Modifier else Modifier.reorderable(reorderState)).fillMaxSize().padding(horizontal = 16.dp)
                 ) {
                     items(items = reorderableFocusItems, key = { it.key }) { item ->
                         ReorderableItem(reorderableState = reorderState, key = item.key) { isDragging ->
@@ -627,7 +631,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                                         )
                                     }
                                     is FocusItem.Task -> {
-                                        Box(modifier = Modifier.detectReorderAfterLongPress(reorderState)) {
+                                        Box(modifier = if (isReadOnly) Modifier else Modifier.detectReorderAfterLongPress(reorderState)) {
                                             TodoItemRow(
                                                 todo = item.todo,
                                                 viewModel = viewModel,
@@ -673,7 +677,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
 
                     LazyColumn(
                         state = reorderStateAllTodos.listState,
-                        modifier = Modifier.reorderable(reorderStateAllTodos).weight(1f).fillMaxWidth()
+                        modifier = (if (isReadOnly) Modifier else Modifier.reorderable(reorderStateAllTodos)).weight(1f).fillMaxWidth()
                     ) {
                         if (allTabMode == "uncompleted") {
                             items(items = reorderableAllTodosItems, key = { it.key }) { item ->
@@ -691,7 +695,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                                                 )
                                             }
                                             is AllTodoItem.Task -> {
-                                                Box(modifier = Modifier.detectReorderAfterLongPress(reorderStateAllTodos)) {
+                                                Box(modifier = if (isReadOnly) Modifier else Modifier.detectReorderAfterLongPress(reorderStateAllTodos)) {
                                                     TodoItemRow(
                                                         todo = item.todo,
                                                         viewModel = viewModel,
@@ -840,12 +844,13 @@ fun ClassicListView(viewModel: TodoViewModel) {
             }
         }
 
+        val editSource = remember(todo.id) { viewModel.activeSource.value }
         EditTodoDialog(
             viewModel = viewModel,
             todo = todo,
             onDismiss = { showEditDialogFor = null },
             onConfirm = { updated ->
-                viewModel.saveEditedTodo(updated)
+                viewModel.saveEditedTodo(updated, editSource)
                 showEditDialogFor = null
             },
             onDelete = {
@@ -923,7 +928,9 @@ fun TodoItemRow(
             .padding(vertical = 6.dp)
             .background(Color.Transparent)
     ) {
-        if (!isReadOnly) {
+        if (isReadOnly) {
+            TextButton(onClick = onEdit, modifier = Modifier.align(Alignment.CenterEnd)) { Text("查看详情") }
+        } else {
             Row(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
@@ -955,7 +962,7 @@ fun TodoItemRow(
 
         Card(
             modifier = (if (isReadOnly) {
-                Modifier.fillMaxWidth()
+                Modifier.fillMaxWidth().padding(end = 72.dp)
             } else {
                 Modifier
                     .fillMaxWidth()

@@ -12,11 +12,12 @@ export function editTimelineSubtask(todo, subtask, save) {
         input.type = type; input.value = value; label.append(input); dialog.append(label); return input;
     };
     const content = field('子步骤内容', 'text', subtask.content);
+    content.readOnly = !save;
     const originalTime = subtask.completed_at;
     const date = originalTime ? new Date(originalTime) : null;
     const pad = n => String(n).padStart(2, '0');
     const local = date && !isNaN(date) ? `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` : '';
-    const completed = field('完成时间（无具体时间可留空）', 'datetime-local', local); completed.step = '1';
+    const completed = field('完成时间（无具体时间可留空）', 'datetime-local', local); completed.step = '1'; completed.readOnly = !save;
     const error = element('p'); error.className = 'learning-error'; dialog.append(error);
     const confirm = element('button', '保存'), close = element('button', '取消');
     confirm.className = close.className = 'learning-button';
@@ -30,7 +31,10 @@ export function editTimelineSubtask(todo, subtask, save) {
         } catch (e) { error.textContent = e.message || String(e); }
         finally { confirm.disabled = close.disabled = false; }
     };
-    close.onclick = () => dialog.close(); dialog.append(confirm, close);
+    close.onclick = () => dialog.close();
+    if (save) dialog.append(confirm);
+    else close.textContent = '关闭';
+    dialog.append(close);
     dialog.addEventListener('keydown', e => e.stopPropagation());
     dialog.addEventListener('close', () => dialog.remove()); document.body.append(dialog); dialog.showModal();
 }

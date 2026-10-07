@@ -32,7 +32,8 @@ internal fun TimelineSubtaskPicker(viewModel: TodoViewModel, items: List<Pair<To
 
 @Composable
 internal fun TimelineRecordEditor(viewModel: TodoViewModel, ids: List<String>, onDismiss: () -> Unit) {
-    val data by viewModel.todoData.collectAsState()
+    val learning = currentLearningData(viewModel)
+    val data = learning.data
     val records = data.timeEntries.filter { it.id in ids && !it.deleted }
     var selected by remember(ids) { mutableStateOf(ids.distinct().singleOrNull()) }
     val entry = records.find { it.id == selected }
@@ -50,6 +51,9 @@ internal fun TimelineRecordEditor(viewModel: TodoViewModel, ids: List<String>, o
 @Composable
 internal fun TimelineSubtaskEditor(viewModel: TodoViewModel, todo: Todo, subtask: Subtask, onDismiss: () -> Unit) {
     val source = remember(todo.id, subtask.id) { viewModel.activeSource.value }
+    val learning = currentLearningData(viewModel)
+    val currentSource by viewModel.activeSource.collectAsState()
+    LaunchedEffect(currentSource) { if (currentSource != source) onDismiss() }
     var content by rememberSaveable(todo.id, subtask.id) { mutableStateOf(subtask.content) }
     val originalTime = remember(todo.id, subtask.id) { timelineTime(subtask.completedAt) }
     var time by rememberSaveable(todo.id, subtask.id) { mutableStateOf(originalTime) }
@@ -59,18 +63,18 @@ internal fun TimelineSubtaskEditor(viewModel: TodoViewModel, todo: Todo, subtask
     AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("子步骤详情") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("所属任务：${todo.content}")
-            OutlinedTextField(content, { content = it }, label = { Text("子步骤内容") }, enabled = !busy)
-            OutlinedTextField(time, { time = it }, label = { Text("完成时间（无具体时间可留空）") }, enabled = !busy)
+            OutlinedTextField(content, { content = it }, label = { Text("子步骤内容") }, enabled = !busy, readOnly = learning.readOnly)
+            OutlinedTextField(time, { time = it }, label = { Text("完成时间（无具体时间可留空）") }, enabled = !busy, readOnly = learning.readOnly)
             Text("日期和时间格式：2026-09-10 09:30:00")
             if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
         }
-    }, confirmButton = { TextButton(enabled = !busy, onClick = {
+    }, confirmButton = { if (!learning.readOnly) TextButton(enabled = !busy, onClick = click@ {
+        if (viewModel.activeSource.value != source) { onDismiss(); return@click }
         scope.launch {
             busy = true
             try {
                 require(content.isNotBlank()) { "子步骤内容不能为空" }
-                check(viewModel.activeSource.value == source) { "清单已切换，请重新打开" }
-                val current = viewModel.activeTodos.value.find { it.id == todo.id && !it.deleted }
+                val current = viewModel.todoData.value.todos.find { it.id == todo.id && !it.deleted }
                 check(current != null && current.subtasks.any { it.id == subtask.id }) { "该子步骤已删除" }
                 val completedAt = if (time == originalTime) subtask.completedAt else if (time.isBlank()) null else {
                     try { LocalDateTime.parse(time.trim().replace(' ', 'T')).atZone(ZoneId.systemDefault()).toInstant().toString() }
@@ -78,7 +82,7 @@ internal fun TimelineSubtaskEditor(viewModel: TodoViewModel, todo: Todo, subtask
                 }
                 viewModel.saveEditedTodo(current.copy(subtasks = current.subtasks.map {
                     if (it.id == subtask.id) it.copy(content = content.trim(), completedAt = completedAt) else it
-                }, updatedAt = nowIso()))
+                }, updatedAt = nowIso()), source)
                 onDismiss()
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e

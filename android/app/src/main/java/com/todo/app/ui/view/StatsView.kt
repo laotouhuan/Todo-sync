@@ -159,6 +159,16 @@ private fun MakeupIcon(shape: String, color: Color, dotRadius: androidx.compose.
 
 @Composable
 fun StatsView(viewModel: TodoViewModel) {
+    val source by viewModel.activeSource.collectAsState()
+    val loading by viewModel.collabLoading.collectAsState()
+    val error by viewModel.collabError.collectAsState()
+    if (source is TodoViewModel.ActiveSource.Collaboration && (loading || error != null)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(if (loading) "正在加载协作数据…" else error ?: "无法读取协作数据")
+            if (!loading) TextButton(onClick = { (source as? TodoViewModel.ActiveSource.Collaboration)?.collab?.let(viewModel::loadCollabData) }) { Text("重试读取") }
+        }
+        return
+    }
     var subTab by remember { mutableIntStateOf(0) } // 0 = Insights, 1 = Health
     var showEditDialogFor by remember { mutableStateOf<Todo?>(null) }
 
@@ -180,12 +190,13 @@ fun StatsView(viewModel: TodoViewModel) {
     }
 
     showEditDialogFor?.let { todo ->
+        val editSource = remember(todo.id) { viewModel.activeSource.value }
         EditTodoDialog(
             viewModel = viewModel,
             todo = todo,
             onDismiss = { showEditDialogFor = null },
             onConfirm = { updated -> 
-                viewModel.saveEditedTodo(updated)
+                viewModel.saveEditedTodo(updated, editSource)
                 showEditDialogFor = null
             },
             onDelete = {
@@ -204,7 +215,8 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     var targetDate by remember { mutableStateOf(LocalDate.now()) }
 
     var showTimingPreference by remember { mutableStateOf(viewModel.configManager.statsShowTiming) }
-    val timingEnabled by viewModel.timeTrackingEnabled.collectAsState()
+    val personalTimingEnabled by viewModel.timeTrackingEnabled.collectAsState()
+    val timingEnabled = personalTimingEnabled || currentLearningData(viewModel).readOnly
     val showTiming = timingEnabled && (period == "day" || showTimingPreference)
     var showTaskList by remember { mutableStateOf(false) }
     var expandedFilterMenu by remember { mutableStateOf(false) }

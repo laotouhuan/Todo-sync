@@ -5,6 +5,10 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.todo.app.data.ConfigManager
 import com.todo.app.data.model.Todo
+import com.todo.app.data.model.TodoData
+import com.todo.app.data.model.learningViewData
+import com.todo.app.data.model.requirePersonalTarget
+import com.todo.app.data.model.CollaborationSubmitter
 import com.todo.app.data.model.HealthMetrics
 import com.todo.app.data.model.calculateHealthMetrics
 import com.todo.app.data.model.parseDateSyntax
@@ -20,6 +24,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 
 import java.util.UUID
 import java.time.Instant
@@ -82,6 +87,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         }
     }
 
+    private val _collabSnapshot = MutableStateFlow<Pair<String, TodoData>?>(null)
     private val _collabData = MutableStateFlow<List<Todo>?>(null)
     val collabData: StateFlow<List<Todo>?> = _collabData.asStateFlow()
 
@@ -96,12 +102,14 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         collabRequest++
         _activeSource.value = ActiveSource.Personal
         _collabData.value = null
+        _collabSnapshot.value = null
         _collabError.value = null
         _collabLoading.value = false
     }
 
     fun switchToCollaboration(collab: com.todo.app.data.model.CollaborationSource) {
         _collabData.value = null
+        _collabSnapshot.value = null
         _activeSource.value = ActiveSource.Collaboration(collab)
         loadCollabData(collab)
     }
@@ -109,15 +117,19 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     fun loadCollabData(collab: com.todo.app.data.model.CollaborationSource) {
         if ((_activeSource.value as? ActiveSource.Collaboration)?.collab != collab) return
         val request = ++collabRequest
+        _collabSnapshot.value = null
+        _collabData.value = null
+        _collabLoading.value = true
         viewModelScope.launch {
-            _collabLoading.value = true
             _collabError.value = null
             val result = repository.readCollaborationTodos(collab)
             if (request != collabRequest || (_activeSource.value as? ActiveSource.Collaboration)?.collab != collab) return@launch
             if (result.isSuccess) {
-                _collabData.value = result.getOrNull()?.todos
+                _collabSnapshot.value = collab.id to result.getOrThrow()
+                _collabData.value = result.getOrThrow().todos
             } else {
                 _collabData.value = null
+                _collabSnapshot.value = null
                 val err = result.exceptionOrNull()?.message ?: "未知错误"
                 _collabError.value = if (err == "EXPIRED") {
                     "授权已过期，请联系对方重新生成授权码"
@@ -248,27 +260,41 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
             com.todo.app.data.model.TaskReference(todo.id, "collaboration", source.collab.id)
         else com.todo.app.data.model.TaskReference(todo.id)
     }
-    val learningTasks = kotlinx.coroutines.flow.combine(todoData, collabData, activeSource) { data, collab, source ->
-        data.todos.associateBy { com.todo.app.data.model.TaskReference(it.id) } +
-            if (source is ActiveSource.Collaboration) (collab ?: emptyList()).associateBy {
-                com.todo.app.data.model.TaskReference(it.id, "collaboration", source.collab.id)
-            } else emptyMap()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
-    suspend fun startLearning(todo: Todo) = repository.startLearning(todo, learningReference(todo))
-    suspend fun stopLearning(id: String): Result<Unit> = repository.stopLearning(id).map { discarded ->
-        _discardedShortTimers.value += discarded
-    }
-    suspend fun saveTimeEntry(entry: com.todo.app.data.model.TimeEntry) = repository.saveTimeEntry(entry)
-    suspend fun saveDailyReview(review: com.todo.app.data.model.DailyReview) = repository.saveDailyReview(review)
-    suspend fun saveEditedTodo(todo: Todo) {
-        val source = activeSource.value
-        if (source is ActiveSource.Collaboration) {
-            repository.writeCollaborationTodo(source.collab, todo.copy(updatedAt = com.todo.app.data.model.nowIso())).getOrThrow()
-            _collabData.value = _collabData.value?.map { if (it.id == todo.id) todo else it }
-        } else repository.updateTodo(todo)
-    }
+    val learningViewData = kotlinx.coroutines.flow.combine(todoData, _collabSnapshot, activeSource) { personal, remote, source ->
+        if (source is ActiveSource.Collaboration) learningViewData(
+            remote?.takeIf { it.first == source.collab.id }?.second ?: TodoData(1, "", emptyList()), source.collab.id)
+        else learningViewData(personal)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, learningViewData(TodoData(1, "", emptyList())))
+    val learningTasks = learningViewData.map { it.tasks }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
+    private fun personalTarget(source: ActiveSource) = requirePersonalTarget(source is ActiveSource.Collaboration)
+    private suspend fun <T> personalWrite(target: ActiveSource, write: suspend () -> T): T {
+        personalTarget(target)
+        // 已接受的个人写入归 ViewModel 管理，不随原按钮或弹窗离开而取消。
+        return viewModelScope.async { write() }.await()
+    }
+    suspend fun startLearning(todo: Todo, target: ActiveSource = activeSource.value): Result<Unit> {
+        if (target is ActiveSource.Collaboration) return Result.failure(IllegalStateException("协作清单仅允许查看和新增任务"))
+        return personalWrite(target) { repository.startLearning(todo, com.todo.app.data.model.TaskReference(todo.id)) }
+    }
+    suspend fun stopLearning(id: String, target: ActiveSource = activeSource.value): Result<Unit> {
+        if (target is ActiveSource.Collaboration) return Result.failure(IllegalStateException("协作清单仅允许查看和新增任务"))
+        return personalWrite(target) { repository.stopLearning(id).map { _discardedShortTimers.value += it } }
+    }
+    suspend fun saveTimeEntry(entry: com.todo.app.data.model.TimeEntry, target: ActiveSource = activeSource.value): Result<Unit> {
+        if (target is ActiveSource.Collaboration) return Result.failure(IllegalStateException("协作清单仅允许查看和新增任务"))
+        return personalWrite(target) { repository.saveTimeEntry(entry) }
+    }
+    suspend fun saveDailyReview(review: com.todo.app.data.model.DailyReview, target: ActiveSource = activeSource.value): Result<Unit> {
+        if (target is ActiveSource.Collaboration) return Result.failure(IllegalStateException("协作清单仅允许查看和新增任务"))
+        return personalWrite(target) { repository.saveDailyReview(review) }
+    }
+    suspend fun saveEditedTodo(todo: Todo, target: ActiveSource = activeSource.value) {
+        personalWrite(target) { repository.updateTodo(todo) }
+    }
     fun toggleTodoStatus(id: String) {
+        if (activeSource.value is ActiveSource.Collaboration) return
         viewModelScope.launch {
             try {
                 repository.toggleTodoStatus(id)
@@ -279,6 +305,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     }
 
     fun updateTodo(todo: Todo) {
+        if (activeSource.value is ActiveSource.Collaboration) return
         viewModelScope.launch {
             try {
                 repository.updateTodo(todo)
@@ -289,6 +316,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     }
 
     fun batchUpdateTodos(todos: List<Todo>) {
+        if (activeSource.value is ActiveSource.Collaboration) return
         viewModelScope.launch {
             try {
                 repository.batchUpdateTodos(todos)
@@ -299,6 +327,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     }
 
     fun deleteTodo(id: String) {
+        if (activeSource.value is ActiveSource.Collaboration) return
         viewModelScope.launch {
             try {
                 repository.deleteTodo(id)
@@ -309,6 +338,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     }
 
     fun addTodoSmart(rawContent: String) {
+        if (activeSource.value is ActiveSource.Collaboration) return
         if (rawContent.isBlank()) return
 
         val parsed = parseDateSyntax(rawContent)
@@ -327,32 +357,41 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         }
     }
 
-    fun addCollabTodoSmart(collab: com.todo.app.data.model.CollaborationSource, rawContent: String) {
-        if (rawContent.isBlank()) return
-        val parsed = parseDateSyntax(rawContent)
-        if (parsed.content.isBlank()) return
+    private val collaborationSubmitter = CollaborationSubmitter()
+    val pendingCollaborationSubmissions = collaborationSubmitter.pending
 
-        val nickname = configManager.nickname.ifBlank { "匿名" }
-        val signedContent = "${parsed.content} (由 [$nickname] 添加)"
-        
-        val defaultPref = configManager.defaultDueDate
-        val defaultInsertion = configManager.defaultInsertion
+    fun discardCollaborationSubmission(id: String) = collaborationSubmitter.discard(id)
 
+    fun retryCollaborationSubmission(id: String) {
         viewModelScope.launch {
             try {
-                val currentList = _collabData.value ?: emptyList()
-                val todo = Todo.createFromParsed(parsed, signedContent, currentList, defaultPref, defaultInsertion)
-                
-                val res = repository.writeCollaborationTodo(collab, todo)
-                if (res.isSuccess) {
-                    loadCollabData(collab)
-                } else {
-                    _uiEvent.emit("协作写入失败: ${res.exceptionOrNull()?.message}")
+                val saved = collaborationSubmitter.send(id, { key -> collaborations.value.find { it.id == key } }) { source, todo ->
+                    repository.writeCollaborationTodo(source, todo).getOrThrow()
+                }
+                if (saved) {
+                    _uiEvent.emit("协作任务已保存")
+                    (activeSource.value as? ActiveSource.Collaboration)?.collab?.takeIf { it.id == id }?.let(::loadCollabData)
                 }
             } catch (e: Exception) {
-                _uiEvent.emit("协作写入失败: ${e.message}")
+                if (e is CancellationException) throw e
+                _uiEvent.emit("新增结果待确认，请重试同一次提交：${e.message}")
             }
         }
+    }
+
+    fun addCollabTodoSmart(collab: com.todo.app.data.model.CollaborationSource, rawContent: String) {
+        if (rawContent.isBlank()) return
+        if (pendingCollaborationSubmissions.value.any { it.sourceId == collab.id }) {
+            viewModelScope.launch { _uiEvent.emit("请先重试或放弃待确认的新增") }; return
+        }
+        val parsed = parseDateSyntax(rawContent)
+        if (parsed.content.isBlank()) return
+        val nickname = configManager.nickname.ifBlank { "匿名" }
+        val signedContent = "${parsed.content} (由 [$nickname] 添加)"
+        val todo = Todo.createFromParsed(parsed, signedContent, _collabData.value ?: emptyList(),
+            configManager.defaultDueDate, configManager.defaultInsertion)
+        collaborationSubmitter.create(collab, todo)
+        retryCollaborationSubmission(collab.id)
     }
 
     fun syncWithCloud() {
@@ -373,6 +412,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     }
 
     fun importSelectedFromLastPeriod(type: String, selectedIds: List<String>) {
+        if (activeSource.value is ActiveSource.Collaboration) return
         viewModelScope.launch {
             try {
                 repository.importSelectedFromLastPeriod(type, selectedIds)
@@ -383,6 +423,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     }
 
     fun importFromLastPeriod(type: String) {
+        if (activeSource.value is ActiveSource.Collaboration) return
         viewModelScope.launch {
             try {
                 repository.importFromLastPeriod(type)

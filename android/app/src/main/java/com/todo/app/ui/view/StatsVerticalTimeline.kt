@@ -33,12 +33,13 @@ private data class VerticalCompletion(val todo: Todo, val subtask: Subtask?, val
 
 @Composable
 fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: String, target: LocalDate, onEditTodo: (Todo) -> Unit) {
-    val data by viewModel.todoData.collectAsState()
-    val tasks by viewModel.learningTasks.collectAsState()
+    val learning = currentLearningData(viewModel)
+    val data = learning.data
+    val tasks = learning.tasks
     val source by viewModel.activeSource.collectAsState()
     val ref = if (source is TodoViewModel.ActiveSource.Collaboration) TaskReference("", "collaboration", (source as TodoViewModel.ActiveSource.Collaboration).collab.id) else TaskReference("")
     val resolved = remember(data.timeEntries, tasks) { Learning.resolveEntries(data.timeEntries, tasks) }
-    val parts = remember(resolved, ref, period, target) { StatsTimeline.arcs(resolved, ref, period, target) }
+    val parts = remember(resolved, learning.conflicts, ref, period, target) { StatsTimeline.arcs(resolved, ref, period, target, conflicts = learning.conflicts) }
     val days = remember(period, target) { StatsTimeline.days(period, target) }
     val completed = remember(todos, period, target) { StatsTimeline.completions(todos, period, target) }
     val steps = remember(todos, period, target) { StatsTimeline.subtasks(todos, period, target) }

@@ -114,8 +114,7 @@ object Learning {
         return null
     }
     fun summary(entries: List<TimeEntry>, start: LocalDate, end: LocalDate, zone: ZoneId = ZoneId.systemDefault(),
-        selectedLabel: String? = null): LearningSummary {
-        val conflicts = overlaps(entries)
+        selectedLabel: String? = null, conflicts: Set<String> = overlaps(entries)): LearningSummary {
         val startTime = start.atStartOfDay(zone).toInstant()
         val endTime = end.atStartOfDay(zone).toInstant()
         val relevant = entries.filter { !it.deleted && instant(it.started_at)?.isBefore(endTime) == true &&
@@ -134,11 +133,12 @@ object Learning {
     fun fields(review: DailyReview) = listOf("事实" to review.fact, "卡点" to review.obstacle, "有效动作" to review.effective_action, "下一步" to review.next_step)
     fun preview(review: DailyReview): String = fields(review).firstOrNull { it.second.isNotBlank() }?.let { "${it.first}：${it.second.lines().take(2).joinToString("\n")}" } ?: ""
     fun export(data: TodoData, period: String, date: LocalDate, includeLearning: Boolean = true, zone: ZoneId = ZoneId.systemDefault(),
-        tasks: Map<TaskReference, Todo> = data.todos.associateBy { TaskReference(it.id) }): Pair<String, String> {
+        tasks: Map<TaskReference, Todo> = data.todos.associateBy { TaskReference(it.id) },
+        conflicts: Set<String> = overlaps(data.timeEntries)): Pair<String, String> {
         val resolved = resolveEntries(data.timeEntries, tasks)
         val (start, end) = range(period, date)
         val reviews = data.dailyReviews.filter { !it.deleted && it.date >= start.toString() && it.date < end.toString() }
-        val totals = summary(resolved, start, end, zone)
+        val totals = summary(resolved, start, end, zone, conflicts = conflicts)
         val dates = (reviews.map { LocalDate.parse(it.date) } + if (includeLearning) totals.parts.map { it.date } else emptyList()).toSortedSet()
         require(dates.isNotEmpty()) { "这个时间范围没有可导出的内容" }
         val lines = mutableListOf("# 每日复盘", "")
@@ -147,7 +147,7 @@ object Learning {
             val review = reviews.find { it.date == day.toString() }
             if (review == null) lines.addAll(listOf("当日未填写复盘", "")) else fields(review).forEach { (title, value) -> lines.addAll(listOf("### $title", "", value.trim().ifEmpty { "未填写" }, "")) }
             if (includeLearning) {
-                val summary = summary(resolved, day, day.plusDays(1), zone)
+                val summary = summary(resolved, day, day.plusDays(1), zone, conflicts = conflicts)
                 lines.addAll(listOf("### 学习投入", "", "合计：${duration(summary.duration)}，${summary.count} 次。", "", "| 标签 | 时长 | 次数 |", "| --- | --- | --- |"))
                 summary.groups.forEach { g -> lines.add("| ${g.label.replace("\\", "\\\\").replace("|", "\\|").replace(Regex("[\\r\\n]"), " ")} | ${duration(g.duration)} | ${g.count} |") }; lines.add("")
             }

@@ -45,7 +45,7 @@ for (const type of ['weekly', 'monthly']) {
                 { content: '第一项', order: 10, completed: false }
             ].map(todo => ({ ...dateHelpers.createTodo(todo.content, oldPeriod), ...todo, task_type: taskType }));
             const before = JSON.stringify(originals);
-            const state = { todoData: { todos: [...originals] } };
+            const state = { activeSource: { type: 'personal' }, todoData: { todos: [...originals] } };
             const list = element();
             const document = {
                 getElementById: id => id === 'import-tasks-list' ? list : element(),
@@ -69,3 +69,13 @@ for (const type of ['weekly', 'monthly']) {
         });
     }
 }
+
+it('协作来源不能通过上期导入入口修改个人任务', async () => {
+    const state = { activeSource: { type: 'collaboration', id: 'shared' }, todoData: { todos: [] } };
+    const api = runInNewContext(`({ open: ${source.slice(openModal.start, openModal.end)}, confirm: ${source.slice(confirm.start, confirm.end)} })`, {
+        appState: state, document: new Proxy({}, { get() { throw new Error('不应进入个人导入界面'); } })
+    });
+    api.open('weekly');
+    await api.confirm();
+    assert.deepEqual(state.todoData.todos, []);
+});

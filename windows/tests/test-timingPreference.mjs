@@ -1,3 +1,4 @@
+import { learningSnapshot, requirePersonalTarget } from '../src/collaborationView.js';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -7,7 +8,9 @@ import * as helpers from '../src/timeTracking.js';
 
 // 调用真实视图逻辑，仅替换 DOM 与弹窗按钮，不启动浏览器。
 const source = readFileSync(new URL('../src/learningView.js', import.meta.url), 'utf8');
-const declaration = parse(source, { ecmaVersion: 'latest', sourceType: 'module' }).body.find(n => n.type === 'ExportNamedDeclaration').declaration;
+const statements = parse(source, { ecmaVersion: 'latest', sourceType: 'module' }).body;
+const declaration = statements.find(n => n.type === 'ExportNamedDeclaration').declaration;
+const localInput = statements.find(n => n.type === 'FunctionDeclaration' && n.id.name === 'localInput');
 function harness(entries = [], enabled = true, now = Date.now()) {
     const state = { appConfig: { time_tracking_enabled: enabled }, todoData: { todos: [], time_entries: structuredClone(entries), daily_reviews: [] }, activeSource: { type: 'personal' }, currentView: 'list' };
     let commits = 0, fail = false, scheduled = 0, cleared = 0;
@@ -16,9 +19,9 @@ function harness(entries = [], enabled = true, now = Date.now()) {
         constructor(...args) { super(...(args.length ? args : [now])); }
         static now() { return now; }
     }
-    const element = () => ({ dataset: {}, append() {}, replaceChildren() {}, addEventListener() {}, close() {} });
-    const create = runInNewContext(source.slice(declaration.start, declaration.end) + ';createLearningView', {
-        ...helpers, structuredClone, Date: FixedDate,
+    const element = () => ({ dataset: {}, classList: { add() {} }, append() {}, replaceChildren() {}, addEventListener() {}, close() {} });
+    const create = runInNewContext(source.slice(localInput.start, localInput.end) + '\n' + source.slice(declaration.start, declaration.end) + ';createLearningView', {
+        ...helpers, learningSnapshot, requirePersonalTarget, structuredClone, Date: FixedDate,
         el: element, button: (text, action) => { const b = { text, action }; buttons.push(b); return b; },
         modal: title => { const d = { ...element(), title }; dialogs.push(d); return d; },
         document: { querySelectorAll: () => [], querySelector: () => null },
@@ -33,6 +36,31 @@ function harness(entries = [], enabled = true, now = Date.now()) {
         timers: () => [scheduled, cleared], choose: text => buttons.find(b => b.text === text).action() };
 }
 const entry = { id: 'e', task_content_snapshot: '测试计时', task_ref: { todo_id: 't' }, started_at: '2026-09-01T00:00:00Z', ended_at: null };
+
+it('协作模式的实际计时与记录入口仅查看，个人计时关闭后仍能显示远端记录', () => {
+    const h = harness([], false);
+    h.state.activeSource = { type: 'collaboration', id: 'remote' };
+    h.state.collabData = { todos: [{ id: 't', content: '对方任务' }], time_entries: [{ ...entry, task_ref: { todo_id: 't', source_type: 'personal', source_id: null } }], daily_reviews: [] };
+    h.api.attachTimer({ insertBefore() {}, querySelector() {} }, { id: 't', content: '对方任务' });
+    h.api.editRecord(h.api.resolvedEntries()[0]);
+    assert.equal(h.api.enabled(), true);
+    assert.ok(h.buttons.some(b => b.text === '记录'));
+    assert.ok(h.buttons.some(b => b.text === '关闭'));
+    assert.equal(h.buttons.filter(b => ['开始', '结束', '编辑记录', '删除', '补录计时记录'].includes(b.text)).length, 0);
+    assert.equal(h.commits(), 0);
+});
+
+it('协作页面关闭本机计时时只处理个人运行记录，不处理对方计时', async () => {
+    const h = harness([entry]);
+    h.state.activeSource = { type: 'collaboration', id: 'remote' };
+    h.state.collabData = { todos: [], time_entries: [{ ...entry, id: 'owner-entry' }], daily_reviews: [] };
+    const disabling = h.api.prepareDisable();
+    await h.choose('结束计时并关闭');
+    assert.equal(await disabling, true);
+    assert.ok(h.state.todoData.time_entries[0].ended_at);
+    assert.equal(h.state.collabData.time_entries[0].ended_at, null);
+});
+
 describe('本机计时开关实际交互逻辑', () => {
     it('任务结束按钮丢弃不超过 30 秒的记录，成功后弹窗；较长记录正常保留', async () => {
         for (const duration of [0, 30000, 30001]) {

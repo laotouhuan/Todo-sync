@@ -52,7 +52,7 @@ it('切回个人清单后旧请求不写入协作数据', async () => {
     state.activeSource = { type: 'personal' };
     pending[0].resolve({ data: '{"todos":[],"marker":"old"}' });
     await old;
-    assert.equal(state.collabData, undefined);
+    assert.equal(state.collabData, null);
 });
 
 function shareHarness(buttonName, invoke) {

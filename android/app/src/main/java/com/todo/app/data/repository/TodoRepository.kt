@@ -824,13 +824,7 @@ class TodoRepository(private val context: Context) {
             }
 
             val data = jsonFormat.decodeFromString<TodoData>(result.content)
-            val alreadyExists = data.todos.any { it.id == todo.id }
-            val updatedTodos = if (alreadyExists) data.todos else data.todos + todo
-
-            val updated = data.copy(
-                todos = updatedTodos,
-                last_updated = nowIso()
-            )
+            val updated = com.todo.app.data.model.appendCollaborationTodo(data, todo, nowIso())
             val json = jsonFormat.encodeToString(updated)
             client.uploadCollaborationFile(collab.webdavFilepath, json)
             Result.success(Unit)

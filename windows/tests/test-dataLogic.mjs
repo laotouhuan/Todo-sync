@@ -1,3 +1,4 @@
+import { requirePersonalTarget } from '../src/collaborationView.js';
 import { parse as parseSource } from 'acorn';
 import { runInNewContext } from 'node:vm';
 import * as learningHelpers from '../src/timeTracking.js';
@@ -556,7 +557,7 @@ describe('实际页面的同步 ID 注入回归', () => {
         const state = { healthThroughputDays: 7, collaborations: [] };
         const todos = [];
         const api = runInNewContext(declarations + ';({migrateAndNormalize,renderHealth,renderCollabListInSettings})', {
-            ...dateHelpers, ...learningHelpers, migrateAndNormalize, document, appState: state, getActiveTodos: () => todos, Date
+            ...dateHelpers, requirePersonalTarget, ...learningHelpers, migrateAndNormalize, document, appState: state, getActiveTodos: () => todos, Date
         });
         return { api, state, todos, document, htmlWrites };
     }
@@ -704,7 +705,7 @@ describe('学习保存失败与串行队列', () => {
         const state = { todoData: original, collabData: { todos: [{ ...task, content: '协作任务' }] }, activeSource: { type: 'collaboration' }, appConfig: { sync_mode: 'webdav' }, saveVersion: 0 };
         let fail = true, writes = 0, saved;
         const commit = runInNewContext('let _saveQueue=Promise.resolve();let _lastRenderedHash="";' + declaration('_doSaveData') + declaration('commitPersonalLabels') + ';commitPersonalLabels', {
-            ...learningHelpers, applyLabelChange, appState: state, structuredClone, Date, setTimeout: () => {},
+            requirePersonalTarget, ...learningHelpers, applyLabelChange, appState: state, structuredClone, Date, setTimeout: () => {},
             render: () => {}, learningUI: { refresh: () => {} }, setSyncStatus: () => {}, SyncState: { SYNCING: 1, ERROR: 2, IDLE: 0 },
             purgeOldDeletedTodos: () => { throw new Error('标签保存不能清理记录'); }, showToast: () => {}, console: { error: () => {} },
             invoke: async (cmd, args) => {
@@ -724,14 +725,14 @@ describe('学习保存失败与串行队列', () => {
         assert.deepEqual(saved.reminder_settings, original.reminder_settings);
         assert.equal(saved.todos.length, 2); assert.equal(state.collabData.todos[0].label, '学习');
     });
-    it('实际编辑保存失败保留草稿及原标签，重试成功才关闭；协作写入保持来源隔离', async () => {
+    it('实际编辑保存失败保留草稿及原标签，重试成功才关闭；协作编辑拒绝写入并保持来源隔离', async () => {
         let success = false, closed = 0; const notices = [];
         const original = {id:'task',content:'旧内容',label:'旧标签',subtasks:[],updated_at:'2026-09-10T00:00:00Z'};
         const state = {appConfig:{},todoData:{todos:[original]},activeSource:{type:'personal'},currentEditingTodo:structuredClone(original),currentEditingSubtasks:[]};
         const fields = {'edit-content':{value:'新内容'},'edit-learning-label':{value:'数学'}};
         const calls = [];
         const save = runInNewContext('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";'+declaration('saveEditModal')+';saveEditModal', {
-            ...learningHelpers,...dateHelpers,structuredClone,appState:state,document:{getElementById:id=>fields[id]},
+            requirePersonalTarget, ...learningHelpers,...dateHelpers,structuredClone,appState:state,document:{getElementById:id=>fields[id]},
             extractCollaborator:()=>({nickname:null}),deepClone:structuredClone,closeEditModal:()=>closed++,render:()=>{},
             showToast:m=>notices.push(m),console:{error:()=>{}},_doSaveData:async()=>success,invoke:async(cmd,args)=>calls.push([cmd,args])
         });
@@ -740,14 +741,14 @@ describe('学习保存失败与串行队列', () => {
         success=true; await save(); assert.equal(closed,1); assert.equal(state.todoData.todos[0].label,'数学');
         state.activeSource={type:'collaboration',id:'source'}; state.collabData={todos:[structuredClone(original)]};
         fields['edit-learning-label'].value='协作'; await save();
-        assert.equal(calls[0][0],'write_collaboration_todo'); assert.equal(calls[0][1].collabId,'source');
-        assert.equal(JSON.parse(calls[0][1].todoJson).label,'协作'); assert.equal(state.todoData.todos[0].label,'数学');
+        assert.equal(calls.length,0); assert.equal(state.collabData.todos[0].label,'旧标签');
+        assert.equal(state.todoData.todos[0].label,'数学');
     });
     it('落盘失败回滚新集合并保留旧数据，下一次保存仍可成功', async () => {
         let success = false;
-        const state = {todoData:{todos:[{id:'existing',content:'原有任务'}],time_entries:[],daily_reviews:[]}};
+        const state = {activeSource:{type:'personal'},todoData:{todos:[{id:'existing',content:'原有任务'}],time_entries:[],daily_reviews:[]}};
         const commit = runInNewContext('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";' + declaration('commitLearning') + ';commitLearning', {
-            ...learningHelpers, appState:state, structuredClone, render:()=>{}, learningUI:{refresh:()=>{}}, _doSaveData:async()=>success
+            requirePersonalTarget, ...learningHelpers, appState:state, structuredClone, render:()=>{}, learningUI:{refresh:()=>{}}, _doSaveData:async()=>success
         });
         await assert.rejects(commit(d=>d.daily_reviews.push({id:'r',date:'2026-09-10',fact:'不能丢失的草稿'})),/保存失败/);
         assert.equal(state.todoData.daily_reviews.length,0);
@@ -758,7 +759,7 @@ describe('学习保存失败与串行队列', () => {
     });
     it('实际写入命令失败会返回失败，而非误报成功', async () => {
         const save = runInNewContext(declaration('_doSaveData') + ';_doSaveData', {
-            ...learningHelpers, appState:{todoData:{todos:[]},appConfig:{sync_mode:'local'},saveVersion:0},
+            requirePersonalTarget, ...learningHelpers, appState:{todoData:{todos:[]},appConfig:{sync_mode:'local'},saveVersion:0},
             setSyncStatus:()=>{}, SyncState:{SYNCING:1,ERROR:2}, purgeOldDeletedTodos:()=>{},
             invoke:async()=>{throw new Error('磁盘写入失败');}, console:{error:()=>{}}, Date
         });
@@ -767,9 +768,9 @@ describe('学习保存失败与串行队列', () => {
     it('实际写入成功后保留计时记录，云端失败不回滚已经落盘的记录', async () => {
         for (const mode of ['local', 'webdav']) {
             let persisted;
-            const state = {todoData:{todos:[],time_entries:[],daily_reviews:[]},appConfig:{sync_mode:mode},saveVersion:0};
+            const state = {activeSource:{type:'personal'},todoData:{todos:[],time_entries:[],daily_reviews:[]},appConfig:{sync_mode:mode},saveVersion:0};
             const commit = runInNewContext('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";' + declaration('_doSaveData') + declaration('commitLearning') + ';commitLearning', {
-                ...learningHelpers, appState:state, structuredClone, Date, setTimeout:()=>{},
+                requirePersonalTarget, ...learningHelpers, appState:state, structuredClone, Date, setTimeout:()=>{},
                 setSyncStatus:()=>{}, SyncState:{SYNCING:1,ERROR:2,IDLE:0}, purgeOldDeletedTodos:()=>{},
                 render:()=>{}, learningUI:{refresh:()=>{}}, showToast:()=>{}, console:{error:()=>{}},
                 invoke:async(cmd,args)=>{if(cmd==='write_todo_data') persisted=JSON.parse(args.data);else throw new Error('云端离线');}

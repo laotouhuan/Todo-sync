@@ -191,6 +191,13 @@ fun EditTodoDialog(
     onDelete: () -> Unit,
     viewModel: com.todo.app.ui.viewmodel.TodoViewModel
 ) {
+    val openingSource = remember { viewModel.activeSource.value }
+    val activeSource by viewModel.activeSource.collectAsState()
+    LaunchedEffect(activeSource) { if (activeSource != openingSource) onDismiss() }
+    if (openingSource is com.todo.app.ui.viewmodel.TodoViewModel.ActiveSource.Collaboration) {
+        ReadOnlyTodoDialog(todo, viewModel, onDismiss)
+        return
+    }
     var learningLabel by remember(todo.id, todo.label) { mutableStateOf(todo.label ?: "") }
 
     val learningTasks by viewModel.learningTasks.collectAsState()
@@ -235,7 +242,8 @@ fun EditTodoDialog(
     val saveScope = rememberCoroutineScope()
     val saveContext = LocalContext.current
     var saving by remember { mutableStateOf(false) }
-    val onSave: () -> Unit = {
+    val onSave: () -> Unit = save@ {
+        if (viewModel.activeSource.value != openingSource) return@save
         val updated = buildUpdatedTodo(
             todo = todo,
             content = content,
