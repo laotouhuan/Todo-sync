@@ -53,8 +53,8 @@ export function isOverdue(todo, todayStr) {
     if (!todo.date || todo.completed) return false;
     // Exclude week and month tasks — they don't have a specific due date
     if (isWeekDate(todo.date) || isMonthDate(todo.date)) return false;
-    // Exclude recurring and checkin tasks — habit tasks do not have overdue status
-    if (todo.recurring === 'daily_repeat' || todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin') return false;
+    // 周/月打卡按周期判断，普通任务（含旧每日任务）按截止日期判断逾期
+    if (todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin') return false;
     return todo.date < todayStr;
 }
 
@@ -211,7 +211,7 @@ export function parseInputSyntax(rawContent) {
     }
     content = content.replace(subtaskRegex, '').trim();
 
-    const dateRegex = /(?:\s+|^)@(today|tomorrow|none|week|month|day|daily|\d{4}-\d{2}-\d{2}|\d{2}-\d{2})(?:[*/:](\d*))?$/i;
+    const dateRegex = /(?:\s+|^)@(today|tomorrow|none|week|month|\d{4}-\d{2}-\d{2}|\d{2}-\d{2})(?:[*/:](\d*))?$/i;
 
     let taskDate = null;
     let taskType = 'normal';
@@ -229,10 +229,6 @@ export function parseInputSyntax(rawContent) {
         }
         else if (v === 'today') taskDate = getTodayString();
         else if (v === 'tomorrow') taskDate = getTomorrowString();
-        else if (v === 'day' || v === 'daily') {
-            taskDate = getTodayString();
-            taskType = 'daily_repeat';
-        }
         else if (v === 'week') {
             taskDate = getThisWeekString();
             taskType = 'weekly_checkin';

@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StatsFilterTest {
-    private val allTypes = setOf("normal", "daily", "weekly", "monthly")
+    private val allTypes = setOf("normal", "weekly", "monthly")
 
     private fun todo(
         id: String,
@@ -24,12 +24,12 @@ class StatsFilterTest {
     @Test
     fun eachTaskTypeMatchesOnlyItsSelectedFilter() {
         assertTrue(matchesStatsTypeFilter(todo("normal"), setOf("normal")))
-        assertTrue(matchesStatsTypeFilter(todo("daily", recurring = "daily_repeat"), setOf("daily")))
+        assertFalse(matchesStatsTypeFilter(todo("daily", recurring = "daily_repeat"), setOf("daily")))
         assertTrue(matchesStatsTypeFilter(todo("weekly", taskType = TaskType.WEEKLY_CHECKIN), setOf("weekly")))
         assertTrue(matchesStatsTypeFilter(todo("monthly", taskType = TaskType.MONTHLY_CHECKIN), setOf("monthly")))
 
         assertFalse(matchesStatsTypeFilter(todo("normal"), setOf("daily")))
-        assertFalse(matchesStatsTypeFilter(todo("daily", recurring = "daily_repeat"), setOf("normal")))
+        assertTrue(matchesStatsTypeFilter(todo("daily", recurring = "daily_repeat"), setOf("normal")))
         assertFalse(matchesStatsTypeFilter(todo("unknown", taskType = "unknown"), allTypes))
     }
 
@@ -47,11 +47,17 @@ class StatsFilterTest {
     }
 
     @Test
-    fun legacyMixedMarkersMatchEitherSelectedType() {
+    fun legacyMixedMarkersUseCheckinType() {
         val legacy = todo("mixed", taskType = TaskType.WEEKLY_CHECKIN, recurring = "daily_repeat")
 
-        assertTrue(matchesStatsTypeFilter(legacy, setOf("daily")))
+        assertFalse(matchesStatsTypeFilter(legacy, setOf("daily")))
         assertTrue(matchesStatsTypeFilter(legacy, setOf("weekly")))
         assertFalse(matchesStatsTypeFilter(legacy, setOf("normal")))
     }
+    @Test fun legacyVisualsFollowActualTaskType() {
+        org.junit.Assert.assertEquals("circle", todo("daily", recurring = "daily_repeat").statsVisualStyle().shape)
+        org.junit.Assert.assertEquals("diamond", todo("mixed", TaskType.WEEKLY_CHECKIN, "daily_repeat").statsVisualStyle().shape)
+        org.junit.Assert.assertEquals("star", todo("mixed", TaskType.MONTHLY_CHECKIN, "daily_repeat").statsVisualStyle().shape)
+    }
+
 }

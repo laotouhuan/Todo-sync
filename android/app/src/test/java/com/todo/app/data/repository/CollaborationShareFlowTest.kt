@@ -65,6 +65,30 @@ class CollaborationShareFlowTest {
         } }
     }
 
+    @Test fun generatingOwnCodeAndImportingUseDifferentErrorContexts() {
+        for (status in listOf(401, 403, 404)) withServer(status) { flow, requests -> runBlocking {
+            val generated = runCatching { flow.generate(payload, { true }) { it } }.exceptionOrNull()!!
+            val imported = runCatching { flow.importValidated(payload) { payload } }.exceptionOrNull()!!
+            assertTrue(generated.message!!.contains("你的"))
+            assertFalse(generated.message!!.contains("分享者"))
+            assertTrue(imported.message!!.contains("分享者"))
+            assertTrue(generated.message!!.contains(status.toString()))
+            assertTrue(imported.message!!.contains(status.toString()))
+            assertFalse(generated.message!!.contains(payload.pass))
+            val auth = requests.map { request -> request.lines().first { it.startsWith("Authorization:", true) } }
+            assertEquals(auth[0], auth[1])
+        } }
+    }
+
+    @Test fun malformedFileUsesCorrectOwner() {
+        withServer(200, "{broken") { flow, _ -> runBlocking {
+            val own = runCatching { flow.generate(payload, { true }) { it } }.exceptionOrNull()!!
+            val shared = runCatching { flow.importValidated(payload) { payload } }.exceptionOrNull()!!
+            assertTrue(own.message!!.contains("你的待办文件格式无效"))
+            assertTrue(shared.message!!.contains("分享者待办文件格式无效"))
+        } }
+    }
+
     @Test fun validDataGeneratesSameSnapshotAndReimportsWithoutDuplicate() {
         withServer(200) { flow, requests -> runBlocking {
             assertEquals(payload, flow.generate(payload, { true }) { it })

@@ -29,10 +29,48 @@ data class LearningPart(val date: LocalDate, val duration: Long, val entry: Time
 data class LearningGroup(val label: String, val duration: Long, val count: Int)
 data class LearningSummary(val duration: Long, val count: Int, val parts: List<LearningPart>,
     val groups: List<LearningGroup>, val pending: Int, val running: Int)
+data class RecentTimingTask(val todo: Todo, val startedAt: Instant)
 
 object Learning {
     const val SHORT_TIME_ENTRY_MESSAGE = "计时未超过 30 秒，不保存为记录。"
     private val minimumDuration = Duration.ofSeconds(30)
+
+    // 计时资格使用本地周期计数，不改写旧完成状态或原始打卡记录。
+    fun canTimeTodo(todo: Todo, zone: ZoneId = ZoneId.systemDefault()): Boolean {
+        if (todo.deleted) return false
+        val weekly = todo.taskType == TaskType.WEEKLY_CHECKIN
+        val monthly = todo.taskType == TaskType.MONTHLY_CHECKIN
+        if (!weekly && !monthly) return !todo.completed
+        val target = todo.targetCount ?: return true
+        val count = todo.completedDates.count { value ->
+            val date = if (value.length == 10) runCatching { LocalDate.parse(value) }.getOrNull()
+                else instant(value)?.atZone(zone)?.toLocalDate()
+            date != null && (if (weekly) weekStringOf(date) else monthStringOf(date)) == todo.date
+        }
+        return count < target
+    }
+
+    fun recentTimingTasks(todos: List<Todo>, entries: List<TimeEntry>, zone: ZoneId = ZoneId.systemDefault()): List<RecentTimingTask> {
+        if (entries.any { !it.deleted && it.ended_at == null }) return emptyList()
+        val available = todos.filter { canTimeTodo(it, zone) }.associateBy { it.id }
+        val latest = mutableMapOf<String, RecentTimingTask>()
+        for (entry in entries) {
+            if (entry.deleted || entry.task_ref.source_type != "personal" || entry.task_ref.source_id != null) continue
+            val todo = available[entry.task_ref.todo_id] ?: continue
+            val start = instant(entry.started_at) ?: continue
+            val end = instant(entry.ended_at) ?: continue
+            if (Duration.between(start, end) <= minimumDuration) continue
+            val previous = latest[todo.id]
+            if (previous == null || start > previous.startedAt) latest[todo.id] = RecentTimingTask(todo, start)
+        }
+        return latest.values.sortedWith(compareByDescending<RecentTimingTask> { it.startedAt }.thenBy { it.todo.id }).take(5)
+    }
+
+    fun lastTimedText(startedAt: Instant, today: LocalDate = LocalDate.now(), zone: ZoneId = ZoneId.systemDefault()): String {
+        val local = startedAt.atZone(zone)
+        val day = if (local.toLocalDate() == today) "今天" else local.toLocalDate().toString()
+        return "上次计时：$day ${local.toLocalTime().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))}"
+    }
 
     // 短计时保留删除标记参与同步，避免其他设备恢复已丢弃的运行记录。
     fun finishTimeEntry(entry: TimeEntry, endedAt: String): TimeEntry {

@@ -54,9 +54,9 @@ class ReminderRuleEvaluatorTest {
             targetDate, zone
         )
 
-        assertEquals(2, result.totalCount)
+        assertEquals(3, result.totalCount)
         assertEquals(1, result.completedCount)
-        assertEquals(1, result.remainingCount)
+        assertEquals(2, result.remainingCount)
         assertEquals(1, result.overdueCount)
     }
 
@@ -83,11 +83,11 @@ class ReminderRuleEvaluatorTest {
             targetDate, zone
         )
 
-        assertEquals(2, result.totalCount)
+        assertEquals(1, result.totalCount)
         assertEquals(1, result.completedCount)
-        assertEquals(1, result.remainingCount)
+        assertEquals(0, result.remainingCount)
         assertEquals(0, result.overdueCount)
-        assertTrue(result.shouldTrigger)
+        assertFalse(result.shouldTrigger)
     }
 
     @Test

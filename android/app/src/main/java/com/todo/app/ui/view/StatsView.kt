@@ -75,20 +75,17 @@ private fun formatVal(valDouble: Double): String {
 internal data class StatsTaskVisualStyle(val color: Color, val shape: String)
 
 internal fun Todo.statsVisualStyle(): StatsTaskVisualStyle = when {
-    recurring == "daily_repeat" -> StatsTaskVisualStyle(Color(0xFFF59E0B), "triangle")
     taskType == TaskType.WEEKLY_CHECKIN -> StatsTaskVisualStyle(Color(0xFF6366F1), "diamond")
     taskType == TaskType.MONTHLY_CHECKIN -> StatsTaskVisualStyle(Color(0xFFF43F5E), "star")
     else -> StatsTaskVisualStyle(Color(0xFF10B981), "circle")
 }
 
 internal fun matchesStatsTypeFilter(todo: Todo, checkedFilters: Set<String>): Boolean {
-    val isDaily = todo.recurring == "daily_repeat"
     val isWeekly = todo.taskType == TaskType.WEEKLY_CHECKIN
     val isMonthly = todo.taskType == TaskType.MONTHLY_CHECKIN
-    val isNormal = todo.taskType == TaskType.NORMAL && todo.recurring != "daily_repeat"
+    val isNormal = todo.taskType == TaskType.NORMAL
 
     return (isNormal && checkedFilters.contains("normal")) ||
-        (isDaily && checkedFilters.contains("daily")) ||
         (isWeekly && checkedFilters.contains("weekly")) ||
         (isMonthly && checkedFilters.contains("monthly"))
 }
@@ -108,16 +105,6 @@ private fun MakeupIcon(shape: String, color: Color, dotRadius: androidx.compose.
             "circle" -> {
                 drawCircle(color = color, radius = dotRadiusPx)
                 drawCircle(color = Color.White, radius = dotRadiusPx, style = Stroke(width = strokeW))
-            }
-            "triangle" -> {
-                val path = Path().apply {
-                    moveTo(px, py - dotRadiusPx * 1.1f)
-                    lineTo(px - dotRadiusPx, py + dotRadiusPx * 0.9f)
-                    lineTo(px + dotRadiusPx, py + dotRadiusPx * 0.9f)
-                    close()
-                }
-                drawPath(path = path, color = color)
-                drawPath(path = path, color = Color.White, style = Stroke(width = strokeW))
             }
             "diamond" -> {
                 val path = Path().apply {
@@ -220,7 +207,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     val showTiming = timingEnabled && (period == "day" || showTimingPreference)
     var showTaskList by remember { mutableStateOf(false) }
     var expandedFilterMenu by remember { mutableStateOf(false) }
-    var checkedFilters by remember { mutableStateOf(setOf("normal", "daily", "weekly", "monthly")) }
+    var checkedFilters by remember { mutableStateOf(setOf("normal", "weekly", "monthly")) }
     var tooltipTodo by remember { mutableStateOf<Todo?>(null) }
     var tooltipDate by remember { mutableStateOf("") }
     var tooltipTime by remember { mutableStateOf("") }
@@ -372,7 +359,6 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                     ) {
                         listOf(
                             Triple("normal", "普通待办", Color(0xFF10B981)),
-                            Triple("daily", "每日重复", Color(0xFFF59E0B)),
                             Triple("weekly", "每周打卡", Color(0xFF6366F1)),
                             Triple("monthly", "每月打卡", Color(0xFFF43F5E))
                         ).forEach { (key, label, color) ->
@@ -703,16 +689,6 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                                     alpha = dotAlpha
                                                 )
                                             }
-                                            "triangle" -> {
-                                                val path = Path().apply {
-                                                    moveTo(px, py - dotRadius * 1.1f)
-                                                    lineTo(px - dotRadius, py + dotRadius * 0.9f)
-                                                    lineTo(px + dotRadius, py + dotRadius * 0.9f)
-                                                    close()
-                                                }
-                                                drawPath(path = path, color = dot.color, alpha = dotAlpha)
-                                                drawPath(path = path, color = Color.White, style = Stroke(width = strokeW), alpha = dotAlpha)
-                                            }
                                             "diamond" -> {
                                                 val path = Path().apply {
                                                     moveTo(px, py - dotRadius * 1.1f)
@@ -973,8 +949,7 @@ fun HealthContent(viewModel: TodoViewModel) {
         todos.filter { 
             !it.deleted && 
             it.taskType != TaskType.WEEKLY_CHECKIN && 
-            it.taskType != TaskType.MONTHLY_CHECKIN &&
-            it.recurring != "daily_repeat"
+            it.taskType != TaskType.MONTHLY_CHECKIN
         }
     }
     val incompleteTodos = remember(activeTodos) {

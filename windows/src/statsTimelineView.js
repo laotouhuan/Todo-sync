@@ -66,8 +66,8 @@ export function renderTimeline({ svgEl, todos, entries, source, period, target, 
             draw(enabled); toggle.textContent = enabled ? '隐藏计时' : '显示计时'; toggle.setAttribute('aria-pressed', String(enabled));
         }; header.append(toggle);
     }
-    const type = t => t.recurring === 'daily_repeat' ? 'daily' : t.task_type === 'weekly_checkin' ? 'weekly' : t.task_type === 'monthly_checkin' ? 'monthly' : 'normal';
-    const colors = { normal: '#10B981', daily: '#F59E0B', weekly: '#6366F1', monthly: '#F43F5E' };
+    const type = t => t.task_type === 'weekly_checkin' ? 'weekly' : t.task_type === 'monthly_checkin' ? 'monthly' : 'normal';
+    const colors = { normal: '#10B981', weekly: '#6366F1', monthly: '#F43F5E' };
     const steps = collectSubtaskEvents(todos.filter(t => filters[type(t)] !== false), period, target);
     const arcs = timingEnabled ? collectTimerArcs(entries, source, period, target, conflicts) : [];
     let note = card.querySelector('.timeline-note');

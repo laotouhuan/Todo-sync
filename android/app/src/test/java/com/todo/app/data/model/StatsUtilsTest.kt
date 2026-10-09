@@ -35,7 +35,7 @@ class StatsUtilsTest {
     }
 
     @Test
-    fun calculateHealthMetricsExcludesDeletedCheckinAndDailyRepeatTodos() {
+    fun calculateHealthMetricsIncludesLegacyDailyAsNormal() {
         val now = Instant.parse("2026-09-10T12:00:00Z")
         val active = healthTodo("active", "2026-09-01T00:00:00Z")
         val excluded = listOf(
@@ -47,9 +47,9 @@ class StatsUtilsTest {
 
         val metrics = calculateHealthMetrics(listOf(active) + excluded, now, ZoneId.of("UTC"))
 
-        assertEquals(9.0, metrics.currentAvgBacklogLife, 0.0)
-        assertEquals(9.0, metrics.baselineAvgBacklogLife, 0.0)
-        assertEquals(1, metrics.baselineSleepingCountVal)
+        assertEquals(24.5, metrics.currentAvgBacklogLife, 0.0)
+        assertEquals(24.5, metrics.baselineAvgBacklogLife, 0.0)
+        assertEquals(2, metrics.baselineSleepingCountVal)
     }
 
     @Test

@@ -32,7 +32,7 @@ data class Todo(
     var order: Double = 0.0,
     @SerialName("updated_at") var updatedAt: String = createdAt,
     var deleted: Boolean = false,
-    var recurring: String = "none", // none, daily_repeat
+    var recurring: String = "none", // daily_repeat 仅兼容旧数据，不再生成副本
     @SerialName("task_type") var taskType: String = "normal", // normal, weekly_checkin, monthly_checkin
     @SerialName("completed_dates") var completedDates: List<String> = emptyList(),
     @SerialName("target_count") var targetCount: Int? = null,
@@ -103,7 +103,7 @@ data class Todo(
             return create(content, finalDate).copy(
                 taskType = parsed.taskType,
                 targetCount = parsed.targetCount,
-                recurring = if (parsed.taskType == "daily_repeat") "daily_repeat" else "none",
+                recurring = RecurringType.NONE,
                 order = orderVal,
                 subtasks = subtaskList
             )

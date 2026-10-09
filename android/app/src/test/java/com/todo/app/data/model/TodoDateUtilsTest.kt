@@ -99,7 +99,7 @@ class TodoDateUtilsTest {
         // Daily repeat tasks past date -> not overdue
         val dailyTodo = Todo.create("Test", date = "2026-06-10")
         dailyTodo.recurring = RecurringType.DAILY_REPEAT
-        assertFalse(dailyTodo.isOverdue("2026-06-15"))
+        assertTrue(dailyTodo.isOverdue("2026-06-15"))
 
         // Monthly checkin tasks past date -> not overdue
         val monthlyTodo = Todo.create("Test", date = "2026-05")
@@ -212,4 +212,26 @@ class TodoDateUtilsTest {
         )
         assertTrue(todoBottom.order > 200.0)
     }
+    @Test
+    fun retiredDailySyntaxStaysInContentAndUsesEntryDefaultDate() {
+        for (syntax in listOf("@day", "@daily", "@DAILY")) {
+            val text = "背单词 $syntax"
+            val parsed = parseDateSyntax(text)
+            assertEquals(text, parsed.content)
+            assertEquals(TaskType.NORMAL, parsed.taskType)
+            assertFalse(parsed.hasExplicitDateSyntax)
+            for (pref in listOf("today", "tomorrow", "none")) {
+                val task = Todo.createFromParsed(parsed, currentList = emptyList(), defaultDueDatePref = pref)
+                val expected = when (pref) {
+                    "today" -> LocalDate.now().toString()
+                    "tomorrow" -> LocalDate.now().plusDays(1).toString()
+                    else -> null
+                }
+                assertEquals(expected, task.date)
+                assertEquals(RecurringType.NONE, task.recurring)
+                assertEquals(TaskType.NORMAL, task.taskType)
+            }
+        }
+    }
+
 }

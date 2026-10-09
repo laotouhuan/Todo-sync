@@ -91,12 +91,24 @@ test('剩余任务保留当前周期口径，并支持无条件与空任务规�
         monthly({ date: '2026-08' })
     ];
     const result = evaluateReminderRule({ condition: 'any_remaining', task_scope: 'recurring_only' }, items, day);
-    assert.equal(result.shouldTrigger, true);
+    assert.equal(result.shouldTrigger, false);
     assert.equal(result.completedCount, 1);
-    assert.equal(result.remainingCount, 1);
+    assert.equal(result.remainingCount, 0);
     assert.equal(result.overdueCount, 0);
     assert.equal(evaluateReminderRule(noon, [], day).shouldTrigger, true);
     assert.equal(evaluateReminderRule({ condition: 'any_remaining' }, [], day).shouldTrigger, false);
     assert.equal(evaluateReminderRule({ condition: 'unconditional' }, [], day).shouldTrigger, true);
     assert.equal(evaluateReminderRule({ condition: 'unknown' }, [], day).shouldTrigger, false);
+});
+
+
+test('旧每日任务按普通范围和逾期判断，混合标记以周/月类型为准', () => {
+    const legacy = todo({ date: '2026-09-01', recurring: 'daily_repeat' });
+    const result = evaluateReminderRule({ ...noon, task_scope: 'today_only' }, [legacy], day);
+    assert.equal(result.remainingCount, 1);
+    assert.equal(result.overdueCount, 1);
+    assert.equal(evaluateReminderRule({ ...noon, task_scope: 'recurring_only' }, [legacy], day).totalCount, 0);
+    const mixed = monthly({ recurring: 'daily_repeat' });
+    assert.equal(evaluateReminderRule({ ...noon, task_scope: 'recurring_only' }, [mixed], day).remainingCount, 1);
+    assert.equal(evaluateReminderRule({ ...noon, task_scope: 'today_only' }, [mixed], day).totalCount, 0);
 });

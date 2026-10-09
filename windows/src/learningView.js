@@ -1,5 +1,6 @@
 import { learningSnapshot, requirePersonalTarget } from './collaborationView.js';
-import { normalizeLabel, taskReference, sameTask, learningRange, summarizeLearning, formatDuration, validateTimeEntry, localDay, availableLabels, resolveLearningEntries, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE } from './timeTracking.js';
+import { normalizeLabel, taskReference, sameTask, learningRange, summarizeLearning, formatDuration, validateTimeEntry, localDay, availableLabels, resolveLearningEntries, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE, canTimeTodo, recentTimingTasks, createRunningTimeEntry } from './timeTracking.js';
+import { sortFunc } from './dateUtils.js';
 import { reviewFields, reviewPreview, exportReviews } from './reviewUtils.js';
 
 // 所有用户文字均通过 textContent/value 写入，计时刷新只更新文本。
@@ -38,7 +39,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
     const resolvedEntries = () => resolveLearningEntries(entries(), knownTasks());
     const entryLabel = entry => resolvedEntries().find(e => e.id === entry.id)?.label_snapshot || '未分类';
     const running = () => entries().filter(e => !e.deleted && e.ended_at == null);
-    let labelFilter, banner, lastConflict = '', reviewLeave, refreshLabelPicker, timer;
+    let labelFilter, banner, lastConflict = '', reviewLeave, refreshLabelPicker, refreshTimerPicker, timer;
     let lastSource = JSON.stringify(state.activeSource);
     const run = async action => { try { await action(); } catch (e) { toast(e.message || String(e)); } };
     function clock(entry) {
@@ -81,18 +82,73 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             if (entries().some(e => !e.deleted && sameTask(e.task_ref, ref))) group.append(button('记录', () => showRecords(entries().filter(e => !e.deleted && sameTask(e.task_ref, ref)), '计时记录', todo, ref)));
             row.insertBefore(group, row.querySelector('.edit-btn')); tick(); return;
         }
-        if (current) { group.append(clock(current), button('结束', () => run(() => stop(current.id)))); }
-        else if (!running().length) group.append(button('开始', () => run(async () => {
-            await sync();
-            await commit(d => {
-                requireEnabled();
-                if (d.time_entries.some(e => !e.deleted && !e.ended_at)) throw new Error('已有任务正在计时，请先结束或处理记录');
-                const now = new Date().toISOString();
-                d.time_entries.push({ id: crypto.randomUUID(), task_ref: ref, task_content_snapshot: todo.content,
-                    label_snapshot: normalizeLabel(todo.label), started_at: now, ended_at: null, created_at: now, updated_at: now, deleted: false });
-            });
-        })));
-        row.insertBefore(group, row.querySelector('.edit-btn')); tick();
+        if (current) {
+            group.append(el('small', '计时中', 'learning-timing-mark'));
+            row.insertBefore(group, row.querySelector('.edit-btn'));
+        }
+    }
+    async function startTiming(todoId, target) {
+        await sync();
+        await commit(d => {
+            requireEnabled();
+            if (JSON.stringify(state.activeSource) !== JSON.stringify(target)) throw new Error('清单已切换，请重新选择');
+            d.time_entries.push(createRunningTimeEntry(d, todoId));
+        });
+    }
+    function showTimerPicker() {
+        if (readOnly() || !enabled() || running().length) return;
+        const target = { ...state.activeSource };
+        const dialog = modal('最近计时的任务'); dialog.dataset.timing = 'true';
+        dialog.classList.add('learning-timer-picker');
+        let other = false, busy = false, failure = '';
+        const search = input('search', '', '搜索任务', dialog);
+        const list = el('div', null, 'learning-timer-candidates');
+        const error = el('p', '', 'learning-error'); error.setAttribute('role', 'alert');
+        const navigation = button('选择其他任务', () => { other = !other; search.value = ''; renderPicker(); });
+        const cancel = button('取消', () => dialog.close());
+        dialog.append(list, error, navigation, cancel);
+        async function select(todoId) {
+            if (busy) return;
+            busy = true; failure = ''; renderPicker();
+            try {
+                await startTiming(todoId, target);
+                dialog.close();
+            } catch (e) {
+                failure = e.message || String(e);
+            } finally { busy = false; if (dialog.open) renderPicker(); }
+        }
+        function renderPicker() {
+            if (!enabled() || readOnly() || JSON.stringify(state.activeSource) !== JSON.stringify(target)) { dialog.close(); return; }
+            if (!busy && running().length) { dialog.close(); return; }
+            dialog.querySelector('h3').textContent = other ? '选择要计时的任务' : '最近计时的任务';
+            search.parentElement.hidden = !other; search.disabled = busy;
+            navigation.textContent = other ? '返回最近任务' : '选择其他任务';
+            navigation.disabled = busy; cancel.disabled = busy; error.textContent = failure;
+            list.replaceChildren();
+            const today = localDay(new Date());
+            let candidates;
+            if (other) {
+                candidates = state.todoData.todos.filter(canTimeTodo)
+                    .sort((a, b) => Number(b.date === today) - Number(a.date === today) || sortFunc(a, b))
+                    .filter(todo => todo.content.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()))
+                    .map(todo => ({ todo }));
+            } else candidates = recentTimingTasks(state.todoData.todos, state.todoData.time_entries || []);
+            if (!candidates.length) list.append(el('p', other ? '暂无匹配的可计时任务' : '暂无可继续计时的最近任务，请选择其他任务'));
+            for (const { todo, startedAt } of candidates) {
+                const item = button('', () => select(todo.id)); item.classList.add('learning-timer-candidate'); item.disabled = busy;
+                item.append(el('span', todo.content));
+                if (startedAt) {
+                    const value = localInput(startedAt).replace('T', ' ').slice(0, 16);
+                    item.append(el('small', '上次计时：' + (value.startsWith(today) ? value.replace(today, '今天') : value)));
+                }
+                list.append(item);
+            }
+        }
+        search.oninput = renderPicker;
+        dialog.addEventListener('cancel', e => { if (busy) e.preventDefault(); });
+        refreshTimerPicker = renderPicker;
+        dialog.addEventListener('close', () => { if (refreshTimerPicker === renderPicker) refreshTimerPicker = null; });
+        renderPicker();
     }
     function editEntry(original, todo, ref, changed = () => {}) {
         if (!enabled()) return;
@@ -320,15 +376,18 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         const source = JSON.stringify(state.activeSource);
         if (source !== lastSource) {
             document.querySelectorAll('dialog.learning-dialog').forEach(d => d.close());
-            reviewLeave = null; refreshLabelPicker = null; labelFilter = ''; lastConflict = ''; lastSource = source;
+            reviewLeave = null; refreshLabelPicker = null; refreshTimerPicker = null; labelFilter = ''; lastConflict = ''; lastSource = source;
         }
         if (enabled() && !timer) timer = setInterval(tick, 1000);
         if (!enabled() && timer) { clearInterval(timer); timer = null; }
         document.querySelectorAll('[data-timing-section]').forEach(n => { n.hidden = !enabled(); });
         if (!enabled()) document.querySelectorAll('dialog[data-timing]').forEach(d => d.close());
         refreshLabelPicker?.();
+        refreshTimerPicker?.();
         if (!banner) { banner = el('div', null, 'learning-banner'); document.querySelector('main')?.before(banner); }
         banner.replaceChildren(); const active = enabled() ? running() : []; banner.hidden = !active.length;
+        const startButton = document.getElementById('start-timer-btn');
+        if (startButton) startButton.hidden = !enabled() || readOnly() || active.length > 0;
         if (active.length === 1) {
             banner.append(el('span', active[0].task_content_snapshot), clock(active[0]));
             if (!readOnly()) banner.append(button('结束', () => run(() => stop(active[0].id))));
@@ -341,6 +400,8 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         if (state.currentView === 'stats') renderStats(); tick();
     }
     function install() {
+        const startButton = document.getElementById('start-timer-btn');
+        if (startButton) startButton.onclick = showTimerPicker;
         const anchor = document.querySelector('.stats-list-toggle-container'); const host = el('div'); host.id = 'learning-insights'; anchor?.before(host);
         // 编辑弹窗阻止底层导航；关闭窗口也先处理未保存正文。
         window.addEventListener('beforeunload', e => { if (reviewLeave) { e.preventDefault(); e.returnValue = ''; } });

@@ -4,7 +4,7 @@ import java.time.LocalDate
 
 // ====== Input Parsing ======
 
-private val DATE_REGEX = Regex("""(?:\s+|^)@(today|tomorrow|none|week|month|day|daily|\d{4}-\d{2}-\d{2}|\d{2}-\d{2})(?:[*/:](\d*))?$""", RegexOption.IGNORE_CASE)
+private val DATE_REGEX = Regex("""(?:\s+|^)@(today|tomorrow|none|week|month|\d{4}-\d{2}-\d{2}|\d{2}-\d{2})(?:[*/:](\d*))?$""", RegexOption.IGNORE_CASE)
 private val FULL_DATE_REGEX = Regex("""^\d{4}-\d{2}-\d{2}$""")
 private val SHORT_DATE_REGEX = Regex("""^\d{2}-\d{2}$""")
 private val FULL_WIDTH_DIGIT_REGEX = Regex("""[０-９]""")
@@ -47,10 +47,6 @@ fun parseDateSyntax(rawContent: String): ParsedSyntax {
             "none" -> null
             "today" -> LocalDate.now().toString()
             "tomorrow" -> LocalDate.now().plusDays(1).toString()
-            "day", "daily" -> {
-                taskType = TaskType.DAILY_REPEAT
-                LocalDate.now().toString()
-            }
             "week" -> {
                 taskType = TaskType.WEEKLY_CHECKIN
                 targetCount = dateMatch.groupValues.getOrNull(2)?.toIntOrNull()

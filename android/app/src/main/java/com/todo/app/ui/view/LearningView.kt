@@ -6,6 +6,8 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
@@ -91,7 +93,6 @@ private fun LearningClock(entry: TimeEntry) {
 @Composable
 fun LearningTimer(todo: Todo, viewModel: TodoViewModel) {
     val learning = currentLearningData(viewModel)
-    val source by viewModel.activeSource.collectAsState()
     val personalTimingEnabled by viewModel.timeTrackingEnabled.collectAsState()
     val timingEnabled = personalTimingEnabled || learning.readOnly
     if (!timingEnabled) return
@@ -99,50 +100,119 @@ fun LearningTimer(todo: Todo, viewModel: TodoViewModel) {
     val active = data.timeEntries.filter { !it.deleted && it.ended_at == null }
     val ref = viewModel.learningReference(todo)
     val entry = active.find { it.task_ref == ref }
-    val scope = rememberCoroutineScope(); val context = LocalContext.current
-    var busy by remember { mutableStateOf(false) }
     if (learning.readOnly) {
         if (entry != null) LearningClock(entry)
         return
     }
-    if (!todo.deleted && (entry != null || active.isEmpty())) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (entry != null) LearningClock(entry)
-            TextButton(enabled = !busy, contentPadding = PaddingValues(horizontal = 5.dp), onClick = click@ {
-                if (viewModel.activeSource.value != source) return@click
-                busy = true
-                scope.launch {
-                    try {
-                        val result = if (entry == null) viewModel.startLearning(todo, source) else viewModel.stopLearning(entry.id, source)
-                        result.exceptionOrNull()?.let { Toast.makeText(context, it.message, Toast.LENGTH_LONG).show() }
-                    } finally { busy = false }
-                }
-            }) { Text(if (entry == null) "开始" else "结束", fontSize = 12.sp) }
-        }
-    }
+    if (!todo.deleted && entry != null) Text("计时中", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
 }
 
 @Composable
 fun LearningBanner(viewModel: TodoViewModel) {
     val learning = currentLearningData(viewModel)
+    val source by viewModel.activeSource.collectAsState()
     val personalTimingEnabled by viewModel.timeTrackingEnabled.collectAsState()
     val timingEnabled = personalTimingEnabled || learning.readOnly
     if (!timingEnabled) return
     val data = learning.data
     val active = data.timeEntries.filter { !it.deleted && it.ended_at == null }
-    var show by remember { mutableStateOf(false) }
+    var show by remember(source) { mutableStateOf(false) }
+    var chooseTask by remember(source) { mutableStateOf(false) }
+    var busy by remember(source) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope(); val context = LocalContext.current
     LaunchedEffect(active.map { it.id }.sorted()) { if (!learning.readOnly && active.size > 1) show = true }
-    if (active.isNotEmpty()) {
+    if (active.isNotEmpty() || !learning.readOnly) {
         Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (active.size > 1) "${active.size} 条计时待处理" else active.first().task_content_snapshot,
-                    Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
-                if (active.size == 1) LearningClock(active.first())
-                TextButton(onClick = { show = true }) { Text(if (learning.readOnly) "查看记录" else if (active.size > 1) "处理" else "记录 / 结束") }
+                if (active.isEmpty()) {
+                    TextButton(onClick = { chooseTask = true }) { Text("开始计时") }
+                } else {
+                    Text(if (active.size > 1) "${active.size} 条计时待处理" else active.first().task_content_snapshot,
+                        Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
+                    if (active.size == 1) {
+                        LearningClock(active.first())
+                        if (!learning.readOnly) TextButton(enabled = !busy, onClick = click@ {
+                            if (viewModel.activeSource.value != source) return@click
+                            val id = active.first().id
+                            busy = true
+                            scope.launch {
+                                try {
+                                    viewModel.stopLearning(id, source).exceptionOrNull()?.let {
+                                        Toast.makeText(context, it.message, Toast.LENGTH_LONG).show()
+                                    }
+                                } finally { busy = false }
+                            }
+                        }) { Text("结束") }
+                    }
+                    TextButton(onClick = { show = true }) { Text(if (learning.readOnly) "查看记录" else if (active.size > 1) "处理" else "记录") }
+                }
             }
         }
     }
     if (show) LearningRecordsDialog(viewModel, active.map { it.id }, onDismiss = { show = false })
+    if (chooseTask) LearningTaskPicker(viewModel, onDismiss = { chooseTask = false })
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LearningTaskPicker(viewModel: TodoViewModel, onDismiss: () -> Unit) {
+    dismissOnSourceChange(viewModel, onDismiss)
+    val learning = currentLearningData(viewModel)
+    val enabled by viewModel.timeTrackingEnabled.collectAsState()
+    val target = remember { viewModel.activeSource.value }
+    val data = learning.data
+    var other by remember { mutableStateOf(false) }
+    var search by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val today = LocalDate.now()
+    LaunchedEffect(enabled, learning.readOnly, data.timeEntries) {
+        if (!enabled || learning.readOnly || data.timeEntries.any { !it.deleted && it.ended_at == null }) onDismiss()
+    }
+    val recent = Learning.recentTimingTasks(data.todos, data.timeEntries)
+    val candidates = if (other) data.todos.filter { Learning.canTimeTodo(it) }
+        .sortedWith(compareByDescending<Todo> { it.date == today.toString() }.then(TodoComparator))
+        .filter { it.content.contains(search.trim(), ignoreCase = true) }
+        else recent.map { it.todo }
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true, confirmValueChange = { !busy })
+    ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, sheetState = sheet) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).padding(horizontal = 20.dp).padding(bottom = 20.dp)) {
+            Text(if (other) "选择要计时的任务" else "最近计时的任务", style = MaterialTheme.typography.titleLarge)
+            if (other) OutlinedTextField(search, onValueChange = { search = it }, label = { Text("搜索任务") },
+                enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp)) }
+            if (candidates.isEmpty()) Text(if (other) "暂无匹配的可计时任务" else "暂无可继续计时的最近任务，请选择其他任务",
+                modifier = Modifier.padding(vertical = 16.dp))
+            LazyColumn(Modifier.weight(1f, fill = false)) {
+                items(candidates, key = { it.id }) { todo ->
+                    TextButton(enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), onClick = click@ {
+                        if (busy || viewModel.activeSource.value != target || !viewModel.timeTrackingEnabled.value) return@click
+                        busy = true; error = null
+                        scope.launch {
+                            try {
+                                val result = viewModel.startLearning(todo, target)
+                                if (result.isSuccess) onDismiss()
+                                else error = result.exceptionOrNull()?.message ?: "开始计时失败，请重试"
+                            } finally { busy = false }
+                        }
+                    }) {
+                        Column(Modifier.fillMaxWidth()) {
+                            Text(todo.content)
+                            if (!other) recent.find { it.todo.id == todo.id }?.let {
+                                Text(Learning.lastTimedText(it.startedAt), style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TextButton(enabled = !busy, onClick = { other = !other; search = "" }) { Text(if (other) "返回最近任务" else "选择其他任务") }
+                TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") }
+            }
+        }
+    }
 }
 
 @Composable

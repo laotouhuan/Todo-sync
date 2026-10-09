@@ -81,13 +81,13 @@ import java.time.LocalDate
 
 // ====== Section-to-type resolution (extracted from onDragEnd) ======
 
-private data class SectionTaskResolution(
+internal data class SectionTaskResolution(
     val date: String?,
     val taskType: String,
     val recurring: String
 )
 
-private fun resolveTaskForSection(
+internal fun resolveTaskForSection(
     section: String,
     todo: Todo,
     todayStr: String,
@@ -124,7 +124,8 @@ private fun resolveTaskForSection(
             } else {
                 todo.date
             }
-            SectionTaskResolution(targetDate, TaskType.WEEKLY_CHECKIN, RecurringType.NONE)
+            SectionTaskResolution(targetDate, TaskType.WEEKLY_CHECKIN,
+                if (todo.taskType == TaskType.WEEKLY_CHECKIN) todo.recurring else RecurringType.NONE)
         }
         "month" -> {
             val targetDate = if (todo.date == null || !isMonthDate(todo.date!!)) {
@@ -132,7 +133,8 @@ private fun resolveTaskForSection(
             } else {
                 todo.date
             }
-            SectionTaskResolution(targetDate, TaskType.MONTHLY_CHECKIN, RecurringType.NONE)
+            SectionTaskResolution(targetDate, TaskType.MONTHLY_CHECKIN,
+                if (todo.taskType == TaskType.MONTHLY_CHECKIN) todo.recurring else RecurringType.NONE)
         }
         else -> SectionTaskResolution(todo.date, todo.taskType, todo.recurring)
     }
@@ -778,7 +780,6 @@ fun ClassicListView(viewModel: TodoViewModel) {
                         Pair("无日期", "@none"),
                         Pair("今天", "@today"),
                         Pair("明天", "@tomorrow"),
-                        Pair("每天重复", "@daily"),
                         Pair("本周打卡", "@week"),
                         Pair("本月打卡", "@month")
                     ).filter { it.second.startsWith("@$atSearchQuery", ignoreCase = true) }
@@ -1047,28 +1048,7 @@ fun TodoItemRow(
                                         }
                                     }
                             )
-                            if (todo.recurring == RecurringType.DAILY_REPEAT) {
-                                Spacer(Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .background(
-                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                                            shape = RoundedCornerShape(10.dp)
-                                        )
-                                        .border(
-                                            width = 0.5.dp,
-                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                                            shape = RoundedCornerShape(10.dp)
-                                        )
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "每天重复",
-                                        color = MaterialTheme.colorScheme.primary,
-                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                                    )
-                                }
-                            }
+
                         }
                         val parsedMeta = remember(todo.content) { todo.extractCollaboratorContent() }
                         val meta = mutableListOf<String>()
@@ -1088,7 +1068,6 @@ fun TodoItemRow(
                                 meta.add("✓ 完成于 $mmdd")
                             }
                         }
-                        if (todo.recurring != RecurringType.NONE) meta.add("🔄")
                         if (todo.subtasks.isNotEmpty()) meta.add("📋 ${todo.subtasks.count { it.completed }}/${todo.subtasks.size}")
                         if (meta.isNotEmpty()) {
                             Text(text = meta.joinToString(" | "), style = MaterialTheme.typography.bodySmall, color = Color.Gray)

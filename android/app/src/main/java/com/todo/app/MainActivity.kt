@@ -36,6 +36,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import com.todo.app.data.model.SyncPhase
 
 class MainActivity : ComponentActivity() {
 
@@ -106,6 +107,23 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
 
 @Composable
 fun TodoApp(viewModel: TodoViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(viewModel) {
+        launch {
+            viewModel.repositoryEvents.collect { event ->
+                val message = when (event) {
+                    is com.todo.app.data.repository.UiEvent.ShowMessage -> event.message
+                    is com.todo.app.data.repository.UiEvent.ShowError -> event.error
+                }
+                android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+        launch {
+            viewModel.uiEvent.collect { message ->
+                android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -164,25 +182,23 @@ fun TodoApp(viewModel: TodoViewModel) {
 fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?) {
     val activeSource by viewModel.activeSource.collectAsState()
     val collabs by viewModel.collaborations.collectAsState()
-    val collabLoading by viewModel.collabLoading.collectAsState()
-    val isSyncing by viewModel.isSyncing.collectAsState()
+    val syncOutcome by viewModel.syncOutcome.collectAsState()
     val showSearchBar by viewModel.showSearchBar.collectAsState()
     var showSourceMenu by remember { mutableStateOf(false) }
 
     val isReadOnly = activeSource is TodoViewModel.ActiveSource.Collaboration
-    val isLoading = if (activeSource is TodoViewModel.ActiveSource.Personal) isSyncing else collabLoading
+    val target = when (val source = activeSource) {
+        is TodoViewModel.ActiveSource.Personal -> "personal"
+        is TodoViewModel.ActiveSource.Collaboration -> "collaboration:${source.collab.id}:${source.collab.updatedAt}"
+    }
+    val isLoading = syncOutcome.target == target && syncOutcome.phase == SyncPhase.RUNNING
+    val syncFailed = syncOutcome.target == target && syncOutcome.isFailure
+    var showSuccess by remember(syncOutcome, activeSource) { mutableStateOf(false) }
 
-    var wasLoading by remember { mutableStateOf(false) }
-    var showSuccess by remember { mutableStateOf(false) }
-
-    LaunchedEffect(isLoading) {
-        if (isLoading) {
-            wasLoading = true
-            showSuccess = false
-        } else if (wasLoading) {
-            showSuccess = true
-            wasLoading = false
-            kotlinx.coroutines.delay(1500)
+    LaunchedEffect(syncOutcome, activeSource) {
+        showSuccess = syncOutcome.showsSuccess(target)
+        if (showSuccess) {
+            delay((syncOutcome.completedAt + 1500 - System.currentTimeMillis()).coerceAtLeast(0))
             showSuccess = false
         }
     }
@@ -279,6 +295,8 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?) {
                     )
                 }
             }
+            if (syncFailed) Text("同步失败", color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall)
             IconButton(
                 onClick = {
                     if (showSuccess) return@IconButton
@@ -289,7 +307,7 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?) {
                         viewModel.syncWithCloud()
                     }
                 },
-                enabled = true
+                enabled = !isLoading
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
@@ -299,6 +317,9 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?) {
                         contentDescription = "同步成功",
                         tint = androidx.compose.ui.graphics.Color(0xFF10B981)
                     )
+                } else if (syncFailed) {
+                    Icon(Icons.Filled.Warning, contentDescription = "${syncOutcome.error?.message}，点击重试",
+                        tint = MaterialTheme.colorScheme.error)
                 } else {
                     Icon(
                         imageVector = Icons.Filled.Refresh,

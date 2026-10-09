@@ -28,12 +28,17 @@ class WidgetTimerStateTest {
         assertEquals(WidgetTimerState.Idle, widgetTimerState(data(entry.copy(deleted = true), entry.copy(ended_at = now.toString())), true, now))
     }
 
-    @Test fun pickerIncludesFullFocusListWithoutWidgetDisplayLimit() {
-        val todos = (1..30).map { Todo.create("任务 $it", "2026-09-22") }
-        val hidden = Todo.create("删除任务", "2026-09-22").copy(deleted = true)
-        val result = widgetTimerCandidates(TodoData(1, "", todos + hidden),
-            DateStrings("2026-09-22", "2026-09-23", "2026-W39", "2026-09"))
-        assertEquals(30, result.size)
-        assertFalse(result.any { it.deleted })
+    @Test fun pickerUsesOnlyRecentFiveRegardlessOfFocusDateOrWidgetDisplayLimit() {
+        val todos = (1..8).map { Todo.create("任务 $it", null).copy(id = it.toString()) }
+        val records = todos.mapIndexed { index, todo ->
+            val start = now.minusSeconds((8L - index) * 120)
+            entry.copy(id = "entry-$index", task_ref = TaskReference(todo.id), started_at = start.toString(), ended_at = start.plusSeconds(60).toString())
+        }
+        val data = TodoData(1, "", todos, timeEntries = records)
+        val result = widgetTimerCandidates(data)
+        assertEquals(listOf("8", "7", "6", "5", "4"), result.map { it.todo.id })
+        assertEquals(Learning.recentTimingTasks(todos, records), result)
+        assertTrue(widgetTimerCandidates(data.copy(timeEntries = emptyList())).isEmpty())
+        assertTrue(widgetTimerCandidates(data.copy(timeEntries = records + entry)).isEmpty())
     }
 }

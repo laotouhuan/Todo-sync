@@ -5,7 +5,7 @@ function isCheckin(todo) {
 }
 
 function isRecurring(todo) {
-    return todo.recurring === 'daily_repeat' || isCheckin(todo);
+    return isCheckin(todo);
 }
 
 // 完成记录按设备本地日期判断；旧版纯日期保持原意，无效时间不算完成证据。
@@ -27,9 +27,6 @@ export function evaluateReminderRule(rule, todos, date = new Date()) {
         ? (todo.completed_dates || []).some(value => completionDate(value) === today)
         : Boolean(todo.completed && completionDate(todo.completed_at) === today);
     const isCurrentRecurring = todo => {
-        if (todo.recurring === 'daily_repeat') {
-            return !todo.date || todo.date === today || (!todo.completed && todo.date < today);
-        }
         if (todo.task_type === 'weekly_checkin') return !todo.date || todo.date === week;
         if (todo.task_type === 'monthly_checkin') return !todo.date || todo.date === month;
         return false;

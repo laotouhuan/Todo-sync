@@ -45,6 +45,7 @@ const appState = {
     weekCollapsed: true,
     monthCollapsed: true,
     currentEditingTodo: null,
+    currentEditingOriginalType: null,
     editCachedDate: '',
     dateFilter: 'today', // 'today' | 'all'
     searchQuery: '',
@@ -60,7 +61,6 @@ const appState = {
     pastCollapsed: true,
     statsFilters: {
         normal: true,
-        daily: true,
         weekly: true,
         monthly: true
     },
@@ -121,7 +121,7 @@ function showReadOnlyTask(todo) {
     const dialog = document.createElement('dialog'); dialog.className = 'learning-dialog';
     const text = (tag, value) => { const node = document.createElement(tag); node.textContent = value; dialog.append(node); };
     text('h3', '任务详情'); text('p', todo.content);
-    const type = todo.recurring === 'daily_repeat' ? '每天重复' : ({ weekly_checkin: '周打卡', monthly_checkin: '月打卡' }[todo.task_type] || '普通待办');
+    const type = ({ weekly_checkin: '周打卡', monthly_checkin: '月打卡' }[todo.task_type] || '普通待办');
     text('p', `类型：${type} · 标签：${todo.label || '未分类'}`);
     text('p', `截止日期：${todo.date || '未设置'} ${todo.time || ''}`);
     text('p', `状态：${todo.completed ? '已完成' : '未完成'} · 完成时间：${todo.completed_at ? new Date(todo.completed_at).toLocaleString() : '无'}`);
@@ -184,7 +184,6 @@ let _pendingMidnightRefresh = false;
 // ====== 共享常量 ======
 const PURGE_DELETED_AFTER_DAYS = 7;
 const DEFAULT_HISTORY_VISIBLE_DAYS = 3;
-const RECURRING_LABELS = { daily_repeat: '每天重复' };
 
 // SVG Icons
 const ICON_VIEW_LIST = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18"><path d="M4 6H20V8H4V6ZM4 11H20V13H4V11ZM4 16H20V18H4V16Z" fill="currentColor"/></svg>`;
@@ -248,7 +247,6 @@ function bindAutocomplete(inputEl, listEl) {
         { label: '无日期', value: '@none', desc: '强制为无日期任务' },
         { label: '今天', value: '@today', desc: '今天截止' },
         { label: '明天', value: '@tomorrow', desc: '明天截止' },
-        { label: '每天重复', value: '@daily', desc: '每日重复任务' },
         { label: '本周打卡', value: '@week', desc: '本周打卡任务' },
         { label: '本月打卡', value: '@month', desc: '本月打卡任务' }
     ];
@@ -340,22 +338,15 @@ function bindAutocomplete(inputEl, listEl) {
 }
 
 /**
- * 统一设置任务类型和重复属性（供表单提交和闪电录入共用）
+ * 统一设置新任务类型（供表单提交和闪电录入共用）
  * @param {Object} todo - createTodo 返回的对象
  * @param {string|null} taskType - parseInputSyntax 解析出的任务类型
  * @param {number|null} targetCount - parseInputSyntax 解析出的目标打卡次数
  */
 function applyTaskType(todo, taskType, targetCount) {
-    if (taskType === 'daily_repeat') {
-        todo.task_type = 'normal';
-        todo.recurring = 'daily_repeat';
-    } else {
-        if (taskType) todo.task_type = taskType;
-        if (targetCount !== null) todo.target_count = targetCount;
-        if (taskType === 'weekly_checkin' || taskType === 'monthly_checkin') {
-            todo.recurring = 'none';
-        }
-    }
+    if (taskType) todo.task_type = taskType;
+    if (targetCount !== null) todo.target_count = targetCount;
+    todo.recurring = 'none';
 }
 
 // ====== Data I/O ======
@@ -1026,9 +1017,6 @@ function getMetaHtml(todo, todayStr, tomorrowStr) {
         html += `<span class="reminder-overdue-badge">提醒已过期</span>`;
     }
     // Time rendering removed as per v1.0.2 design
-    if (todo.recurring && todo.recurring !== 'none') {
-        html += `<span class="meta-item meta-icon" title="循环: ${escapeHtml(RECURRING_LABELS[todo.recurring] || todo.recurring)}">🔁</span>`;
-    }
     if (todo.subtasks && todo.subtasks.length > 0) {
         const completedCount = todo.subtasks.filter(s => s.completed).length;
         html += `<span class="meta-item subtask-progress">📋 ${completedCount}/${todo.subtasks.length}</span>`;
@@ -1251,27 +1239,6 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
             t.updated_at = new Date().toISOString();
         }
         else {
-            if (!t.completed && t.recurring === 'daily_repeat') {
-                const tomorrowStr = getTomorrowString();
-                const existsClone = appState.todoData.todos.some(
-                    x => x.content === t.content && x.date === tomorrowStr 
-                         && x.recurring === 'daily_repeat' && !x.deleted
-                );
-                if (!existsClone) {
-                    const clone = createTodo(t.content, tomorrowStr);
-                    clone.recurring = 'daily_repeat';
-                    clone.order = -Date.now();
-                    clone.subtasks = t.subtasks
-                        ? deepClone(t.subtasks).map(s => {
-                            s.id = generateUUID();
-                            s.completed = false;
-                            s.completed_at = null;
-                            return s;
-                        })
-                        : [];
-                    appState.todoData.todos.push(clone);
-                }
-            }
             t.completed = !t.completed;
             if (t.completed) {
                 t.completed_at = new Date().toISOString();
@@ -1856,56 +1823,49 @@ async function saveEditModal() {
         const taskTypeSelect = document.getElementById('edit-task-type');
         if (taskTypeSelect) {
             const taskTypeVal = taskTypeSelect.value;
-            if (taskTypeVal === 'daily_repeat') {
-                draft.task_type = 'normal';
-                draft.recurring = 'daily_repeat';
-                draft.time = null;
-                const existingDate = draft.date;
-                if (!existingDate || isWeekDate(existingDate) || isMonthDate(existingDate)) {
-                    draft.date = getTodayString();
-                }
-            } else {
-                draft.task_type = taskTypeVal;
-                draft.recurring = 'none';
+            draft.task_type = taskTypeVal;
 
-                if (taskTypeVal === 'normal') {
-                    const hasDateSwitch = document.getElementById('edit-has-date-switch');
-                    const dateInput = document.getElementById('edit-date');
-                    if (hasDateSwitch && hasDateSwitch.checked && dateInput) {
-                        let dateVal = dateInput.value || null;
-                        if (dateVal) {
-                            dateVal = dateVal.trim();
-                            const isDay = /^\d{4}-\d{2}-\d{2}$/.test(dateVal);
-                            const isWeek = isWeekDate(dateVal);
-                            const isMonth = isMonthDate(dateVal);
-                            if (!isDay && !isWeek && !isMonth) {
-                                dateVal = appState.currentEditingTodo.date || null;
-                                dateInput.value = dateVal || '';
-                            } else if (isWeek) {
-                                draft.task_type = 'weekly_checkin';
-                            } else if (isMonth) {
-                                draft.task_type = 'monthly_checkin';
-                            }
+            if (taskTypeVal === 'normal') {
+                const hasDateSwitch = document.getElementById('edit-has-date-switch');
+                const dateInput = document.getElementById('edit-date');
+                if (hasDateSwitch && hasDateSwitch.checked && dateInput) {
+                    let dateVal = dateInput.value || null;
+                    if (dateVal) {
+                        dateVal = dateVal.trim();
+                        const isDay = /^\d{4}-\d{2}-\d{2}$/.test(dateVal);
+                        const isWeek = isWeekDate(dateVal);
+                        const isMonth = isMonthDate(dateVal);
+                        if (!isDay && !isWeek && !isMonth) {
+                            dateVal = appState.currentEditingTodo.date || null;
+                            dateInput.value = dateVal || '';
+                        } else if (isWeek) {
+                            draft.task_type = 'weekly_checkin';
+                        } else if (isMonth) {
+                            draft.task_type = 'monthly_checkin';
                         }
-                        draft.date = dateVal;
-                    } else {
-                        draft.date = null;
                     }
-                    draft.time = null;
+                    draft.date = dateVal;
                 } else {
-                    draft.time = null;
-                    if (taskTypeVal === 'weekly_checkin') {
-                        if (!isWeekDate(draft.date)) {
-                            draft.date = getThisWeekString();
-                        }
-                    } else if (taskTypeVal === 'monthly_checkin') {
-                        if (!isMonthDate(draft.date)) {
-                            draft.date = getThisMonthString();
-                        }
+                    draft.date = null;
+                }
+                draft.time = null;
+            } else {
+                draft.time = null;
+                if (taskTypeVal === 'weekly_checkin') {
+                    if (!isWeekDate(draft.date)) {
+                        draft.date = getThisWeekString();
+                    }
+                } else if (taskTypeVal === 'monthly_checkin') {
+                    if (!isMonthDate(draft.date)) {
+                        draft.date = getThisMonthString();
                     }
                 }
             }
         }
+
+        // 用打开时的类型与最终保存类型比较，保留普通编辑中的旧标记。
+        const originalType = appState.currentEditingOriginalType;
+        draft.recurring = draft.task_type === originalType.task_type ? originalType.recurring : 'none';
 
         const targetCountInput = document.getElementById('edit-target-count');
         if (targetCountInput) {
@@ -1946,7 +1906,7 @@ async function saveEditModal() {
 
         draft.subtasks = deepClone(appState.currentEditingSubtasks);
 
-        if (appState.currentEditingCompletedDates) {
+        if (appState.currentEditingCompletedDates && (draft.task_type === 'weekly_checkin' || draft.task_type === 'monthly_checkin')) {
             draft.completed_dates = [...appState.currentEditingCompletedDates];
             if (draft.target_count) {
                 const currentPeriodCount = draft.task_type === 'weekly_checkin'
@@ -1996,10 +1956,10 @@ function updateEditModalFields(taskTypeVal) {
         checkinGridGroup.style.display = isCheckin ? 'block' : 'none';
     }
 
-    const isNormalOrDaily = taskTypeVal === 'normal' || taskTypeVal === 'daily_repeat';
+    const isNormal = taskTypeVal === 'normal';
     if (completedAtRow) {
         const todo = appState.currentEditingTodo;
-        completedAtRow.style.display = (isNormalOrDaily && todo && todo.completed) ? 'flex' : 'none';
+        completedAtRow.style.display = (isNormal && todo && todo.completed) ? 'flex' : 'none';
     }
 }
 
@@ -2028,6 +1988,7 @@ function openEditModal(todo) {
     if (!todo) return;
     if (appState.activeSource.type === 'collaboration') { showReadOnlyTask(todo); return; }
     appState.currentEditingTodo = structuredClone(todo);
+    appState.currentEditingOriginalType = { task_type: todo.task_type || 'normal', recurring: todo.recurring || 'none' };
     learningUI.editTask(todo);
 
     const modal = document.getElementById('edit-modal');
@@ -2041,10 +2002,7 @@ function openEditModal(todo) {
         }
 
         const taskTypeSelect = document.getElementById('edit-task-type');
-        let taskTypeVal = todo.task_type || 'normal';
-        if (todo.recurring === 'daily_repeat') {
-            taskTypeVal = 'daily_repeat';
-        }
+        const taskTypeVal = todo.task_type || 'normal';
         if (taskTypeSelect) {
             taskTypeSelect.value = taskTypeVal;
         }
@@ -2079,8 +2037,8 @@ function openEditModal(todo) {
         // 初始化并填充完成日期和时间
         const completedAtRow = document.getElementById('edit-completed-at-row');
         if (completedAtRow) {
-            const isNormalOrDaily = taskTypeVal === 'normal' || taskTypeVal === 'daily_repeat';
-            if (todo.completed && isNormalOrDaily) {
+            const isNormal = taskTypeVal === 'normal';
+            if (todo.completed && isNormal) {
                 completedAtRow.style.display = 'flex';
                 const compDateInput = document.getElementById('edit-completed-date');
                 const compTimeInput = document.getElementById('edit-completed-time');
@@ -2114,8 +2072,7 @@ function openEditModal(todo) {
             if (reminderRepeatEl) reminderRepeatEl.checked = false;
         }
 
-        const isRecurring = taskTypeVal === 'daily_repeat' || taskTypeVal === 'weekly_checkin' || taskTypeVal === 'monthly_checkin';
-        if (reminderRepeatRow) reminderRepeatRow.style.display = isRecurring ? 'block' : 'none';
+        if (reminderRepeatRow) reminderRepeatRow.style.display = 'block';
 
         appState.currentEditingSubtasks = todo.subtasks ? deepClone(todo.subtasks) : [];
         appState.currentEditingCompletedDates = todo.completed_dates ? [...todo.completed_dates] : [];
@@ -2139,6 +2096,7 @@ function closeEditModal() {
     const modal = document.getElementById('edit-modal');
     if (modal) modal.classList.remove('active');
     appState.currentEditingTodo = null;
+    appState.currentEditingOriginalType = null;
     appState.currentEditingSubtasks = [];
     appState.currentEditingCompletedDates = null;
     if (_pendingMidnightRefresh) {
@@ -2249,7 +2207,6 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         const filters = appState.statsFilters;
         if (t.task_type === 'weekly_checkin') return filters.weekly;
         if (t.task_type === 'monthly_checkin') return filters.monthly;
-        if (t.recurring === 'daily_repeat') return filters.daily;
         return filters.normal;
     });
 
@@ -2338,10 +2295,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
                 
                 let color = '#10B981';
                 let shape = 'circle';
-                if (t.recurring === 'daily_repeat') {
-                    color = '#F59E0B';
-                    shape = 'triangle';
-                } else if (t.task_type === 'weekly_checkin') {
+                if (t.task_type === 'weekly_checkin') {
                     color = '#6366F1';
                     shape = 'diamond';
                 } else if (t.task_type === 'monthly_checkin') {
@@ -2367,11 +2321,6 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
 
                 if (shape === 'circle') {
                     innerSvg = `<circle cx="${x}" cy="${y}" r="${dotSize}" fill="${color}" stroke="#ffffff" stroke-width="${strokeWidth}" opacity="${opacityVal}" />`;
-                } else if (shape === 'triangle') {
-                    const p1 = `${x},${y - dotSize * 1.1}`;
-                    const p2 = `${x - dotSize},${y + dotSize * 0.9}`;
-                    const p3 = `${x + dotSize},${y + dotSize * 0.9}`;
-                    innerSvg = `<polygon points="${p1} ${p2} ${p3}" fill="${color}" stroke="#ffffff" stroke-width="${strokeWidth}" opacity="${opacityVal}" />`;
                 } else if (shape === 'diamond') {
                     const p1 = `${x},${y - dotSize * 1.1}`;
                     const p2 = `${x + dotSize * 1.1},${y}`;
@@ -2677,10 +2626,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
             
             let color = '#10B981';
             let shape = 'circle';
-            if (t.recurring === 'daily_repeat') {
-                color = '#F59E0B';
-                shape = 'triangle';
-            } else if (t.task_type === 'weekly_checkin') {
+            if (t.task_type === 'weekly_checkin') {
                 color = '#6366F1';
                 shape = 'diamond';
             } else if (t.task_type === 'monthly_checkin') {
@@ -2694,12 +2640,6 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
                 shapeEl.setAttribute('cx', x);
                 shapeEl.setAttribute('cy', y);
                 shapeEl.setAttribute('r', dotSize);
-            } else if (shape === 'triangle') {
-                shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-                const p1 = `${x},${y - dotSize * 1.1}`;
-                const p2 = `${x - dotSize},${y + dotSize * 0.9}`;
-                const p3 = `${x + dotSize},${y + dotSize * 0.9}`;
-                shapeEl.setAttribute('points', `${p1} ${p2} ${p3}`);
             } else if (shape === 'diamond') {
                 shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
                 const p1 = `${x},${y - dotSize * 1.1}`;
@@ -2812,7 +2752,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
 }
 
 function renderHealth(todayStr, tomorrowStr) {
-    const activeTodos = getActiveTodos().filter(t => !t.deleted && t.task_type !== 'weekly_checkin' && t.task_type !== 'monthly_checkin' && t.recurring !== 'daily_repeat');
+    const activeTodos = getActiveTodos().filter(t => !t.deleted && t.task_type !== 'weekly_checkin' && t.task_type !== 'monthly_checkin');
     const incompleteTodos = activeTodos.filter(t => !t.completed);
     const completedTodos = activeTodos.filter(t => t.completed && t.completed_at);
     
@@ -3198,7 +3138,6 @@ function render() {
         appState.healthThroughputDays,
         appState.showAllHistory,
         appState.statsFilters.normal,
-        appState.statsFilters.daily,
         appState.statsFilters.weekly,
         appState.statsFilters.monthly,
         appState.showStatsList,
@@ -3392,6 +3331,8 @@ function render() {
                         const draggedId = evt.item.dataset.id;
                         const todoMap = new Map(appState.todoData.todos.map(t => [t.id, t]));
                         const t = todoMap.get(draggedId);
+                        const originalTaskType = t?.task_type;
+                        const originalRecurring = t?.recurring;
 
                         // 1. 如果拖动到了折叠头上方松手
                         if (targetHeaderType && t) {
@@ -3402,7 +3343,7 @@ function render() {
                                     stateChanged = true;
                                 }
                                 t.task_type = 'normal';
-                                t.recurring = 'none';
+                                t.recurring = t.task_type === originalTaskType ? originalRecurring : 'none';
                                 t.date = todayStr;
                             } else if (targetHeaderType === 'weekly') {
                                 if (appState.weekCollapsed) {
@@ -3410,7 +3351,7 @@ function render() {
                                     stateChanged = true;
                                 }
                                 t.task_type = 'weekly_checkin';
-                                t.recurring = 'none';
+                                t.recurring = t.task_type === originalTaskType ? originalRecurring : 'none';
                                 t.date = thisWeekStr;
                             } else if (targetHeaderType === 'monthly') {
                                 if (appState.monthCollapsed) {
@@ -3418,7 +3359,7 @@ function render() {
                                     stateChanged = true;
                                 }
                                 t.task_type = 'monthly_checkin';
-                                t.recurring = 'none';
+                                t.recurring = t.task_type === originalTaskType ? originalRecurring : 'none';
                                 t.date = thisMonthStr;
                             }
                             t.order = -Date.now();
@@ -3440,7 +3381,7 @@ function render() {
                                 if (separatorIndex !== -1 && nodeIndex < separatorIndex) {
                                     // 拖到上半区：今日任务
                                     t.task_type = 'normal';
-                                    t.recurring = 'none';
+                                    t.recurring = t.task_type === originalTaskType ? originalRecurring : 'none';
                                     if (!isOverdue(t, todayStr)) {
                                         if (t.date !== todayStr) {
                                             t.date = todayStr;
@@ -3452,27 +3393,27 @@ function render() {
                                     // 保留周/月格式日期，避免丢失周期标识
                                     if (t.date && !isWeekDate(t.date) && !isMonthDate(t.date)) {
                                         t.task_type = 'normal';
-                                        t.recurring = 'none';
+                                        t.recurring = t.task_type === originalTaskType ? originalRecurring : 'none';
                                         t.date = '';
                                         stateChanged = true;
                                     } else if (isWeekDate(t.date)) {
                                         t.task_type = 'weekly_checkin';
-                                        t.recurring = 'none';
+                                        t.recurring = t.task_type === originalTaskType ? originalRecurring : 'none';
                                     } else if (isMonthDate(t.date)) {
                                         t.task_type = 'monthly_checkin';
-                                        t.recurring = 'none';
+                                        t.recurring = t.task_type === originalTaskType ? originalRecurring : 'none';
                                     }
                                 }
                             } else if (toType === 'weekly') {
                                 t.task_type = 'weekly_checkin';
-                                t.recurring = 'none';
+                                t.recurring = t.task_type === originalTaskType ? originalRecurring : 'none';
                                 if (t.date !== thisWeekStr) {
                                     t.date = thisWeekStr;
                                     stateChanged = true;
                                 }
                             } else if (toType === 'monthly') {
                                 t.task_type = 'monthly_checkin';
-                                t.recurring = 'none';
+                                t.recurring = t.task_type === originalTaskType ? originalRecurring : 'none';
                                 if (t.date !== thisMonthStr) {
                                     t.date = thisMonthStr;
                                     stateChanged = true;
@@ -4534,7 +4475,7 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
         });
     }
 
-    ['normal', 'daily', 'weekly', 'monthly'].forEach(key => {
+    ['normal', 'weekly', 'monthly'].forEach(key => {
         const cb = document.getElementById(`filter-${key}`);
         if (cb) {
             cb.checked = appState.statsFilters[key];
@@ -4696,7 +4637,6 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
                 newTodo.target_count = orig.target_count || null;
                 newTodo.label = orig.label || null;
                 newTodo.time = orig.time || null;
-                newTodo.recurring = orig.recurring || 'none';
                 // 候选已按上期列表排序，递增排序值保持导入后的相同顺序。
                 newTodo.order = nowMs + orderOffset * 1000;
                 newTodo.created_at = new Date(nowMs - orderOffset * 10).toISOString();
@@ -4730,27 +4670,19 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
     if (taskTypeSelect) {
         taskTypeSelect.addEventListener('change', () => {
             const reminderRepeatRow = document.getElementById('edit-reminder-repeat-row');
-            const isRecurring = taskTypeSelect.value === 'daily_repeat' || taskTypeSelect.value === 'weekly_checkin' || taskTypeSelect.value === 'monthly_checkin';
-            if (reminderRepeatRow) reminderRepeatRow.style.display = isRecurring ? 'block' : 'none';
+            if (reminderRepeatRow) reminderRepeatRow.style.display = 'block';
             updateEditModalFields(taskTypeSelect.value);
             if (appState.currentEditingTodo) {
-                // 如果是“每天重复”，底层映射为 normal + recurring = daily_repeat
-                if (taskTypeSelect.value === 'daily_repeat') {
-                    appState.currentEditingTodo.task_type = 'normal';
-                    appState.currentEditingTodo.recurring = 'daily_repeat';
-                } else {
-                    appState.currentEditingTodo.task_type = taskTypeSelect.value;
-                    appState.currentEditingTodo.recurring = 'none';
-                    if (taskTypeSelect.value === 'normal') {
-                        if (isWeekDate(appState.currentEditingTodo.date) || isMonthDate(appState.currentEditingTodo.date)) {
-                            appState.currentEditingTodo.date = getTodayString();
-                            const dateInput = document.getElementById('edit-date');
-                            if (dateInput) {
-                                dateInput.value = appState.currentEditingTodo.date;
-                                dateInput.type = 'date';
-                                const typeBtn = document.getElementById('edit-date-type-btn');
-                                if (typeBtn) typeBtn.textContent = '文本格式';
-                            }
+                appState.currentEditingTodo.task_type = taskTypeSelect.value;
+                if (taskTypeSelect.value === 'normal') {
+                    if (isWeekDate(appState.currentEditingTodo.date) || isMonthDate(appState.currentEditingTodo.date)) {
+                        appState.currentEditingTodo.date = getTodayString();
+                        const dateInput = document.getElementById('edit-date');
+                        if (dateInput) {
+                            dateInput.value = appState.currentEditingTodo.date;
+                            dateInput.type = 'date';
+                            const typeBtn = document.getElementById('edit-date-type-btn');
+                            if (typeBtn) typeBtn.textContent = '文本格式';
                         }
                     }
                 }

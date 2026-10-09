@@ -53,13 +53,29 @@ pub(super) fn decode(code: String, key: String) -> Result<SharePayload, String> 
     serde_json::from_value(value).map_err(|_| "分享码字段无效，请重新复制完整内容。".into())
 }
 
+#[derive(Clone, Copy)]
+enum ShareContext { Generation, Collaboration }
+
 pub(super) fn http_status(status: u16) -> Result<(), String> {
+    http_status_for(status, ShareContext::Collaboration)
+}
+
+fn http_status_for(status: u16, context: ShareContext) -> Result<(), String> {
     match status {
         200..=299 => Ok(()),
-        401 => Err("对方 WebDAV 认证失败（401）。请让对方确认个人同步成功，并重新生成分享码后导入。".into()),
-        403 => Err("服务器拒绝访问（403），请对方检查访问权限。".into()),
-        404 => Err("对方待办文件不存在（404），请确认路径并完成一次同步。".into()),
-        300..=399 => Err("服务器返回重定向，请确认 WebDAV 目标地址后重试。".into()),
+        401 => Err(match context {
+            ShareContext::Generation => "你的 WebDAV 认证失败（401）。请检查“设置 → 同步”中的账号和第三方应用密码，保存后重试。",
+            ShareContext::Collaboration => "分享码中的 WebDAV 凭据认证失败（401）。请分享者检查同步配置，并重新生成分享码后导入。",
+        }.into()),
+        403 => Err(match context {
+            ShareContext::Generation => "服务器拒绝访问（403），请检查你的 WebDAV 访问权限。",
+            ShareContext::Collaboration => "服务器拒绝访问（403），请分享者检查访问权限。",
+        }.into()),
+        404 => Err(match context {
+            ShareContext::Generation => "你的待办文件不存在（404），请检查同步路径并完成一次同步。",
+            ShareContext::Collaboration => "分享者待办文件不存在（404），请分享者确认路径并完成一次同步。",
+        }.into()),
+        s @ 300..=399 => Err(format!("服务器返回重定向（{s}），请确认 WebDAV 目标地址后重试。")),
         s => Err(format!("WebDAV 请求失败（{s}），请稍后重试。")),
     }
 }
@@ -74,8 +90,11 @@ fn expiry(exp: Option<i64>, date: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn valid_data(body: &str) -> Result<(), String> {
-    let invalid = "对方待办文件格式无效，请检查同步文件";
+fn valid_data(body: &str, context: ShareContext) -> Result<(), String> {
+    let invalid = match context {
+        ShareContext::Generation => "你的待办文件格式无效，请检查同步文件",
+        ShareContext::Collaboration => "分享者待办文件格式无效，请检查同步文件",
+    };
     let data: serde_json::Value = serde_json::from_str(body).map_err(|_| invalid)?;
     if !data["version"].is_i64() || !data["last_updated"].is_string() { return Err(invalid.into()); }
     let todos = data["todos"].as_array().ok_or(invalid)?;
@@ -87,21 +106,31 @@ fn valid_data(body: &str) -> Result<(), String> {
 }
 
 pub(super) async fn read(client: &reqwest::Client, source: &CollaborationSource) -> Result<CollabReadResult, String> {
+    read_for(client, source, ShareContext::Collaboration).await
+}
+
+async fn read_for(client: &reqwest::Client, source: &CollaborationSource, context: ShareContext) -> Result<CollabReadResult, String> {
     let response = client.get(super::build_collab_url(source))
         .basic_auth(&source.webdav_username, Some(&source.webdav_password))
-        .send().await.map_err(|_| "无法连接对方服务器，请检查地址和网络后重试。")?;
-    http_status(response.status().as_u16())?;
+        .send().await.map_err(|_| match context {
+            ShareContext::Generation => "无法连接你的 WebDAV 服务器，请检查地址和网络后重试。",
+            ShareContext::Collaboration => "无法连接分享者服务器，请检查地址和网络后重试。",
+        })?;
+    http_status_for(response.status().as_u16(), context)?;
     let server_time = response.headers().get("date").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
     expiry(source.expire_at, &server_time)?;
-    let data = response.text().await.map_err(|_| "无法读取对方待办文件，请稍后重试。")?;
-    valid_data(&data)?;
+    let data = response.text().await.map_err(|_| match context {
+        ShareContext::Generation => "无法读取你的待办文件，请稍后重试。",
+        ShareContext::Collaboration => "无法读取分享者待办文件，请稍后重试。",
+    })?;
+    valid_data(&data, context)?;
     Ok(CollabReadResult { data, server_time })
 }
 
 pub(super) async fn generate(client: &reqwest::Client, payload: SharePayload,
     is_current: impl FnOnce() -> bool) -> Result<(String, String), String> {
     let source = payload.source();
-    generate_with_read(payload, is_current, read(client, &source)).await
+    generate_with_read(payload, is_current, read_for(client, &source, ShareContext::Generation)).await
 }
 
 async fn generate_with_read(payload: SharePayload, is_current: impl FnOnce() -> bool,
@@ -152,6 +181,41 @@ mod tests {
     fn payload() -> SharePayload {
         SharePayload { url: "https://example.test/dav/".into(), user: "fake".into(),
             pass: " fake-password ".into(), path: "清单/todo_data.json".into(), exp: 0 }
+    }
+
+    #[test]
+    fn generation_and_import_report_correct_target_with_identical_credentials() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            for status in [401, 403, 404] {
+                let (source, client, worker) = server(status, "{}", None, 2);
+                let error = generate_with_read(payload(), || true, read_for(&client, &source, ShareContext::Generation)).await.err().unwrap();
+                assert!(error.contains(&status.to_string()));
+                assert!(error.contains("你的"));
+                assert!(!error.contains("分享者"));
+                assert!(!error.contains("fake-password"));
+                let mut committed = false;
+                let error = import_with_read(payload(), |_| { committed = true; Ok(()) }, read(&client, &source)).await.err().unwrap();
+                assert!(error.contains(&status.to_string()));
+                assert!(error.contains("分享者"));
+                assert!(!committed);
+                let requests = worker.join().unwrap();
+                let authorization = |index: usize| requests[index].lines().find(|line| line.to_lowercase().starts_with("authorization:")).unwrap();
+                assert_eq!(authorization(0), authorization(1));
+            }
+        });
+    }
+
+    #[test]
+    fn malformed_file_refers_to_operation_target() {
+        run(async {
+            let (source, client, worker) = server(200, "{invalid", None, 2);
+            let own = read_for(&client, &source, ShareContext::Generation).await.err().unwrap();
+            let shared = read(&client, &source).await.err().unwrap();
+            assert!(own.contains("你的待办文件格式无效"));
+            assert!(shared.contains("分享者待办文件格式无效"));
+            worker.join().unwrap();
+        });
     }
 
     // 测试仅把网络目标改为本机 HTTP，凭据和生产请求/响应处理保持不变。

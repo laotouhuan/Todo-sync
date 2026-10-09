@@ -1,4 +1,68 @@
+import { getISOWeekString } from './dateUtils.js';
+
 // 学习记录的纯逻辑；按设备本地自然日统计。
+function checkinDate(value) {
+    if (typeof value !== 'string') return null;
+    const day = value.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    const calendar = new Date(`${day}T12:00:00`);
+    if (!Number.isFinite(calendar.getTime()) || localDay(calendar) !== day) return null;
+    if (value === day) return calendar;
+    if (!/^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return null;
+    const timestamp = new Date(value);
+    return Number.isFinite(timestamp.getTime()) ? timestamp : null;
+}
+
+function timingTimestamp(value) {
+    if (typeof value !== 'string' || !value.includes('T')) return NaN;
+    return checkinDate(value)?.getTime() ?? NaN;
+}
+
+export function canTimeTodo(todo) {
+    if (!todo || todo.deleted) return false;
+    const weekly = todo.task_type === 'weekly_checkin';
+    const monthly = todo.task_type === 'monthly_checkin';
+    if (!weekly && !monthly) return !todo.completed;
+    if (todo.target_count == null) return true;
+    const count = (todo.completed_dates || []).filter(value => {
+        const date = checkinDate(value);
+        if (!date) return false;
+        const period = weekly ? getISOWeekString(date) : localDay(date).slice(0, 7);
+        return period === todo.date;
+    }).length;
+    return count < todo.target_count;
+}
+
+export function recentTimingTasks(todos, entries) {
+    if (entries.some(e => !e.deleted && e.ended_at == null)) return [];
+    const available = new Map(todos.filter(canTimeTodo).map(todo => [todo.id, todo]));
+    const latest = new Map();
+    for (const entry of entries) {
+        const ref = entry.task_ref;
+        if (entry.deleted || (ref?.source_type || 'personal') !== 'personal' || ref?.source_id != null) continue;
+        const todo = available.get(ref?.todo_id);
+        const start = timingTimestamp(entry.started_at), end = timingTimestamp(entry.ended_at);
+        if (!todo || !Number.isFinite(start) || !Number.isFinite(end) || end - start <= 30000) continue;
+        const previous = latest.get(todo.id);
+        if (!previous || start > previous.time) latest.set(todo.id, { todo, startedAt: entry.started_at, time: start });
+    }
+    return [...latest.values()].sort((a, b) => {
+        if (a.time !== b.time) return b.time - a.time;
+        if (a.todo.id === b.todo.id) return 0;
+        return a.todo.id < b.todo.id ? -1 : 1;
+    })
+        .slice(0, 5).map(({ todo, startedAt }) => ({ todo, startedAt }));
+}
+
+export function createRunningTimeEntry(data, todoId, now = new Date().toISOString()) {
+    const todo = data.todos.find(t => t.id === todoId);
+    if (!todo) throw new Error('任务已不存在，请重新选择');
+    if (!canTimeTodo(todo)) throw new Error('任务已删除、完成或达到目标，请重新选择');
+    if (data.time_entries.some(e => !e.deleted && e.ended_at == null)) throw new Error('已有任务正在计时，请先结束或处理记录');
+    return { id: crypto.randomUUID(), task_ref: taskReference(todo), task_content_snapshot: todo.content,
+        label_snapshot: normalizeLabel(todo.label), started_at: now, ended_at: null, created_at: now, updated_at: now, deleted: false };
+}
+
 export function normalizeLabel(value) {
     const text = typeof value === 'string' ? value.trim().normalize('NFC') : '';
     return text && text !== '未分类' ? text : null;

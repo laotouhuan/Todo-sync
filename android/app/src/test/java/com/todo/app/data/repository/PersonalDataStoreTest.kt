@@ -139,6 +139,30 @@ class PersonalDataStoreTest {
         assertEquals(1, store.data.value.timeEntries.size)
     }
 
+    @Test fun startRejectsLatestCompletedTaskAndChecksGoalInsteadOfStaleCompletedFlag() = runBlocking {
+        val store = PersonalDataStore(file())
+        for (latest in listOf(todo.copy(completed = true), todo.copy(completed = true, recurring = RecurringType.DAILY_REPEAT))) {
+            store.restore(encode(data.copy(todos = listOf(latest))))
+            assertTrue(runCatching { store.start(todo, TaskReference(todo.id), { true }, start) }.isFailure)
+            assertTrue(store.data.value.timeEntries.isEmpty())
+        }
+        val checkin = todo.copy(taskType = TaskType.WEEKLY_CHECKIN, date = "2026-W39", targetCount = 2,
+            completedDates = listOf("2026-09-22"), completed = true)
+        store.restore(encode(data.copy(todos = listOf(checkin))))
+        store.start(todo, TaskReference(todo.id), { true }, start)
+        assertTrue(store.data.value.todos.single().completed)
+        assertEquals(1, store.data.value.timeEntries.size)
+        store.restore(encode(data.copy(todos = listOf(checkin.copy(completed = false, completedDates = listOf("2026-09-22", "2026-09-23"))))))
+        assertTrue(runCatching { store.start(todo, TaskReference(todo.id), { true }, start) }.isFailure)
+        assertFalse(store.data.value.todos.single().completed)
+        assertTrue(store.data.value.timeEntries.isEmpty())
+        store.restore(encode(data.copy(todos = listOf(checkin.copy(targetCount = null)))))
+        store.start(todo, TaskReference(todo.id), { true }, start)
+        assertEquals(1, store.data.value.timeEntries.size)
+        assertTrue(runCatching { store.start(todo, TaskReference(todo.id), { true }, start) }.isFailure)
+        assertEquals(1, store.data.value.timeEntries.size)
+    }
+
     @Test fun staleStopLeavesNewTimerAndRecomputesLatestWidgetState() = runBlocking {
         val store = PersonalDataStore(file())
         val other = entry.copy(id = "other", task_content_snapshot = "另一任务")

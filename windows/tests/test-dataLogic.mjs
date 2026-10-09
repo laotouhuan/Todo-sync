@@ -698,6 +698,64 @@ describe('学习保存失败与串行队列', () => {
     const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
     const tree = parseSource(source, {ecmaVersion:'latest',sourceType:'module'});
     const declaration = name => { const n = tree.body.find(n => n.type === 'FunctionDeclaration' && n.id.name === name); return source.slice(n.start,n.end); };
+    function timerHarness(afterSync = () => {}, save = () => true) {
+        const viewSource = readFileSync(new URL('../src/learningView.js', import.meta.url), 'utf8');
+        const viewTree = parseSource(viewSource, { ecmaVersion: 'latest', sourceType: 'module' });
+        const createView = viewTree.body.find(n => n.type === 'ExportNamedDeclaration').declaration;
+        const start = createView.body.body.find(n => n.type === 'FunctionDeclaration' && n.id.name === 'startTiming');
+        const state = { activeSource: { type: 'personal' }, appConfig: {}, todoData: {
+            todos: [{ id: 'task', content: '旧名称', label: '旧标签', completed: false }], time_entries: [],
+            daily_reviews: [{ id: 'review', date: '2026-09-22', fact: '保留复盘' }], reminder_settings: { enabled: true }
+        } };
+        let writes = 0;
+        const begin = runInNewContext('let _saveQueue=Promise.resolve();let _lastRenderedHash="";' + declaration('commitLearning') +
+            'const requireEnabled=()=>{if(state.appConfig.time_tracking_enabled===false)throw new Error("计时已关闭");};' +
+            'const commit=change=>{requirePersonalTarget(state.activeSource);return commitLearning(change);};' +
+            viewSource.slice(start.start, start.end) + ';startTiming', {
+            ...learningHelpers, requirePersonalTarget, state, appState: state, structuredClone, Date, JSON,
+            sync: async () => afterSync(state), render: () => {}, learningUI: { refresh: () => {} },
+            _doSaveData: async () => { writes++; return save(); }
+        });
+        return { state, begin: () => begin('task', { type: 'personal' }), writes: () => writes };
+    }
+    it('实际开始提交在同步后校验最新任务、开关、来源和运行记录', async () => {
+        const changes = [
+            state => { state.todoData.todos = []; },
+            state => { state.todoData.todos[0].deleted = true; },
+            state => { state.todoData.todos[0].completed = true; },
+            state => { Object.assign(state.todoData.todos[0], { recurring: 'daily_repeat', completed: true }); },
+            state => { Object.assign(state.todoData.todos[0], { task_type: 'weekly_checkin', date: '2026-W39', target_count: 1, completed_dates: ['2026-09-22'] }); },
+            state => { state.todoData.time_entries.push({ id: 'other', ended_at: null, deleted: false }); },
+            state => { state.appConfig.time_tracking_enabled = false; },
+            state => { state.activeSource = { type: 'collaboration', id: 'source' }; }
+        ];
+        for (const change of changes) {
+            const h = timerHarness(change);
+            await assert.rejects(h.begin());
+            assert.equal(h.writes(), 0);
+            assert.equal(h.state.todoData.time_entries.length, change === changes[5] ? 1 : 0);
+        }
+    });
+    it('实际开始使用最新快照、忽略打卡任务旧完成状态，保存失败可重试', async () => {
+        let success = false;
+        const h = timerHarness(state => Object.assign(state.todoData.todos[0], {
+            content: '最新名称', label: ' 新标签 ', completed: true, task_type: 'weekly_checkin', date: '2026-W39',
+            target_count: 2, completed_dates: ['2026-09-22']
+        }), () => success);
+        await assert.rejects(h.begin(), /保存失败/);
+        assert.equal(h.state.todoData.time_entries.length, 0);
+        success = true;
+        await h.begin();
+        const entry = h.state.todoData.time_entries[0];
+        assert.equal(entry.task_content_snapshot, '最新名称');
+        assert.equal(entry.label_snapshot, '新标签');
+        assert.equal(h.state.todoData.todos[0].completed, true);
+        assert.equal(h.state.todoData.daily_reviews[0].fact, '保留复盘');
+        assert.equal(h.state.todoData.reminder_settings.enabled, true);
+        await assert.rejects(h.begin(), /已有任务正在计时/);
+        assert.equal(h.state.todoData.time_entries.length, 1);
+        assert.equal(h.writes(), 2);
+    });
     it('实际标签保存固定个人来源，失败可重试且完整保留计时和复盘', async () => {
         const task = { id: 'same', content: '个人任务', label: '学习', updated_at: '2026-09-01T00:00:00Z' };
         const entry = { id: 'e', task_ref: { todo_id: 'deleted', source_type: 'personal' }, started_at: '2026-09-01T00:00:00Z', ended_at: null };
@@ -728,7 +786,7 @@ describe('学习保存失败与串行队列', () => {
     it('实际编辑保存失败保留草稿及原标签，重试成功才关闭；协作编辑拒绝写入并保持来源隔离', async () => {
         let success = false, closed = 0; const notices = [];
         const original = {id:'task',content:'旧内容',label:'旧标签',subtasks:[],updated_at:'2026-09-10T00:00:00Z'};
-        const state = {appConfig:{},todoData:{todos:[original]},activeSource:{type:'personal'},currentEditingTodo:structuredClone(original),currentEditingSubtasks:[]};
+        const state = {appConfig:{},todoData:{todos:[original]},activeSource:{type:'personal'},currentEditingTodo:structuredClone(original),currentEditingOriginalType:{task_type:'normal',recurring:'none'},currentEditingSubtasks:[]};
         const fields = {'edit-content':{value:'新内容'},'edit-learning-label':{value:'数学'}};
         const calls = [];
         const save = runInNewContext('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";'+declaration('saveEditModal')+';saveEditModal', {

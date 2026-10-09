@@ -6,13 +6,13 @@ function svg(tag, attrs, text) {
     const n = document.createElementNS(ns, tag); Object.entries(attrs).forEach(([k, v]) => n.setAttribute(k, v));
     if (text != null) n.textContent = text; return n;
 }
-const colors = { normal: '#10B981', daily: '#F59E0B', weekly: '#6366F1', monthly: '#F43F5E' };
-const type = t => t.recurring === 'daily_repeat' ? 'daily' : t.task_type === 'weekly_checkin' ? 'weekly' : t.task_type === 'monthly_checkin' ? 'monthly' : 'normal';
+const colors = { normal: '#10B981', weekly: '#6366F1', monthly: '#F43F5E' };
+const type = t => t.task_type === 'weekly_checkin' ? 'weekly' : t.task_type === 'monthly_checkin' ? 'monthly' : 'normal';
 
 function completionMark(event, x, y, radius) {
     const color = colors[type(event.todo)];
     if (event.subtask || type(event.todo) === 'normal') return svg('circle', { cx: x, cy: y, r: radius, fill: event.subtask ? 'var(--modal-bg-solid)' : color, stroke: event.subtask ? color : '#fff', 'stroke-width': 1.5 });
-    const kind = type(event.todo), count = kind === 'daily' ? 3 : kind === 'weekly' ? 4 : 10;
+    const kind = type(event.todo), count = kind === 'weekly' ? 4 : 10;
     const points = Array.from({ length: count }, (_, i) => {
         const angle = i / count * Math.PI * 2 - Math.PI / 2, r = kind === 'monthly' && i % 2 ? radius * .45 : radius;
         return `${x + r * Math.cos(angle)},${y + r * Math.sin(angle)}`;

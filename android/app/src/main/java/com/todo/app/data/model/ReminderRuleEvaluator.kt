@@ -18,19 +18,14 @@ data class ReminderRuleEvaluation(
     val date: LocalDate
 )
 
-/** 判断任务是否属于提醒规则中的循环/打卡任务。 */
+/** 判断任务是否属于提醒规则中的周/月打卡任务。 */
 fun Todo.isCheckinOrRecurring(): Boolean =
-    recurring == RecurringType.DAILY_REPEAT ||
-        taskType == TaskType.WEEKLY_CHECKIN ||
+    taskType == TaskType.WEEKLY_CHECKIN ||
         taskType == TaskType.MONTHLY_CHECKIN
 
-/** 判断循环或打卡任务是否属于指定日期。 */
+/** 判断周/月打卡任务是否属于指定日期。 */
 fun Todo.isRecurringFor(date: LocalDate): Boolean {
-    val dateStr = date.toString()
     return when {
-        recurring == RecurringType.DAILY_REPEAT -> {
-            this.date == null || this.date == dateStr || (!completed && this.date!! < dateStr)
-        }
         taskType == TaskType.WEEKLY_CHECKIN -> this.date == null || this.date == weekStringOf(date)
         taskType == TaskType.MONTHLY_CHECKIN -> this.date == null || this.date == monthStringOf(date)
         else -> false
@@ -52,7 +47,7 @@ private fun completionDate(value: String?, zone: ZoneId): LocalDate? {
     }
 }
 
-/** 当天实际完成过：打卡看每次记录，普通/每日任务看完成时间，不用截止日期代替。 */
+/** 当天实际完成过：打卡看每次记录，普通任务看完成时间，不用截止日期代替。 */
 fun Todo.hasCompletionOn(date: LocalDate, zone: ZoneId = ZoneId.systemDefault()): Boolean =
     if (taskType == TaskType.WEEKLY_CHECKIN || taskType == TaskType.MONTHLY_CHECKIN) {
         completedDates.any { completionDate(it, zone) == date }

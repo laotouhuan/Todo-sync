@@ -231,9 +231,9 @@ describe('isOverdue', () => {
         assert.equal(isOverdue(todo, '2026-06-28'), false);
     });
 
-    it('每日重复任务日期早于今天且未完成 → 不逾期', () => {
+    it('旧每日任务日期早于今天且未完成 → 逾期', () => {
         const todo = { date: '2020-01-01', completed: false, recurring: 'daily_repeat' };
-        assert.equal(isOverdue(todo, '2026-06-28'), false);
+        assert.equal(isOverdue(todo, '2026-06-28'), true);
     });
 
     it('周打卡任务/月打卡任务 → 不逾期', () => {
@@ -384,16 +384,14 @@ describe('parseInputSyntax', () => {
         assert.equal(result.targetCount, 4);
     });
 
-    it('解析 @day / @daily 为每天重复任务', () => {
-        const res1 = parseInputSyntax('日常任务 @day');
-        assert.equal(res1.content, '日常任务');
-        assert.equal(res1.taskDate, getTodayString());
-        assert.equal(res1.taskType, 'daily_repeat');
-
-        const res2 = parseInputSyntax('日常任务 @daily');
-        assert.equal(res2.content, '日常任务');
-        assert.equal(res2.taskDate, getTodayString());
-        assert.equal(res2.taskType, 'daily_repeat');
+    it('@day / @daily 保留正文，不识别为日期或重复类型', () => {
+        for (const syntax of ['@day', '@daily', '@DAILY']) {
+            const result = parseInputSyntax(`日常任务 ${syntax}`);
+            assert.equal(result.content, `日常任务 ${syntax}`);
+            assert.equal(result.taskDate, null);
+            assert.equal(result.taskType, 'normal');
+            assert.equal(result.hasExplicitDate, false);
+        }
     });
 
     it('解析 @none 为显式无日期任务', () => {

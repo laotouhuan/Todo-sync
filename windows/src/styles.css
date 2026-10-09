@@ -431,6 +431,10 @@ footer {
   transition: all 0.2s;
 }
 
+.icon-btn[hidden] {
+  display: none;
+}
+
 .icon-btn:hover {
   color: var(--text-primary);
   background: rgba(255, 255, 255, 0.1);
@@ -1495,15 +1499,7 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   background-color: #10B981;
   border-radius: 50%;
 }
-.stats-filter-item .dot.daily-dot::before {
-  content: "";
-  display: block;
-  width: 0;
-  height: 0;
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-bottom: 10px solid #F59E0B;
-}
+
 .stats-filter-item .dot.weekly-dot::before {
   content: "";
   display: block;
@@ -2774,6 +2770,13 @@ textarea {
 .learning-button:disabled { opacity: .5; cursor: wait; }
 .learning-timer { display: inline-flex; align-items: center; flex-shrink: 0; gap: 3px; }
 .learning-timer .learning-button { padding: 5px; font-size: .75rem; }
+.learning-timing-mark { color: var(--text-secondary); white-space: nowrap; }
+.learning-timer-picker[open] { display: flex; flex-direction: column; overflow: hidden; }
+.learning-timer-picker > h3, .learning-timer-picker > label, .learning-timer-picker > button { flex-shrink: 0; }
+.learning-timer-picker > label[hidden] { display: none; }
+.learning-timer-candidates { overflow-y: auto; min-height: 0; }
+.learning-timer-candidate { display: flex; flex-direction: column; align-items: flex-start; text-align: left; width: calc(100% - 6px); gap: 4px; overflow-wrap: anywhere; }
+.learning-timer-candidate small { color: var(--text-secondary); }
 .learning-clock { color: var(--text-primary); font-variant-numeric: tabular-nums; font-size: .75rem; white-space: nowrap; }
 .learning-banner { color: var(--text-primary); display: flex; align-items: center; gap: 6px; padding: 5px 12px; background: #7196dd22; font-size: .8rem; }
 .learning-banner[hidden] { display: none; }

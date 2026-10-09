@@ -23,10 +23,8 @@ internal fun widgetTimerState(data: TodoData, enabled: Boolean, now: Instant = I
 internal fun widgetTimerTitle(entry: TimeEntry): String =
     entry.task_content_snapshot.takeIf { it.isNotBlank() } ?: "未命名任务"
 
-internal fun widgetTimerCandidates(data: TodoData, dates: DateStrings = DateStrings.now()): List<Todo> {
-    val groups = classifyForTodayFocus(data.todos, dates.today, dates.thisWeek, dates.thisMonth)
-    return groups.todayTasks + groups.weekTasks + groups.monthTasks
-}
+internal fun widgetTimerCandidates(data: TodoData): List<RecentTimingTask> =
+    Learning.recentTimingTasks(data.todos, data.timeEntries)
 
 internal fun isWidgetTimingTodo(state: WidgetTimerState, todoId: String): Boolean =
     state is WidgetTimerState.Running && state.entry.task_ref == TaskReference(todoId)

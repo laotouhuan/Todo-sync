@@ -80,8 +80,7 @@ fun calculateHealthMetrics(todos: List<Todo>, now: Instant, zone: ZoneId): Healt
     val activeList = todos.filter {
         !it.deleted &&
             it.taskType != TaskType.WEEKLY_CHECKIN &&
-            it.taskType != TaskType.MONTHLY_CHECKIN &&
-            it.recurring != "daily_repeat"
+            it.taskType != TaskType.MONTHLY_CHECKIN
     }
     val incompleteTodos = activeList.filter { !it.completed }
     val completedTodos = activeList.filter { it.completed && !it.completedAt.isNullOrEmpty() }

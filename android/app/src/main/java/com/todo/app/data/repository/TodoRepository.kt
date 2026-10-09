@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import com.todo.app.data.model.Todo
 import com.todo.app.data.model.TodoData
+import com.todo.app.data.model.SyncOutcome
+import com.todo.app.data.model.CollaborationData
 import com.todo.app.data.ConfigManager
 import com.todo.app.data.WebDavClient
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +25,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.IOException
 import java.util.UUID
 import com.todo.app.data.model.nowIso
 import com.todo.app.data.model.nowInstant
@@ -31,7 +34,6 @@ import com.todo.app.data.model.isMonthDate
 import com.todo.app.data.model.getWeeklyCompletedCount
 import com.todo.app.data.model.getMonthlyCompletedCount
 import com.todo.app.data.model.TaskType
-import com.todo.app.data.model.RecurringType
 import java.time.OffsetDateTime
 
 /**
@@ -42,6 +44,22 @@ sealed class UiEvent {
     data class ShowMessage(val message: String) : UiEvent()
     data class ShowError(val error: String) : UiEvent()
 }
+
+/** 主界面和小组件共用的普通任务完成逻辑；旧重复标记不生成新任务。 */
+internal fun toggleNormalTodos(todos: List<Todo>, id: String, completeSubtasks: Boolean, now: String = nowIso()): List<Todo> =
+    todos.map { todo ->
+        if (todo.id != id) todo else {
+            val completed = !todo.completed
+            todo.copy(
+                completed = completed,
+                completedAt = if (completed) now else null,
+                subtasks = if (completed && completeSubtasks) todo.subtasks.map { subtask ->
+                    if (subtask.completed) subtask else subtask.copy(completed = true, completedAt = now)
+                } else todo.subtasks,
+                updatedAt = now
+            )
+        }
+    }
 
 internal fun generateShareCodeKey(random: java.security.SecureRandom = java.security.SecureRandom()): String {
     val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -80,6 +98,7 @@ class TodoRepository(private val context: Context) {
 
     private val dataFile = File(context.filesDir, "todo_data.json")
     private val personalStore = PersonalDataStore(dataFile)
+    private val personalCloudSync = PersonalCloudSync(personalStore)
     private val collabFile = File(context.filesDir, "collaborations.json")
     private val collaborationDataFile = CollaborationDataFile(collabFile)
     private val configManager = ConfigManager(context)
@@ -129,7 +148,7 @@ class TodoRepository(private val context: Context) {
     private fun enqueueCollaborationSync() {
         repoScope.launch {
             try {
-                syncCollaborations()
+                reportSyncFailure(syncCollaborations())
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -161,12 +180,14 @@ class TodoRepository(private val context: Context) {
     fun resetWebDavClient() {
         // Uses @Volatile for visibility; reference assignment is atomic on JVM
         webDavClient = null
+        cloudSyncState.reset()
     }
 
     private val _todoData = personalStore.data
 
     private val cloudSyncState = CloudSyncState()
     val isSyncing = cloudSyncState.syncing
+    val syncOutcome = cloudSyncState.outcome.asStateFlow()
     private val _syncStatus = cloudSyncState.status // 0：空闲，1：同步中，2：失败
     val syncStatus: kotlinx.coroutines.flow.StateFlow<Int> = _syncStatus.asStateFlow()
 
@@ -248,45 +269,57 @@ class TodoRepository(private val context: Context) {
 
 
 
-    suspend fun syncWithCloud() = mutex.withLock { withContext(Dispatchers.IO) {
-        try {
-            val result = cloudSyncState.run(configManager.isConfigured()) {
-                requestWidgetRefresh()
-                personalStore.loadLocked()
-                initWebDavClient()
-                val client = webDavClient ?: error("同步客户端初始化失败")
-                val cloudJson = client.downloadFile(configManager.filePath)
-                if (cloudJson != null) {
-                    val cloudData = jsonFormat.decodeFromString<TodoData>(cloudJson)
-                    val localData = _todoData.value
-                    val mergedData = com.todo.app.data.model.MergeUtils.mergeTodoData(localData, cloudData)
+    // 每次操作固定凭据及目标路径，配置变更只使旧展示结果失效。
+    private data class SyncEndpoint(val client: WebDavClient, val path: String)
+    private fun syncEndpoint(): SyncEndpoint? = if (configManager.isConfigured())
+        SyncEndpoint(WebDavClient(configManager.webDavUrl, configManager.username, configManager.appPassword), configManager.filePath)
+        else null
 
-                    val mergedJson = jsonFormat.encodeToString(mergedData)
-                    val localChanged = com.todo.app.data.model.MergeUtils.hasContentChanges(mergedData, localData)
-                    val cloudChanged = com.todo.app.data.model.MergeUtils.hasContentChanges(mergedData, cloudData)
-                    if (localChanged) {
-                        createLocalBackup()
-                        personalStore.commitLocked(mergedData)
-                        requestWidgetRefresh()
-                        refreshReminders(mergedData)
-                    }
-                    if (cloudChanged) {
-                        client.uploadFile(configManager.filePath, mergedJson)
-                    }
-                    if (localChanged) _uiEvent.trySend(UiEvent.ShowMessage("检测到云端更新，已自动同步完成"))
-                } else {
-                    // 只有成功加载的数据才能上传。
-                    client.uploadFile(configManager.filePath, jsonFormat.encodeToString(_todoData.value))
-                }
+    private var lastSyncFailure: String? = null
+    private fun reportSyncFailure(result: SyncOutcome) {
+        if (result.operationId != syncOutcome.value.operationId) return
+        if (result.isSuccess) lastSyncFailure = null
+        result.exceptionOrNull()?.let { e ->
+            if (lastSyncFailure != e.message) {
+                lastSyncFailure = e.message
+                _uiEvent.trySend(UiEvent.ShowError("个人同步失败：${e.message}"))
             }
-            result.exceptionOrNull()?.let { e ->
-                Log.e(TAG, "syncWithCloud failed", e)
-                _uiEvent.trySend(UiEvent.ShowError("同步失败: ${e.message}"))
-            }
-        } finally {
-            requestWidgetRefresh()
         }
     }
+
+    suspend fun syncWithCloud(includeCollaborations: Boolean = false): SyncOutcome {
+        val configurationId = cloudSyncState.configurationId()
+        val endpoint = syncEndpoint()
+        return withContext(Dispatchers.IO) {
+            mutex.withLock {
+                try {
+                    val result = cloudSyncState.run(endpoint != null, configurationId = configurationId) {
+                        requestWidgetRefresh()
+                        val fixed = requireNotNull(endpoint)
+                        syncPersonalAndConfiguration(
+                            personal = {
+                                personalCloudSync.synchronize(
+                                    download = { fixed.client.downloadFile(fixed.path) },
+                                    upload = { fixed.client.uploadFile(fixed.path, it); Unit },
+                                    backup = ::createLocalBackup,
+                                    localChanged = { merged ->
+                                        requestWidgetRefresh()
+                                        refreshReminders(merged)
+                                    }
+                                )
+                            },
+                            configuration = if (includeCollaborations) ({ syncCollaborationsLocked(fixed) }) else null
+                        )
+                    }
+                    reportSyncFailure(result)
+                    if (includeCollaborations && result.isSuccess && result.operationId == syncOutcome.value.operationId)
+                        _uiEvent.trySend(UiEvent.ShowMessage("个人数据与协作配置同步完成"))
+                    result
+                } finally {
+                    requestWidgetRefresh()
+                }
+            }
+        }
     }
 
     suspend fun forcePullCloud() = mutex.withLock { withContext(Dispatchers.IO) {
@@ -303,12 +336,12 @@ class TodoRepository(private val context: Context) {
                 refreshReminders(migratedData)
                 _uiEvent.send(UiEvent.ShowMessage("强制拉取成功！"))
             } else {
-                _uiEvent.send(UiEvent.ShowError("下载失败：找不到文件或密码错误"))
+                _uiEvent.send(UiEvent.ShowError("你的云端待办文件不存在（404），请检查同步路径。"))
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.e(TAG, "forcePullCloud failed", e)
-            val msg = if (e.message?.contains("云端") == true) e.message!! else "云端同步失败，请检查网络连接和 WebDAV 配置"
+            val msg = e.message ?: "云端同步失败，请检查网络连接和 WebDAV 配置"
             _uiEvent.send(UiEvent.ShowError(msg))
         }
     }
@@ -334,16 +367,9 @@ class TodoRepository(private val context: Context) {
     }
 
     suspend fun startLearning(todo: Todo, ref: com.todo.app.data.model.TaskReference): Result<Unit> {
-        try {
-            ensureDataLoaded()
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            return Result.failure(e)
-        }
-        syncWithCloud()
         return withContext(Dispatchers.IO) {
             try {
-                personalStore.start(todo, ref, { configManager.timeTrackingEnabled })
+                startLearningAfterSync(personalStore, todo, ref, { configManager.timeTrackingEnabled }, { syncWithCloud() })
                 uploadChannel.trySend(Unit)
                 requestWidgetRefresh()
                 Result.success(Unit)
@@ -527,13 +553,14 @@ class TodoRepository(private val context: Context) {
 
     private suspend fun performBackgroundUpload() = mutex.withLock {
         try {
-            cloudSyncState.run(configManager.isConfigured()) {
-                val currentData = personalStore.loadLocked()
+            val configurationId = cloudSyncState.configurationId()
+            val endpoint = syncEndpoint()
+            val result = cloudSyncState.run(endpoint != null, configurationId = configurationId) {
                 requestWidgetRefresh()
-                initWebDavClient()
-                val client = webDavClient ?: error("同步客户端初始化失败")
-                client.uploadFile(configManager.filePath, jsonFormat.encodeToString(currentData))
-            }.onFailure { Log.e(TAG, "performBackgroundUpload upload failed", it) }
+                val fixed = requireNotNull(endpoint)
+                personalCloudSync.upload { fixed.client.uploadFile(fixed.path, it); Unit }
+            }
+            reportSyncFailure(result)
         } finally {
             requestWidgetRefresh()
         }
@@ -624,57 +651,7 @@ class TodoRepository(private val context: Context) {
         saveTodos(current)
     }
 
-    // ====== Toggle: Daily repeat task ======
-
-    private suspend fun toggleDailyRepeatTask(
-        todo: Todo,
-        current: MutableList<Todo>
-    ) {
-        val tomorrowStr = java.time.LocalDate.now().plusDays(1).toString()
-        val existsClone = current.any {
-            it.content == todo.content && it.date == tomorrowStr
-                && it.recurring == RecurringType.DAILY_REPEAT && !it.deleted
-        }
-        if (!existsClone) {
-            val clone = todo.copy(
-                id = UUID.randomUUID().toString(),
-                date = tomorrowStr,
-                completed = false,
-                completedAt = null,
-                createdAt = nowIso(),
-                updatedAt = nowIso(),
-                order = -System.currentTimeMillis().toDouble(), // 负数置顶
-                subtasks = todo.subtasks.map {
-                    it.copy(id = UUID.randomUUID().toString(), completed = false, completedAt = null)
-                }
-            )
-            current.add(clone)
-        }
-    }
-
     // ====== Toggle: Normal task ======
-
-    private suspend fun toggleNormalTask(
-        todo: Todo,
-        current: MutableList<Todo>,
-        index: Int
-    ) {
-        val isCompletedNow = !todo.completed
-        val updatedTodo = todo.copy(
-            completed = isCompletedNow,
-            completedAt = if (isCompletedNow) nowInstant() else null,
-            subtasks = if (isCompletedNow && configManager.completeSubtasksWithParent) {
-                todo.subtasks.map { s ->
-                    if (s.completed) s else s.copy(completed = true, completedAt = nowIso())
-                }
-            } else {
-                todo.subtasks
-            },
-            updatedAt = nowIso()
-        )
-        current[index] = updatedTodo
-        saveTodos(current)
-    }
 
     suspend fun toggleTodoStatus(id: String) = mutex.withLock {
         withContext(Dispatchers.IO) { personalStore.loadLocked() }
@@ -689,10 +666,7 @@ class TodoRepository(private val context: Context) {
                 return@withLock
             }
 
-            if (!todo.completed && todo.recurring == RecurringType.DAILY_REPEAT) {
-                toggleDailyRepeatTask(todo, current)
-            }
-            toggleNormalTask(todo, current, index)
+            saveTodos(toggleNormalTodos(current, id, configManager.completeSubtasksWithParent))
         }
     }
 
@@ -888,40 +862,31 @@ class TodoRepository(private val context: Context) {
         cloud: com.todo.app.data.model.CollaborationData
     ): Pair<com.todo.app.data.model.CollaborationData, Boolean> = collaborationDataFile.merge(local, cloud)
 
-    suspend fun syncCollaborations() = withContext(Dispatchers.IO) {
-        initWebDavClient()
-        val client = webDavClient ?: return@withContext
+    suspend fun syncCollaborations(): SyncOutcome {
+        val configurationId = cloudSyncState.configurationId()
+        val endpoint = syncEndpoint()
+        return withContext(Dispatchers.IO) { mutex.withLock {
+            cloudSyncState.run(endpoint != null, configurationId = configurationId) { syncCollaborationsLocked(requireNotNull(endpoint)) }
+        } }
+    }
 
-        val basePath = configManager.filePath
+    private suspend fun syncCollaborationsLocked(endpoint: SyncEndpoint) {
+        val client = endpoint.client
+        val basePath = endpoint.path
         val lastSlash = basePath.lastIndexOf('/')
         val parentPath = if (lastSlash != -1) basePath.substring(0, lastSlash) else ""
         val collabFilePath = if (parentPath.isNotEmpty()) "$parentPath/collaborations.json" else "collaborations.json"
 
-        mutex.withLock {
-            collaborationDataFile.sync(
-                download = {
-                    try {
-                        client.downloadFile(collabFilePath)?.let {
-                            jsonFormat.decodeFromString<com.todo.app.data.model.CollaborationData>(it)
-                        }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to download collaborations.json from cloud", e)
-                        throw e
-                    }
-                },
-                upload = { content ->
-                    try {
-                        check(client.uploadFile(collabFilePath, content)) { "协作清单同步失败，请重试" }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to upload collaborations.json to cloud", e)
-                        throw e
+        collaborationDataFile.sync(
+            download = {
+                client.downloadFile(collabFilePath)?.let {
+                    try { jsonFormat.decodeFromString<CollaborationData>(it) }
+                    catch (_: kotlinx.serialization.SerializationException) {
+                        throw IOException("协作配置文件格式无效，请检查云端文件。")
                     }
                 }
-            )
-        }
+            },
+            upload = { content -> client.uploadFile(collabFilePath, content); Unit }
+        )
     }
 }

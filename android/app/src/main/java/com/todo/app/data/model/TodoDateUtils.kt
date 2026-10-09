@@ -16,7 +16,6 @@ import java.time.temporal.IsoFields
 
 object TaskType {
     const val NORMAL = "normal"
-    const val DAILY_REPEAT = "daily_repeat"
     const val WEEKLY_CHECKIN = "weekly_checkin"
     const val MONTHLY_CHECKIN = "monthly_checkin"
 }
@@ -144,8 +143,8 @@ fun Todo.isOverdue(todayStr: String): Boolean {
     if (completed) return false
     // Exclude week and month tasks -- they don't have a specific due date
     if (isWeekDate(d) || isMonthDate(d)) return false
-    // Exclude recurring and checkin tasks -- habit tasks do not have overdue status
-    if (recurring == RecurringType.DAILY_REPEAT || taskType == TaskType.WEEKLY_CHECKIN || taskType == TaskType.MONTHLY_CHECKIN) return false
+    // 周/月打卡按周期判断，普通任务（含旧每日任务）按截止日期判断逾期
+    if (taskType == TaskType.WEEKLY_CHECKIN || taskType == TaskType.MONTHLY_CHECKIN) return false
     return d < todayStr
 }
 

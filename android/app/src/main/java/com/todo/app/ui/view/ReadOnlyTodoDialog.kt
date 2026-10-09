@@ -17,7 +17,6 @@ internal fun ReadOnlyTodoDialog(todo: Todo, viewModel: TodoViewModel, onDismiss:
         Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(todo.content)
             val type = when {
-                todo.recurring == "daily_repeat" -> "每天重复"
                 todo.taskType == TaskType.WEEKLY_CHECKIN -> "周打卡"
                 todo.taskType == TaskType.MONTHLY_CHECKIN -> "月打卡"
                 else -> "普通待办"

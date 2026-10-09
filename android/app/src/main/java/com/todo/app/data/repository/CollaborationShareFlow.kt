@@ -1,6 +1,9 @@
 package com.todo.app.data.repository
 
 import com.todo.app.data.WebDavClient
+import com.todo.app.data.WebDavContext
+import com.todo.app.data.WebDavHttpException
+import com.todo.app.data.WebDavNetworkException
 import com.todo.app.data.model.ShareCodePayload
 import com.todo.app.data.model.TodoData
 import kotlinx.coroutines.currentCoroutineContext
@@ -16,7 +19,7 @@ internal class CollaborationShareFlow(
         WebDavClient(it.url, it.user, it.pass).downloadCollaborationFile(it.path)
     }
 ) {
-    suspend fun validate(payload: ShareCodePayload) {
+    suspend fun validate(payload: ShareCodePayload, context: WebDavContext = WebDavContext.COLLABORATION) {
         val url = payload.url.toHttpUrlOrNull()
         require(url != null && url.isHttps && url.username.isEmpty() && url.password.isEmpty() &&
             url.query == null && url.fragment == null) { "WebDAV 地址必须是有效的 HTTPS 地址，且不包含凭据、查询或片段" }
@@ -28,7 +31,9 @@ internal class CollaborationShareFlow(
             !payload.path.startsWith('/') && !payload.path.contains('\\') &&
             payload.path.split('/').none { it == "." || it == ".." } && !payload.path.endsWith('/')) { "云端文件路径无效" }
         require(payload.exp >= 0) { "授权有效期无效" }
-        val result = download(payload)
+        val result = try { download(payload) }
+        catch (e: WebDavHttpException) { throw WebDavHttpException(e.status, e.operation, context) }
+        catch (e: WebDavNetworkException) { throw WebDavNetworkException(context, e.operation) }
         currentCoroutineContext().ensureActive()
         collaborationExpiryFailure(payload.exp.takeUnless { it == 0L }, result.serverTime)?.let { error(it) }
         try {
@@ -36,12 +41,13 @@ internal class CollaborationShareFlow(
             json.parseToJsonElement(result.content).jsonObject.getValue("todos").jsonArray
             json.decodeFromString<TodoData>(result.content)
         } catch (_: Exception) {
-            error("对方待办文件格式无效，请检查同步文件")
+            error(if (context == WebDavContext.COLLABORATION) "分享者待办文件格式无效，请检查同步文件"
+                else "你的待办文件格式无效，请检查同步文件")
         }
     }
 
     suspend fun <T> generate(payload: ShareCodePayload, isCurrent: () -> Boolean, encrypt: (ShareCodePayload) -> T): T {
-        validate(payload)
+        validate(payload, WebDavContext.SHARE_GENERATION)
         check(isCurrent()) { "连接配置已修改，请保存后重新生成" }
         return encrypt(payload)
     }

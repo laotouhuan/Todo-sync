@@ -85,9 +85,9 @@ import org.burnoutcrew.reorderable.reorderable
 import org.burnoutcrew.reorderable.ReorderableItem
 import org.burnoutcrew.reorderable.detectReorderAfterLongPress
 
-// ====== buildUpdatedTodo (top-level private) ======
+// ====== 编辑保存 ======
 
-private fun buildUpdatedTodo(
+internal fun buildUpdatedTodo(
     todo: Todo,
     content: String,
     date: String,
@@ -98,27 +98,21 @@ private fun buildUpdatedTodo(
     parentCompletedAt: String?,
     completedDates: List<String>,
     subtasks: List<Subtask>,
-    reminder: com.todo.app.data.model.Reminder? = null
+    reminder: com.todo.app.data.model.Reminder? = null,
+    originalTaskType: String = todo.taskType,
+    originalRecurring: String = todo.recurring
 ): Todo {
-    var mappedTaskType = if (selectedTypeUi == TaskType.DAILY_REPEAT) TaskType.NORMAL else selectedTypeUi
-    var mappedRecurring = if (selectedTypeUi == TaskType.DAILY_REPEAT) RecurringType.DAILY_REPEAT else RecurringType.NONE
+    var mappedTaskType = selectedTypeUi
 
     var finalDate = date.takeIf { it.isNotBlank() }
     var finalTime = time.takeIf { it.isNotBlank() }
 
-    if (selectedTypeUi == TaskType.DAILY_REPEAT) {
-        finalTime = null
-        if (finalDate.isNullOrEmpty() || isWeekDate(finalDate) || isMonthDate(finalDate)) {
-            finalDate = LocalDate.now().toString()
-        }
-    } else if (mappedTaskType == TaskType.NORMAL && finalDate != null && (isWeekDate(finalDate) || isMonthDate(finalDate))) {
+    if (mappedTaskType == TaskType.NORMAL && finalDate != null && (isWeekDate(finalDate) || isMonthDate(finalDate))) {
         finalTime = null
         if (isWeekDate(finalDate)) {
             mappedTaskType = TaskType.WEEKLY_CHECKIN
-            mappedRecurring = RecurringType.NONE
         } else {
             mappedTaskType = TaskType.MONTHLY_CHECKIN
-            mappedRecurring = RecurringType.NONE
         }
     } else if (selectedTypeUi == TaskType.WEEKLY_CHECKIN) {
         finalTime = null
@@ -153,7 +147,7 @@ private fun buildUpdatedTodo(
         content = finalContent.takeIf { it.isNotBlank() } ?: todo.content,
         date = finalDate,
         time = finalTime,
-        recurring = mappedRecurring,
+        recurring = if (mappedTaskType == originalTaskType) originalRecurring else RecurringType.NONE,
         taskType = mappedTaskType,
         targetCount = targetCount,
         completedDates = completedDates,
@@ -220,9 +214,9 @@ fun EditTodoDialog(
     var parentCompleted by remember(todo.completed) { mutableStateOf(todo.completed) }
     var parentCompletedAt by remember(todo.completedAt) { mutableStateOf(todo.completedAt) }
 
-    var selectedTypeUi by remember(todo.taskType, todo.recurring) {
-        mutableStateOf(if (todo.recurring == RecurringType.DAILY_REPEAT) TaskType.DAILY_REPEAT else todo.taskType)
-    }
+    // 本次编辑的原始类型保持不变，截止日期推导后再比较最终类型。
+    val originalType = remember(todo.id) { todo.taskType to todo.recurring }
+    var selectedTypeUi by remember(todo.id, todo.taskType) { mutableStateOf(todo.taskType) }
 
     var hasReminder by remember(todo.id, todo.reminder) { mutableStateOf(todo.reminder != null) }
     var reminderDate by remember(todo.id, todo.reminder, todo.date) {
@@ -247,7 +241,7 @@ fun EditTodoDialog(
         val updated = buildUpdatedTodo(
             todo = todo,
             content = content,
-            date = date,
+            date = if (selectedTypeUi == TaskType.NORMAL && !hasDateEnabled) "" else date,
             time = time,
             selectedTypeUi = selectedTypeUi,
             targetCount = targetCount,
@@ -255,7 +249,9 @@ fun EditTodoDialog(
             parentCompletedAt = parentCompletedAt,
             completedDates = completedDates,
             subtasks = subtasks,
-            reminder = currentReminder
+            reminder = currentReminder,
+            originalTaskType = originalType.first,
+            originalRecurring = originalType.second
         )
         if (!saving) saveScope.launch {
             saving = true
@@ -327,7 +323,7 @@ fun EditTodoDialog(
                         selectedTypeUi = selectedTypeUi
                     )
 
-                    EditDetailSection("任务类型", when (selectedTypeUi) { TaskType.DAILY_REPEAT -> "每天重复"; TaskType.WEEKLY_CHECKIN -> "周打卡"; TaskType.MONTHLY_CHECKIN -> "月打卡"; else -> "普通待办" }) {
+                    EditDetailSection("任务类型", when (selectedTypeUi) { TaskType.WEEKLY_CHECKIN -> "周打卡"; TaskType.MONTHLY_CHECKIN -> "月打卡"; else -> "普通待办" }) {
                         EditTodoTypeSection(
                             selectedTypeUi = selectedTypeUi,
                             onTypeChange = { type ->
@@ -345,8 +341,7 @@ fun EditTodoDialog(
                             reminderTime = reminderTime,
                             onReminderTimeChange = { reminderTime = it },
                             reminderRepeatDaily = reminderRepeatDaily,
-                            onReminderRepeatDailyChange = { reminderRepeatDaily = it },
-                            isRecurring = selectedTypeUi != TaskType.NORMAL
+                            onReminderRepeatDailyChange = { reminderRepeatDaily = it }
                         )
 
                     }
@@ -478,8 +473,8 @@ private fun EditTodoTypeSection(
     Text("任务类型", style = MaterialTheme.typography.titleMedium)
     Spacer(Modifier.height(8.dp))
 
-    val types = listOf(TaskType.NORMAL, TaskType.DAILY_REPEAT, TaskType.WEEKLY_CHECKIN, TaskType.MONTHLY_CHECKIN)
-    val typeLabels = listOf("普通待办", "每天重复", "周打卡", "月打卡")
+    val types = listOf(TaskType.NORMAL, TaskType.WEEKLY_CHECKIN, TaskType.MONTHLY_CHECKIN)
+    val typeLabels = listOf("普通待办", "周打卡", "月打卡")
     val selectedTypeIndex = types.indexOf(selectedTypeUi).takeIf { it >= 0 } ?: 0
     SegmentedButton(typeLabels, selectedTypeIndex) {
         onTypeChange(types[it])
@@ -495,8 +490,7 @@ private fun EditTodoReminderSection(
     reminderTime: String,
     onReminderTimeChange: (String) -> Unit,
     reminderRepeatDaily: Boolean,
-    onReminderRepeatDailyChange: (Boolean) -> Unit,
-    isRecurring: Boolean
+    onReminderRepeatDailyChange: (Boolean) -> Unit
 ) {
     Spacer(Modifier.height(12.dp))
     Row(
@@ -530,19 +524,17 @@ private fun EditTodoReminderSection(
                 modifier = Modifier.fillMaxWidth()
             )
         }
-        if (isRecurring) {
-            Spacer(Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("每天重复提醒", style = MaterialTheme.typography.bodyMedium)
-                Switch(
-                    checked = reminderRepeatDaily,
-                    onCheckedChange = onReminderRepeatDailyChange
-                )
-            }
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("每天重复提醒", style = MaterialTheme.typography.bodyMedium)
+            Switch(
+                checked = reminderRepeatDaily,
+                onCheckedChange = onReminderRepeatDailyChange
+            )
         }
     }
 }
@@ -599,7 +591,7 @@ private fun EditTodoSubtasksSection(
 ) {
     Spacer(Modifier.height(16.dp))
 
-    if (parentCompleted && (todo.taskType == TaskType.NORMAL || todo.recurring == RecurringType.DAILY_REPEAT)) {
+    if (parentCompleted && todo.taskType == TaskType.NORMAL) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)

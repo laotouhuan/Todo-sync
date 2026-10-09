@@ -5,18 +5,26 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import com.todo.app.data.model.RecurringType
-import com.todo.app.data.model.TaskType
 import com.todo.app.data.model.TodoData
+import com.todo.app.data.model.Todo
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 
-class ReminderScheduler(private val context: Context) {
+private const val ONE_DAY_MS = 24 * 60 * 60 * 1000L
 
-    companion object {
-        private const val ONE_DAY_MS = 24 * 60 * 60 * 1000L
+/** 任务重复提醒仅由提醒设置决定，完成及删除后的行为沿用现有规则。 */
+internal fun taskReminderTrigger(todo: Todo, now: Long, triggerMs: Long): Long? {
+    val reminder = todo.reminder ?: return null
+    if (todo.deleted) return null
+    return if (reminder.repeatDaily) {
+        if (triggerMs <= now || todo.completed) triggerMs + ONE_DAY_MS else triggerMs
+    } else {
+        triggerMs.takeIf { !todo.completed && it > now }
     }
+}
+
+class ReminderScheduler(private val context: Context) {
 
     private val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
@@ -33,24 +41,14 @@ class ReminderScheduler(private val context: Context) {
             .filter { !it.deleted && it.reminder != null }
             .forEach { todo ->
                 val reminder = todo.reminder!!
-                val isRecurring = todo.recurring == RecurringType.DAILY_REPEAT ||
-                                  todo.taskType == TaskType.WEEKLY_CHECKIN ||
-                                  todo.taskType == TaskType.MONTHLY_CHECKIN
-
-                if (isRecurring && reminder.repeatDaily) {
-                    val triggerMs = parseTodayTimeToMillis(reminder.reminderTime)
-                    val finalTriggerMs = if (triggerMs <= now || todo.completed) {
-                        triggerMs + ONE_DAY_MS
-                    } else {
-                        triggerMs
-                    }
-                    scheduleExact(makeTaskRequestCode(todo.id), finalTriggerMs, todo.id, "task")
-                } else if (!todo.completed) {
+                val triggerMs = if (reminder.repeatDaily) {
+                    parseTodayTimeToMillis(reminder.reminderTime)
+                } else {
                     val rDate = reminder.reminderDate ?: todo.date ?: todayStr
-                    val triggerMs = parseToMillis(rDate, reminder.reminderTime)
-                    if (triggerMs > now) {
-                        scheduleExact(makeTaskRequestCode(todo.id), triggerMs, todo.id, "task")
-                    }
+                    parseToMillis(rDate, reminder.reminderTime)
+                }
+                taskReminderTrigger(todo, now, triggerMs)?.let { nextTrigger ->
+                    scheduleExact(makeTaskRequestCode(todo.id), nextTrigger, todo.id, "task")
                 }
             }
 

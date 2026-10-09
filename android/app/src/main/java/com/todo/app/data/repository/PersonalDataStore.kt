@@ -105,6 +105,7 @@ internal class PersonalDataStore(
             else -> error("任务来源无效")
         }
         require(!latest.deleted) { "已删除任务不能开始计时" }
+        require(Learning.canTimeTodo(latest)) { "任务已完成或达到目标，请重新选择" }
         require(current.timeEntries.none { !it.deleted && it.ended_at == null }) { "已有任务正在计时，请先结束或处理记录" }
         val timestamp = now ?: nowIso()
         commitLocked(current.copy(last_updated = timestamp, timeEntries = current.timeEntries + TimeEntry(

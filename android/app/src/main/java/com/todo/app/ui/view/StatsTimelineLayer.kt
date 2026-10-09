@@ -65,7 +65,7 @@ fun StatsTimelineLayer(viewModel: TodoViewModel, todos: List<Todo>, period: Stri
                 Offset(size.width / 2 - r, size.height / 2 - r), Size(2 * r, 2 * r), style = Stroke(6.dp.toPx()))
         }
         points.forEach { (e, p) ->
-            val color = when { e.todo.recurring == "daily_repeat" -> Color(0xFFF59E0B); e.todo.taskType == TaskType.WEEKLY_CHECKIN -> Color(0xFF6366F1); e.todo.taskType == TaskType.MONTHLY_CHECKIN -> Color(0xFFF43F5E); else -> Color(0xFF10B981) }
+            val color = when { e.todo.taskType == TaskType.WEEKLY_CHECKIN -> Color(0xFF6366F1); e.todo.taskType == TaskType.MONTHLY_CHECKIN -> Color(0xFFF43F5E); else -> Color(0xFF10B981) }
             val alpha = clockEntryAlpha(sweepProgress(), StatsTimeline.clockMinute(e.time!!))
             drawCircle(color, (if (period == "day") 4 else 3).dp.toPx(), p, alpha = alpha, style = Stroke(2.dp.toPx()))
         }

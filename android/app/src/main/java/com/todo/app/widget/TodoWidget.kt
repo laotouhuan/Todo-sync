@@ -37,6 +37,7 @@ import com.todo.app.WidgetAddActivity
 import com.todo.app.WidgetTimerActivity
 import com.todo.app.R
 import com.todo.app.data.model.Learning
+import com.todo.app.data.model.SyncPhase
 import android.os.SystemClock
 import android.widget.RemoteViews
 import android.widget.Toast
@@ -147,11 +148,12 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
             val dateObj = LocalDate.now()
             val dateString = dateObj.format(DATE_FORMATTER)
 
-            val syncStatus = repository.syncStatus.value
+            val syncStatus = repository.syncOutcome.value.phase
             val statusColor = ColorProvider(when (syncStatus) {
-                1 -> WidgetTheme.StatusSyncing
-                2 -> WidgetTheme.StatusError
-                else -> WidgetTheme.StatusSuccess
+                SyncPhase.RUNNING -> WidgetTheme.StatusSyncing
+                SyncPhase.FAILED -> WidgetTheme.StatusError
+                SyncPhase.SUCCEEDED -> WidgetTheme.StatusSuccess
+                else -> WidgetTheme.TextVariant
             })
 
             Column(
@@ -465,10 +467,16 @@ class ExpandActionCallback : ActionCallback {
 class SyncActionCallback : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         try {
-            TodoApplication.instance.repository.syncWithCloud()
-            refreshAllWidgets(context)
+            val repository = TodoApplication.instance.repository
+            refreshAroundSync(
+                load = { repository.ensureDataLoaded(); Unit },
+                refresh = { refreshAllWidgets(context) },
+                sync = { repository.syncWithCloud() },
+                notifyFailure = { widgetMessage(context, it) })
         } catch (e: Exception) {
-            android.util.Log.e("TodoWidget", "SyncActionCallback onAction 失败: ${e.message}", e)
+            if (e is CancellationException) throw e
+            refreshAllWidgets(context)
+            widgetMessage(context, "同步失败，请重试或打开应用检查设置")
         }
     }
 }
@@ -510,6 +518,7 @@ suspend fun refreshAllWidgets(context: Context) {
         refreshWidgetType(context, manager, TodoCompactWidget::class.java, "CompactWidget")
         refreshWidgetType(context, manager, TodoNormalWidget::class.java, "NormalWidget")
     } catch (e: Exception) {
+        if (e is CancellationException) throw e
         android.util.Log.e("TodoWidget", "refreshAllWidgets 失败: ${e.message}", e)
     }
 }
@@ -529,6 +538,7 @@ private suspend fun refreshWidgetType(
             }
             widgetClass.getDeclaredConstructor().newInstance().update(context, id)
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             android.util.Log.e("TodoWidget", "刷新 ${label} 失败: ${e.message}", e)
         }
     }

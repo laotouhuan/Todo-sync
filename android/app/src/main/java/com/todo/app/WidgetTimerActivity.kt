@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.todo.app.data.model.TaskReference
+import com.todo.app.data.model.Learning
 import com.todo.app.data.model.Todo
 import com.todo.app.data.model.TodoData
 import com.todo.app.ui.theme.TodoAppTheme
@@ -95,7 +96,7 @@ class WidgetTimerActivity : ComponentActivity() {
                         .heightIn(max = maxHeight * 0.85f).navigationBarsPadding().clickable { },
                         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)) {
                         Column(Modifier.padding(20.dp)) {
-                            Text("选择要计时的任务", style = MaterialTheme.typography.titleLarge)
+                            Text("最近计时的任务", style = MaterialTheme.typography.titleLarge)
                             Text("点击任务开始计时", style = MaterialTheme.typography.bodySmall)
                             if (model.busy || model.loading) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 12.dp))
@@ -110,12 +111,15 @@ class WidgetTimerActivity : ComponentActivity() {
                                     WidgetTimerState.Disabled -> Text("请在设置中启用计时")
                                     WidgetTimerState.Idle -> {
                                         val candidates = widgetTimerCandidates(data)
-                                        if (candidates.isEmpty()) Text("暂无可选任务")
+                                        if (candidates.isEmpty()) Text("暂无可继续计时的最近任务，请在应用中选择任务开始计时")
                                         LazyColumn(Modifier.weight(1f, fill = false)) {
-                                            items(candidates, key = { it.id }) { todo ->
-                                                TextButton(onClick = { model.start(todo) }, enabled = !model.busy && !model.loading,
+                                            items(candidates, key = { it.todo.id }) { candidate ->
+                                                TextButton(onClick = { model.start(candidate.todo) }, enabled = !model.busy && !model.loading,
                                                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                                                    Text(todo.content, modifier = Modifier.fillMaxWidth())
+                                                    Column(Modifier.fillMaxWidth()) {
+                                                        Text(candidate.todo.content)
+                                                        Text(Learning.lastTimedText(candidate.startedAt), style = MaterialTheme.typography.bodySmall)
+                                                    }
                                                 }
                                             }
                                         }

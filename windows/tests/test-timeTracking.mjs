@@ -1,9 +1,90 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeLabel, normalizeLearningData, mergeLearningRecords, canonicalLearning, splitTimeEntry, summarizeLearning, validateTimeEntry, overlappingEntries, learningRange, formatDuration, sameTask, taskReference, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE } from '../src/timeTracking.js';
+import { normalizeLabel, normalizeLearningData, mergeLearningRecords, canonicalLearning, splitTimeEntry, summarizeLearning, validateTimeEntry, overlappingEntries, learningRange, formatDuration, sameTask, taskReference, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE, canTimeTodo, recentTimingTasks } from '../src/timeTracking.js';
 
 const entry = (id, start, end, label = '数学') => ({ id, task_ref: {source_type:'personal',source_id:null,todo_id:'task'}, task_content_snapshot:'定理', label_snapshot:label, started_at:start, ended_at:end, created_at:start, updated_at:end || start, deleted:false });
 process.env.TZ = 'Asia/Shanghai';
+
+const timingTodo = (id, extra = {}) => ({ id, content: `当前任务 ${id}`, completed: false, deleted: false, task_type: 'normal', ...extra });
+function history(todoId, startedAt, extra = {}) {
+    const endedAt = new Date(Date.parse(startedAt) + 60000).toISOString();
+    return { ...entry(`record-${todoId}-${startedAt}`, startedAt, endedAt), task_ref: taskReference({ id: todoId }), ...extra };
+}
+
+test('最近任务先过滤、去重和按实际开始时间排序，再取最多五个', () => {
+    const todos = Array.from({ length: 8 }, (_, i) => timingTodo(String(i)));
+    const records = todos.map((todo, i) => history(todo.id, `2026-09-10T0${i}:00:00Z`));
+    records.push(history('0', '2026-09-10T08:00:00Z'), history('0', '2026-09-10T09:00:00Z'));
+    const original = structuredClone({ todos, records });
+    assert.deepEqual(recentTimingTasks(todos, records).map(x => x.todo.id), ['0', '7', '6', '5', '4']);
+    todos[0].deleted = true; todos[7].completed = true;
+    assert.deepEqual(recentTimingTasks(todos, records).map(x => x.todo.id), ['6', '5', '4', '3', '2']);
+    todos[0].deleted = false; todos[7].completed = false;
+    assert.deepEqual({ todos, records }, original);
+    assert.equal(recentTimingTasks(todos, records)[0].todo.content, '当前任务 0');
+    assert.equal(recentTimingTasks(todos.slice(0, 1), records).length, 1);
+    assert.deepEqual(recentTimingTasks(todos, []), []);
+    assert.deepEqual(recentTimingTasks([], records), []);
+});
+
+test('最近任务排除短计时、无效、删除、协作及不可用记录，运行时不提供候选', () => {
+    const todos = [timingTodo('a'), timingTodo('b')];
+    const valid = history('a', '2026-09-10T01:00:00Z');
+    const excluded = [
+        { ...valid, deleted: true },
+        { ...valid, started_at: 'bad' },
+        { ...valid, ended_at: 'bad' },
+        { ...valid, ended_at: valid.started_at },
+        { ...valid, ended_at: '2026-09-10T01:00:30Z' },
+        { ...valid, started_at: '2026-02-30T01:00:00Z' },
+        { ...valid, task_ref: { todo_id: 'a', source_type: 'collaboration', source_id: 'source' } },
+        { ...valid, task_ref: { todo_id: 'a', source_type: 'personal', source_id: 'source' } },
+        { ...valid, task_ref: taskReference({ id: 'missing' }) }
+    ];
+    assert.deepEqual(recentTimingTasks(todos, excluded), []);
+    const newerShort = history('b', '2026-09-10T02:00:00Z', { ended_at: '2026-09-10T02:00:30Z' });
+    assert.deepEqual(recentTimingTasks(todos, [valid, ...excluded, newerShort]).map(x => x.todo.id), ['a']);
+    assert.equal(recentTimingTasks(todos, [{ ...valid, ended_at: '2026-09-10T01:00:30.001Z' }]).length, 1);
+    assert.deepEqual(recentTimingTasks(todos, [valid, { ...newerShort, ended_at: null }]), []);
+});
+
+test('最近任务支持不同时区、同时间按 ID 稳定排序，补录及编辑按开始时间排名', () => {
+    const todos = ['a', 'b', 'c'].map(id => timingTodo(id));
+    const records = [history('b', '2026-09-10T10:00:00+08:00'), history('a', '2026-09-10T02:00:00Z'),
+        history('c', '2026-09-10T03:00:00Z')];
+    assert.deepEqual(recentTimingTasks(todos, records).map(x => x.todo.id), ['c', 'a', 'b']);
+    records[0].updated_at = '2026-10-01T00:00:00Z';
+    assert.deepEqual(recentTimingTasks(todos, records).map(x => x.todo.id), ['c', 'a', 'b']);
+    records.push(history('b', '2026-09-10T04:00:00Z'));
+    assert.deepEqual(recentTimingTasks(todos, records).map(x => x.todo.id), ['b', 'c', 'a']);
+    records[3].deleted = true;
+    assert.deepEqual(recentTimingTasks(todos, records).map(x => x.todo.id), ['c', 'a', 'b']);
+    records[0].started_at = '2026-09-10T01:00:00Z';
+    assert.deepEqual(recentTimingTasks(todos, records).map(x => x.todo.id), ['c', 'a', 'b']);
+    records[2].started_at = '2026-09-10T00:00:00Z';
+    assert.deepEqual(recentTimingTasks(todos, records).map(x => x.todo.id), ['a', 'b', 'c']);
+});
+
+test('计时资格仅按本地周期目标排除打卡任务，不依赖或修改旧完成状态', () => {
+    const weekly = timingTodo('week', { task_type: 'weekly_checkin', date: '2026-W41', target_count: 2,
+        completed: true, completed_dates: ['2026-10-04T16:30:00Z', '2026-10-06Tbad'] });
+    const original = structuredClone(weekly);
+    assert.equal(canTimeTodo(weekly), true);
+    assert.deepEqual(weekly, original);
+    weekly.completed_dates.push('2026-10-06'); weekly.completed = false;
+    assert.equal(canTimeTodo(weekly), false);
+    assert.equal(canTimeTodo({ ...weekly, target_count: null, completed: true }), true);
+    const monthly = { ...weekly, task_type: 'monthly_checkin', date: '2026-10', completed_dates:
+        ['2026-09-30T16:30:00Z', '2026-09-30', '2026-10-01Tinvalid', '2026-10-99', '2026-10-01T12:99:00Z'] };
+    assert.equal(canTimeTodo(monthly), true);
+    monthly.completed_dates.push('2026-10-02T10:00:00+08:00');
+    assert.equal(canTimeTodo(monthly), false);
+    assert.equal(canTimeTodo(timingTodo('normal', { completed: true })), false);
+    assert.equal(canTimeTodo(timingTodo('daily', { recurring: 'daily_repeat', completed: true })), false);
+    assert.equal(canTimeTodo({ ...weekly, deleted: true }), false);
+    const daily = timingTodo('new', { recurring: 'daily_repeat', content: '同名任务' });
+    assert.deepEqual(recentTimingTasks([daily], [history('old', '2026-09-10T01:00:00Z')]), []);
+});
 
 test('结束计时的 30 秒边界、同步删除标记和统计排除', () => {
     const running = entry('short', '2026-09-18T23:59:45+08:00', null);

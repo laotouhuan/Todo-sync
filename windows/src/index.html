@@ -38,6 +38,12 @@
         <div class="status-indicator" id="sync-status"></div>
       </div>
       <div class="header-right">
+        <!-- 开始计时 -->
+        <button id="start-timer-btn" class="icon-btn" type="button" title="开始计时" aria-label="开始计时" hidden>
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18" aria-hidden="true">
+            <path d="M8 5v14l11-7L8 5Z" fill="currentColor"/>
+          </svg>
+        </button>
         <!-- 1. 刷新 -->
         <button id="manual-sync-btn" class="icon-btn" title="云同步" aria-label="云同步">
           <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="18" height="18">
@@ -131,10 +137,6 @@
               <label class="stats-filter-item">
                 <input type="checkbox" id="filter-normal" checked>
                 <span class="dot normal-dot"></span>普通待办
-              </label>
-              <label class="stats-filter-item">
-                <input type="checkbox" id="filter-daily" checked>
-                <span class="dot daily-dot"></span>每日重复
               </label>
               <label class="stats-filter-item">
                 <input type="checkbox" id="filter-weekly" checked>
@@ -292,7 +294,6 @@
           <label for="edit-task-type">任务类型</label>
           <select id="edit-task-type" class="custom-select">
             <option value="normal">普通任务</option>
-            <option value="daily_repeat">每天重复</option>
             <option value="weekly_checkin">周打卡</option>
             <option value="monthly_checkin">月打卡</option>
           </select>

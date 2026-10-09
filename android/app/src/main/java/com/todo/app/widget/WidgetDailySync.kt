@@ -49,12 +49,11 @@ class WidgetDailySyncWorker(context: Context, parameters: WorkerParameters) :
     override suspend fun doWork(): Result {
         try {
             val repository = TodoApplication.instance.repository
-            repository.ensureDataLoaded()
-            // 先用本地数据跨天刷新，云同步失败也不会继续显示昨天的画面。
-            refreshAllWidgets(applicationContext)
-            repository.syncWithCloud()
-            refreshAllWidgets(applicationContext)
-            return Result.success()
+            val outcome = refreshAroundSync(
+                load = { repository.ensureDataLoaded(); Unit },
+                refresh = { refreshAllWidgets(applicationContext) },
+                sync = { repository.syncWithCloud() })
+            return widgetWorkResult(outcome)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.e("WidgetDailySync", "午夜同步失败", e)

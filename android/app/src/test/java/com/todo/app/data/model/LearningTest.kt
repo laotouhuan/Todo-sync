@@ -11,6 +11,75 @@ class LearningTest {
     private fun entry(id: String, start: String, end: String?, label: String? = "数学") =
         TimeEntry(id, TaskReference("task"), start, start, end ?: start, "定理", label, end)
 
+    private fun timingTodo(id: String) = Todo(id, "当前任务 $id", createdAt = "2026-09-01T00:00:00Z")
+    private fun history(id: String, startedAt: String): TimeEntry =
+        entry("record-$id-$startedAt", startedAt, Learning.instant(startedAt)!!.plusSeconds(60).toString())
+            .copy(task_ref = TaskReference(id))
+
+    @Test fun recentTasksFilterDeduplicateAndTakeFiveAfterSorting() {
+        val todos = (0..7).map { timingTodo(it.toString()) }
+        val records = todos.mapIndexed { i, todo -> history(todo.id, "2026-09-10T0$i:00:00Z") } +
+            history("0", "2026-09-10T08:00:00Z") + history("0", "2026-09-10T09:00:00Z")
+        assertEquals(listOf("0", "7", "6", "5", "4"), Learning.recentTimingTasks(todos, records, zone).map { it.todo.id })
+        val filtered = todos.map { if (it.id == "0") it.copy(deleted = true) else if (it.id == "7") it.copy(completed = true) else it }
+        assertEquals(listOf("6", "5", "4", "3", "2"), Learning.recentTimingTasks(filtered, records, zone).map { it.todo.id })
+        assertEquals("当前任务 0", Learning.recentTimingTasks(todos, records, zone).first().todo.content)
+        assertEquals(1, Learning.recentTimingTasks(todos.take(1), records, zone).size)
+        assertTrue(Learning.recentTimingTasks(todos, emptyList(), zone).isEmpty())
+        assertTrue(Learning.recentTimingTasks(emptyList(), records, zone).isEmpty())
+        assertFalse(todos.first().deleted)
+    }
+
+    @Test fun recentTasksExcludeInvalidShortDeletedCollaborationAndMissingRecords() {
+        val todos = listOf(timingTodo("a"), timingTodo("b"))
+        val valid = history("a", "2026-09-10T01:00:00Z")
+        val excluded = listOf(valid.copy(deleted = true), valid.copy(started_at = "bad"), valid.copy(ended_at = "bad"),
+            valid.copy(ended_at = valid.started_at), valid.copy(ended_at = "2026-09-10T01:00:30Z"),
+            valid.copy(started_at = "2026-02-30T01:00:00Z"),
+            valid.copy(task_ref = TaskReference("a", "collaboration", "source")),
+            valid.copy(task_ref = TaskReference("a", "personal", "source")),
+            valid.copy(task_ref = TaskReference("missing")))
+        assertTrue(Learning.recentTimingTasks(todos, excluded, zone).isEmpty())
+        val newerShort = history("b", "2026-09-10T02:00:00Z").copy(ended_at = "2026-09-10T02:00:30Z")
+        assertEquals(listOf("a"), Learning.recentTimingTasks(todos, listOf(valid, newerShort) + excluded, zone).map { it.todo.id })
+        assertEquals(1, Learning.recentTimingTasks(todos, listOf(valid.copy(ended_at = "2026-09-10T01:00:30.001Z")), zone).size)
+        assertTrue(Learning.recentTimingTasks(todos, listOf(valid, newerShort.copy(ended_at = null)), zone).isEmpty())
+    }
+
+    @Test fun recentTasksUseActualStartAndIdRatherThanUpdateTimeOrSnapshots() {
+        val todos = listOf("a", "b", "c").map { timingTodo(it) }
+        val records = listOf(history("b", "2026-09-10T10:00:00+08:00"), history("a", "2026-09-10T02:00:00Z"),
+            history("c", "2026-09-10T03:00:00Z"))
+        assertEquals(listOf("c", "a", "b"), Learning.recentTimingTasks(todos, records, zone).map { it.todo.id })
+        val updated = records.map { it.copy(updated_at = "2026-10-01T00:00:00Z", task_content_snapshot = "旧名称") }
+        assertEquals(listOf("c", "a", "b"), Learning.recentTimingTasks(todos, updated, zone).map { it.todo.id })
+        val manual = history("b", "2026-09-10T04:00:00Z")
+        assertEquals(listOf("b", "c", "a"), Learning.recentTimingTasks(todos, updated + manual, zone).map { it.todo.id })
+        assertEquals(listOf("c", "a", "b"), Learning.recentTimingTasks(todos, updated + manual.copy(deleted = true), zone).map { it.todo.id })
+        val edited = updated.map { if (it.task_ref.todo_id == "c") it.copy(started_at = "2026-09-10T00:00:00Z") else it }
+        assertEquals(listOf("a", "b", "c"), Learning.recentTimingTasks(todos, edited, zone).map { it.todo.id })
+        assertEquals("上次计时：今天 10:00", Learning.lastTimedText(Learning.instant(records[0].started_at)!!, LocalDate.parse("2026-09-10"), zone))
+        assertEquals("上次计时：2026-09-10 10:00", Learning.lastTimedText(Learning.instant(records[0].started_at)!!, LocalDate.parse("2026-09-11"), zone))
+    }
+
+    @Test fun timingEligibilityCountsLocalPeriodsAndDoesNotTrustOrRewriteCompleted() {
+        val weekly = timingTodo("week").copy(taskType = TaskType.WEEKLY_CHECKIN, date = "2026-W41", targetCount = 2,
+            completed = true, completedDates = listOf("2026-10-04T16:30:00Z", "2026-10-06Tbad"))
+        assertTrue(Learning.canTimeTodo(weekly, zone))
+        assertTrue(weekly.completed)
+        assertFalse(Learning.canTimeTodo(weekly.copy(completed = false, completedDates = weekly.completedDates + "2026-10-06"), zone))
+        assertTrue(Learning.canTimeTodo(weekly.copy(targetCount = null), zone))
+        val monthly = weekly.copy(taskType = TaskType.MONTHLY_CHECKIN, date = "2026-10", completedDates = listOf(
+            "2026-09-30T16:30:00Z", "2026-09-30", "2026-10-01Tinvalid", "2026-10-99", "2026-10-01T12:99:00Z"))
+        assertTrue(Learning.canTimeTodo(monthly, zone))
+        assertFalse(Learning.canTimeTodo(monthly.copy(completedDates = monthly.completedDates + "2026-10-02T10:00:00+08:00"), zone))
+        assertFalse(Learning.canTimeTodo(timingTodo("normal").copy(completed = true), zone))
+        assertFalse(Learning.canTimeTodo(timingTodo("daily").copy(recurring = RecurringType.DAILY_REPEAT, completed = true), zone))
+        assertFalse(Learning.canTimeTodo(weekly.copy(deleted = true), zone))
+        val daily = timingTodo("new").copy(recurring = RecurringType.DAILY_REPEAT, content = "同名任务")
+        assertTrue(Learning.recentTimingTasks(listOf(daily), listOf(history("old", "2026-09-10T01:00:00Z")), zone).isEmpty())
+    }
+
     @Test fun shortTimersAreDiscardedAtThirtySecondsAndStayDeletedAfterSync() {
         val running = entry("short", "2026-09-18T23:59:45+08:00", null)
         for (duration in listOf(0L, 29999L, 30000L, 30001L, 60000L)) {

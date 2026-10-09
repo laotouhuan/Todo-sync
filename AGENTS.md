@@ -13,7 +13,7 @@
 
 - 待办事项的增删改查（CRUD）
 - 子任务（Subtasks）
-- 每日重复任务（`recurring: daily_repeat`）与周/月打卡任务（`task_type`）
+- 普通任务与周/月打卡任务（`task_type`）；每日重复已停用，`recurring: daily_repeat` 仅兼容旧数据
 - 软删除（Soft-delete，`deleted` 标记）
 - 日期/时间/排序
 - 统计视图（按日/周/月）
@@ -129,7 +129,7 @@ to-do list/
       "updated_at": "ISO 8601",   // ★ 冲突解决依据
       "order": 0.0,               // 排序权重（数字）
       "deleted": false,           // 软删除标记
-      "recurring": "none",        // 每日重复（兼容遗留字段）：none | daily_repeat
+      "recurring": "none",        // 仅兼容遗留字段：none | daily_repeat；不再执行每日重复
       "task_type": "normal",      // 任务类型：normal | weekly_checkin | monthly_checkin
       "completed_dates": [],      // 打卡记录：兼容 YYYY-MM-DD 与包含时间的 ISO 8601 字符串
       "target_count": null,       // 目标打卡次数（整数或 null）

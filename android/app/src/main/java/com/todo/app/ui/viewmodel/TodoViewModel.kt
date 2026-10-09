@@ -13,6 +13,8 @@ import com.todo.app.data.model.HealthMetrics
 import com.todo.app.data.model.calculateHealthMetrics
 import com.todo.app.data.model.parseDateSyntax
 import com.todo.app.data.repository.TodoRepository
+import com.todo.app.data.repository.CloudSyncState
+import com.todo.app.data.model.SyncOutcome
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -97,9 +99,15 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     private val _collabError = MutableStateFlow<String?>(null)
     val collabError: StateFlow<String?> = _collabError.asStateFlow()
     private var collabRequest = 0L
+    private val collabSyncState = CloudSyncState()
+    private fun syncTarget(source: ActiveSource): String = when (source) {
+        is ActiveSource.Personal -> "personal"
+        is ActiveSource.Collaboration -> "collaboration:${source.collab.id}:${source.collab.updatedAt}"
+    }
 
     fun switchToPersonal() {
         collabRequest++
+        collabSyncState.reset()
         _activeSource.value = ActiveSource.Personal
         _collabData.value = null
         _collabSnapshot.value = null
@@ -121,8 +129,19 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         _collabData.value = null
         _collabLoading.value = true
         viewModelScope.launch {
+            if (request != collabRequest || (_activeSource.value as? ActiveSource.Collaboration)?.collab != collab) return@launch
             _collabError.value = null
-            val result = repository.readCollaborationTodos(collab)
+            val result = try {
+                var snapshot: TodoData? = null
+                val outcome = collabSyncState.run(true, syncTarget(ActiveSource.Collaboration(collab))) {
+                    snapshot = repository.readCollaborationTodos(collab).getOrThrow()
+                }
+                if (outcome.isSuccess) Result.success(requireNotNull(snapshot))
+                else Result.failure(requireNotNull(outcome.error))
+            } catch (e: CancellationException) {
+                if (request == collabRequest) _collabLoading.value = false
+                throw e
+            }
             if (request != collabRequest || (_activeSource.value as? ActiveSource.Collaboration)?.collab != collab) return@launch
             if (result.isSuccess) {
                 _collabSnapshot.value = collab.id to result.getOrThrow()
@@ -151,6 +170,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
 
     private val _uiEvent = MutableSharedFlow<String>()
     val uiEvent: SharedFlow<String> = _uiEvent.asSharedFlow()
+    val repositoryEvents = repository.uiEvent
 
     fun refreshTodayDate() {
         _todayDate.value = java.time.LocalDate.now().toString()
@@ -231,6 +251,11 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
             initialValue = HealthMetrics()
         )
     val isSyncing = repository.isSyncing
+    val syncOutcome = kotlinx.coroutines.flow.combine(repository.syncOutcome, collabSyncState.outcome, activeSource) { personal, collaboration, source ->
+        val target = syncTarget(source)
+        val result = if (source is ActiveSource.Personal) personal else collaboration
+        result.takeIf { it.target == target } ?: SyncOutcome(target = target)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, SyncOutcome())
 
     private val _showSearchBar = MutableStateFlow(false)
     val showSearchBar: StateFlow<Boolean> = _showSearchBar.asStateFlow()
@@ -397,8 +422,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     fun syncWithCloud() {
         viewModelScope.launch {
             try {
-                repository.syncWithCloud()
-                repository.syncCollaborations()
+                repository.syncWithCloud(includeCollaborations = true)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

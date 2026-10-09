@@ -71,7 +71,8 @@
               "none",
               "daily_repeat"
             ],
-            "default": "none"
+            "default": "none",
+            "description": "daily_repeat 仅用于旧数据兼容；新版按 task_type 使用任务，不再自动生成每日副本。"
           },
           "task_type": {
             "type": "string",
