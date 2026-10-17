@@ -87,9 +87,9 @@ export function renderTimeline({ svgEl, todos, entries, source, period, target, 
     const timerTooltip = list => {
         const parts = [...new Map(list.map(a => [`${a.entry.id}:${a.date}`, a])).values()];
         if (!parts.length) return null;
-        return { title: parts.length === 1 ? parts[0].entry.task_content_snapshot : `${parts.length} 条计时记录`, lines: [...parts.slice(0, 3).flatMap(a => {
+        return { title: parts.length === 1 ? (parts[0].entry.display_content || parts[0].entry.task_content_snapshot) : `${parts.length} 条计时记录`, lines: [...parts.slice(0, 3).flatMap(a => {
             const start = clockTooltipDateTime(a.started_at), end = clockTooltipDateTime(a.ended_at);
-            return [...(parts.length > 1 ? [a.entry.task_content_snapshot] : []),
+            return [...(parts.length > 1 ? [(a.entry.display_content || a.entry.task_content_snapshot)] : []),
                 `标签: ${a.entry.label_snapshot || '未分类'}`,
                 `计时区间: ${start.date} ${start.time} — ${end.date} ${end.time}`,
                 `投入时长: ${formatDuration(a.duration)}`];

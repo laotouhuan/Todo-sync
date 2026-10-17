@@ -1,3 +1,4 @@
+import { normalizeSeriesData, displayTaskName, seriesFor, periodMembers, currentPeriod, timingPendingReason, isSeriesDeleted } from './taskSeries.js';
 import { getISOWeekString } from './dateUtils.js';
 
 // 学习记录的纯逻辑；按设备本地自然日统计。
@@ -33,14 +34,23 @@ export function canTimeTodo(todo) {
     return count < todo.target_count;
 }
 
-export function recentTimingTasks(todos, entries) {
+export function timingTodos(data, now = new Date()) {
+    return data.todos.filter(todo => {
+        const series = seriesFor(data, todo.id);
+        if (!series) return canTimeTodo(todo);
+        return !series.deleted && !todo.completed && todo.date === currentPeriod(series.period_type, now) && periodMembers(data, series.id, todo.date).length === 1 && canTimeTodo(todo);
+    }).map(todo => ({ ...todo, content: displayTaskName(data, todo.id) }));
+}
+
+export function recentTimingTasks(todos, entries, data = { todos }) {
     if (entries.some(e => !e.deleted && e.ended_at == null)) return [];
-    const available = new Map(todos.filter(canTimeTodo).map(todo => [todo.id, todo]));
+    const available = new Map(timingTodos(data).map(todo => [seriesFor(data, todo.id)?.id || todo.id, todo]));
     const latest = new Map();
     for (const entry of entries) {
         const ref = entry.task_ref;
         if (entry.deleted || (ref?.source_type || 'personal') !== 'personal' || ref?.source_id != null) continue;
-        const todo = available.get(ref?.todo_id);
+        const key = seriesFor(data, ref?.todo_id)?.id || ref?.todo_id;
+        const todo = available.get(key);
         const start = timingTimestamp(entry.started_at), end = timingTimestamp(entry.ended_at);
         if (!todo || !Number.isFinite(start) || !Number.isFinite(end) || end - start <= 30000) continue;
         const previous = latest.get(todo.id);
@@ -57,9 +67,9 @@ export function recentTimingTasks(todos, entries) {
 export function createRunningTimeEntry(data, todoId, now = new Date().toISOString()) {
     const todo = data.todos.find(t => t.id === todoId);
     if (!todo) throw new Error('任务已不存在，请重新选择');
-    if (!canTimeTodo(todo)) throw new Error('任务已删除、完成或达到目标，请重新选择');
+    if (!timingTodos(data, new Date(now)).some(t => t.id === todoId)) throw new Error('任务已删除、完成或达到目标，请重新选择');
     if (data.time_entries.some(e => !e.deleted && e.ended_at == null)) throw new Error('已有任务正在计时，请先结束或处理记录');
-    return { id: crypto.randomUUID(), task_ref: taskReference(todo), task_content_snapshot: todo.content,
+    return { id: crypto.randomUUID(), task_ref: taskReference(todo), task_content_snapshot: displayTaskName(data, todo.id),
         label_snapshot: normalizeLabel(todo.label), started_at: now, ended_at: null, created_at: now, updated_at: now, deleted: false };
 }
 
@@ -77,7 +87,7 @@ export function taskKey(ref) {
 }
 
 // 返回仅供显示和统计的副本，绝不回写历史快照。
-export function resolveLearningEntries(entries, tasks) {
+export function resolveLearningEntries(entries, tasks, context = null) {
     const byTask = new Map(tasks.map(({ todo, ref }) => [taskKey(ref), todo]));
     const latest = new Map();
     for (const e of entries) {
@@ -88,8 +98,11 @@ export function resolveLearningEntries(entries, tasks) {
     }
     return entries.map(e => {
         const key = taskKey(e.task_ref), todo = byTask.get(key);
-        return { ...e, label_snapshot: normalizeLabel(todo ? todo.label : latest.get(key)?.label_snapshot),
-            task_unavailable: !todo, task_deleted: !!todo?.deleted };
+        const source = context?.source;
+        const scoped = context && ((source?.type === 'collaboration' && e.task_ref?.source_type === 'collaboration' && e.task_ref.source_id === source.id) || (source?.type !== 'collaboration' && (e.task_ref?.source_type || 'personal') === 'personal' && e.task_ref?.source_id == null));
+        const display_content = scoped ? displayTaskName(context.data, e.task_ref?.todo_id, e.task_content_snapshot) : todo?.content || e.task_content_snapshot;
+        return { ...e, display_content, pending_reason: scoped ? timingPendingReason(context.data, source?.type === 'collaboration' ? { ...e, task_ref: { todo_id: e.task_ref.todo_id, source_type: 'personal', source_id: null } } : e) : '', label_snapshot: normalizeLabel(todo ? todo.label : latest.get(key)?.label_snapshot),
+            task_unavailable: !todo, task_deleted: !!todo?.deleted || !!(scoped && isSeriesDeleted(context.data, e.task_ref?.todo_id)) };
     });
 }
 
@@ -118,6 +131,7 @@ export function mergeLearningRecords(local = [], remote = [], key = 'id') {
 }
 
 export function normalizeLearningData(data) {
+    normalizeSeriesData(data);
     data.time_entries = mergeLearningRecords((data.time_entries || []).map(e => ({
         ...e, task_ref: { source_type: 'personal', source_id: null, ...e.task_ref },
         task_content_snapshot: e.task_content_snapshot || '', label_snapshot: normalizeLabel(e.label_snapshot),
@@ -190,12 +204,12 @@ export function finishTimeEntry(entry, endedAt) {
     return { ...entry, ended_at: endedAt, updated_at: endedAt, deleted: duration <= MIN_TIME_ENTRY_DURATION_MS };
 }
 
-export function validateTimeEntry(entry, entries, now = Date.now()) {
+export function validateTimeEntry(entry, entries, now = Date.now(), allowShort = false) {
     const start = Date.parse(entry.started_at), end = entry.ended_at == null ? null : Date.parse(entry.ended_at);
     if (!Number.isFinite(start) || (end !== null && !Number.isFinite(end))) return '请输入有效的日期和时间';
     if (start > now || (end !== null && end > now)) return '不能记录未来的学习时间';
     if (end !== null && end <= start) return '结束时间必须晚于开始时间';
-    if (end !== null && end - start <= MIN_TIME_ENTRY_DURATION_MS) return SHORT_TIME_ENTRY_MESSAGE;
+    if (!allowShort && end !== null && end - start <= MIN_TIME_ENTRY_DURATION_MS) return SHORT_TIME_ENTRY_MESSAGE;
     if (overlappingEntries([...entries.filter(e => e.id !== entry.id), entry]).has(entry.id)) return '与其他计时记录重叠，请检查起止时间';
     return null;
 }
@@ -215,8 +229,8 @@ export function summarizeLearning(entries, start, end, label = undefined, confli
     }
     return { duration: parts.reduce((s, p) => s + p.duration, 0), count: parts.length, parts,
         groups: [...groups.values()].sort((a, b) => b.duration - a.duration),
-        pending: relevant.filter(e => conflicts.has(e.id)).length,
-        running: relevant.filter(e => e.ended_at == null).length };
+        pending: relevant.filter(e => conflicts.has(e.id) || e.pending_reason).length,
+        running: relevant.filter(e => e.ended_at == null && !e.pending_reason).length };
 }
 
 export function formatDuration(ms, clock = false) {

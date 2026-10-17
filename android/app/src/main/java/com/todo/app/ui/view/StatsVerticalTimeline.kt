@@ -38,7 +38,7 @@ fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: S
     val tasks = learning.tasks
     val source by viewModel.activeSource.collectAsState()
     val ref = if (source is TodoViewModel.ActiveSource.Collaboration) TaskReference("", "collaboration", (source as TodoViewModel.ActiveSource.Collaboration).collab.id) else TaskReference("")
-    val resolved = remember(data.timeEntries, tasks) { Learning.resolveEntries(data.timeEntries, tasks) }
+    val resolved = remember(data.timeEntries, tasks, data.taskSeries, data.taskSeriesLinks) { Learning.resolveEntries(data.timeEntries, tasks, data, learning.sourceId) }
     val parts = remember(resolved, learning.conflicts, ref, period, target) { StatsTimeline.arcs(resolved, ref, period, target, conflicts = learning.conflicts) }
     val days = remember(period, target) { StatsTimeline.days(period, target) }
     val completed = remember(todos, period, target) { StatsTimeline.completions(todos, period, target) }

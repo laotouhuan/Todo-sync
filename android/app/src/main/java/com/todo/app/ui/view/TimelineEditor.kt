@@ -42,7 +42,7 @@ internal fun TimelineRecordEditor(viewModel: TodoViewModel, ids: List<String>, o
         Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
             if (records.isEmpty()) Text("该计时记录已删除")
             records.forEach { record -> TextButton(onClick = { selected = record.id }) {
-                Text("${record.task_content_snapshot}\n${timelineTime(record.started_at)} — ${timelineTime(record.ended_at)}")
+                Text("${record.display_content ?: record.task_content_snapshot}\n${timelineTime(record.started_at)} — ${timelineTime(record.ended_at)}")
             } }
         }
     }, confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } })

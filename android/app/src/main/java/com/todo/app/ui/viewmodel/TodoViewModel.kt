@@ -145,7 +145,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
             if (request != collabRequest || (_activeSource.value as? ActiveSource.Collaboration)?.collab != collab) return@launch
             if (result.isSuccess) {
                 _collabSnapshot.value = collab.id to result.getOrThrow()
-                _collabData.value = result.getOrThrow().todos
+                _collabData.value = com.todo.app.data.model.TaskSeriesLogic.visible(result.getOrThrow())
             } else {
                 _collabData.value = null
                 _collabSnapshot.value = null
@@ -220,7 +220,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     }
 
     val todos = repository.getTodoData().map { data ->
-        data.todos.filter { !it.deleted }
+        com.todo.app.data.model.TaskSeriesLogic.visible(data).filter { !it.deleted }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -307,16 +307,24 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         if (target is ActiveSource.Collaboration) return Result.failure(IllegalStateException("协作清单仅允许查看和新增任务"))
         return personalWrite(target) { repository.stopLearning(id).map { _discardedShortTimers.value += it } }
     }
-    suspend fun saveTimeEntry(entry: com.todo.app.data.model.TimeEntry, target: ActiveSource = activeSource.value): Result<Unit> {
+    suspend fun saveTimeEntry(entry: com.todo.app.data.model.TimeEntry, target: ActiveSource = activeSource.value, expected: com.todo.app.data.model.TimeEntry? = null): Result<Unit> {
         if (target is ActiveSource.Collaboration) return Result.failure(IllegalStateException("协作清单仅允许查看和新增任务"))
-        return personalWrite(target) { repository.saveTimeEntry(entry) }
+        return personalWrite(target) { repository.saveTimeEntry(entry, expected) }
     }
     suspend fun saveDailyReview(review: com.todo.app.data.model.DailyReview, target: ActiveSource = activeSource.value): Result<Unit> {
         if (target is ActiveSource.Collaboration) return Result.failure(IllegalStateException("协作清单仅允许查看和新增任务"))
         return personalWrite(target) { repository.saveDailyReview(review) }
     }
-    suspend fun saveEditedTodo(todo: Todo, target: ActiveSource = activeSource.value) {
-        personalWrite(target) { repository.updateTodo(todo) }
+    suspend fun changePeriods(change: (TodoData) -> TodoData): Result<Unit> {
+        personalTarget(activeSource.value)
+        return personalWrite(activeSource.value) { repository.changePeriods(change) }
+    }
+
+    suspend fun saveEditedTodo(todo: Todo, target: ActiveSource = activeSource.value, baseline: TodoData? = null) {
+        personalWrite(target) {
+            if (baseline == null) repository.updateTodo(todo)
+            else repository.changePeriods { com.todo.app.data.model.TaskSeriesLogic.edit(it, baseline, todo) }.getOrThrow()
+        }
     }
     fun toggleTodoStatus(id: String) {
         if (activeSource.value is ActiveSource.Collaboration) return

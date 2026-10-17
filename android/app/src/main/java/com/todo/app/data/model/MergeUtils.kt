@@ -53,6 +53,7 @@ object MergeUtils {
      * 规范化数据：迁移旧格式、去重复ID、去重复打卡日期。
      */
     fun normalizeData(data: TodoData): TodoData {
+        TaskSeriesLogic.validate(data)
         val migratedTodos = data.todos.map { migrateTodo(it) }
 
         // 去重复 ID（保留 updatedAt 最新的）
@@ -131,13 +132,15 @@ object MergeUtils {
             }
         }
         val mergedSettings = mergeReminderSettings(local, cloud)
+        val (series, links) = TaskSeriesLogic.merge(local, cloud)
         return TodoData(
             version = local.version,
             last_updated = nowIso(),
             todos = merged.values.sortedByDescending { it.createdAt },
             reminderSettings = mergedSettings,
             timeEntries = Learning.mergeTimes(local.timeEntries, cloud.timeEntries),
-            dailyReviews = Learning.mergeReviews(local.dailyReviews, cloud.dailyReviews)
+            dailyReviews = Learning.mergeReviews(local.dailyReviews, cloud.dailyReviews),
+            taskSeries = series, taskSeriesLinks = links
         )
     }
 

@@ -286,7 +286,7 @@
         </div>
       </div>
       <div class="modal-body">
-        <label for="edit-content">待办内容</label>
+        <label for="edit-content">待办名称</label>
         <input type="text" id="edit-content" placeholder="输入待办内容..." autocomplete="off" />
         
         <!-- 任务类型 (四种) -->
@@ -372,7 +372,6 @@
           </div>
         </div>
         <div class="subtasks-container" style="margin-top: 0; padding: 0; background: transparent;">
-          <ul id="edit-subtasks-list" class="subtasks-list"></ul>
           <div class="add-subtask-row">
             <input type="text" id="add-subtask-input" placeholder="添加新子步骤..." autocomplete="off" />
             <button type="button" id="add-subtask-btn" class="icon-btn-small" aria-label="添加子步骤">
@@ -381,29 +380,13 @@
               </svg>
             </button>
           </div>
+          <ul id="edit-subtasks-list" class="subtasks-list"></ul>
         </div>
       </div>
 
     </div>
   </div>
 
-  <!-- Import Modal -->
-  <div id="import-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
-    <div class="modal-content glass-panel">
-      <h3 id="import-modal-title">导入任务</h3>
-      <div class="modal-body">
-        <ul id="import-tasks-list" class="subtasks-list">
-          <!-- Rendered via JS -->
-        </ul>
-      </div>
-      <div class="modal-footer">
-        <div class="footer-right" style="width: 100%; justify-content: flex-end;">
-          <button id="import-cancel-btn" class="modal-btn secondary">取消</button>
-          <button id="import-confirm-btn" class="modal-btn primary">导入选中项</button>
-        </div>
-      </div>
-    </div>
-  </div>
   <!-- Backup Modal -->
   <div id="backup-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="backup-modal-title">
     <div class="modal-content glass-panel settings-dialog" style="max-width: 400px;">

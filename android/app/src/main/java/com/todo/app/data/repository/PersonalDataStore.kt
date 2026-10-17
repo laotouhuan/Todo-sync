@@ -105,12 +105,12 @@ internal class PersonalDataStore(
             else -> error("任务来源无效")
         }
         require(!latest.deleted) { "已删除任务不能开始计时" }
-        require(Learning.canTimeTodo(latest)) { "任务已完成或达到目标，请重新选择" }
+        require(Learning.canTimeTodo(latest) && (ref.source_type != "personal" || TaskSeriesLogic.timingTodos(current).any { it.id == latest.id })) { "任务已完成或达到目标，请重新选择" }
         require(current.timeEntries.none { !it.deleted && it.ended_at == null }) { "已有任务正在计时，请先结束或处理记录" }
         val timestamp = now ?: nowIso()
         commitLocked(current.copy(last_updated = timestamp, timeEntries = current.timeEntries + TimeEntry(
             id = UUID.randomUUID().toString(), task_ref = ref, started_at = timestamp,
-            created_at = timestamp, updated_at = timestamp, task_content_snapshot = latest.content,
+            created_at = timestamp, updated_at = timestamp, task_content_snapshot = if (ref.source_type == "personal") TaskSeriesLogic.display(current, latest.id) else latest.content,
             label_snapshot = Learning.label(latest.label))))
     }
 
@@ -120,6 +120,7 @@ internal class PersonalDataStore(
         val entry = current.timeEntries.find { it.id == id && !it.deleted && it.ended_at == null }
             ?: return@withLock 0
         val timestamp = now ?: nowIso()
+        require(TaskSeriesLogic.pending(current, entry) == null) { "请先核对实际结束时间" }
         val finished = Learning.finishTimeEntry(entry, timestamp)
         commitLocked(current.copy(last_updated = timestamp, timeEntries = current.timeEntries.map {
             if (it.id == id) finished else it
@@ -136,6 +137,7 @@ internal class PersonalDataStore(
             val current = loadLocked()
             val running = current.timeEntries.filter { !it.deleted && it.ended_at == null }
             require(running.toSet() == expected.toSet()) { "运行记录已变化，请重新保存并确认" }
+            require(running.none { TaskSeriesLogic.pending(current, it) != null }) { "请先核对实际结束时间，或仅关闭本机计时" }
             if (running.isNotEmpty()) {
                 val timestamp = now ?: nowIso()
                 val updated = current.copy(last_updated = timestamp, timeEntries = current.timeEntries.map { entry ->

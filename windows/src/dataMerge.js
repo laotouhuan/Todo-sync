@@ -1,3 +1,4 @@
+import { mergeSeriesData } from './taskSeries.js';
 import { getISOWeekString, isMonthDate, isWeekDate } from './dateUtils.js';
 import { mergeLearningRecords, normalizeLabel, normalizeLearningData } from './timeTracking.js';
 
@@ -110,6 +111,8 @@ function todoDataContentSnapshot(data) {
     return {
         version: data?.version ?? 1,
         todos: data?.todos || [],
+        task_series: data?.task_series || [],
+        task_series_links: data?.task_series_links || [],
         time_entries: data?.time_entries || [],
         daily_reviews: data?.daily_reviews || [],
         reminder_settings: data?.reminder_settings || {
@@ -241,6 +244,7 @@ export function mergeTodoData(localData, cloudData) {
         version: localData.version || 1,
         last_updated: new Date().toISOString(),
         todos: mergedTodos,
+        ...mergeSeriesData(localData, cloudData),
         reminder_settings: mergedReminderSettings,
         time_entries: mergeLearningRecords(localData.time_entries, cloudData.time_entries),
         daily_reviews: mergeLearningRecords(localData.daily_reviews, cloudData.daily_reviews, 'date')

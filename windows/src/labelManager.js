@@ -46,7 +46,7 @@ export function createLabelManager({ getTodos, commit }) {
     }
     function render() {
         if (!host) return;
-        const todos = getTodos(); previous = JSON.stringify(todos.map(t => [t.id, t.label, t.updated_at]));
+        const todos = getTodos(); previous = JSON.stringify(todos.map(t => [t.id, t.label, t.updated_at, t.content]));
         host.replaceChildren(node('h3', '个人清单 · 标签管理'));
         const search = node('input'); search.type = 'search'; search.placeholder = '搜索标签'; search.value = query;
         search.setAttribute('aria-label', '搜索标签'); host.append(search);
@@ -88,6 +88,6 @@ export function createLabelManager({ getTodos, commit }) {
         drawTasks();
     }
     return { mount(element) { host = element; render(); }, refresh() {
-        if (!busy && host && previous !== JSON.stringify(getTodos().map(t => [t.id, t.label, t.updated_at]))) { selected.clear(); render(); }
+        if (!busy && host && previous !== JSON.stringify(getTodos().map(t => [t.id, t.label, t.updated_at, t.content]))) { selected.clear(); render(); }
     } };
 }

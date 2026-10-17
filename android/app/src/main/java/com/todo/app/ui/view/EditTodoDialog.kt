@@ -108,23 +108,22 @@ internal fun buildUpdatedTodo(
     var finalTime = time.takeIf { it.isNotBlank() }
 
     if (mappedTaskType == TaskType.NORMAL && finalDate != null && (isWeekDate(finalDate) || isMonthDate(finalDate))) {
-        finalTime = null
         if (isWeekDate(finalDate)) {
             mappedTaskType = TaskType.WEEKLY_CHECKIN
         } else {
             mappedTaskType = TaskType.MONTHLY_CHECKIN
         }
     } else if (selectedTypeUi == TaskType.WEEKLY_CHECKIN) {
-        finalTime = null
         if (finalDate == null || !isWeekDate(finalDate)) {
             finalDate = weekStringOf(LocalDate.now())
         }
     } else if (selectedTypeUi == TaskType.MONTHLY_CHECKIN) {
-        finalTime = null
         if (finalDate == null || !isMonthDate(finalDate)) {
             finalDate = monthStringOf(LocalDate.now())
         }
     }
+
+    if (mappedTaskType != originalTaskType) finalTime = null
 
     val isCompletedNow = if (mappedTaskType == TaskType.WEEKLY_CHECKIN || mappedTaskType == TaskType.MONTHLY_CHECKIN) {
         val tempTodo = todo.copy(completedDates = completedDates, date = finalDate)
@@ -181,8 +180,7 @@ private fun copyToClipboard(context: Context, text: String) {
 fun EditTodoDialog(
     todo: Todo,
     onDismiss: () -> Unit,
-    onConfirm: suspend (Todo) -> Unit,
-    onDelete: () -> Unit,
+    onConfirm: suspend (Todo, com.todo.app.data.model.TodoData) -> Unit,
     viewModel: com.todo.app.ui.viewmodel.TodoViewModel
 ) {
     val openingSource = remember { viewModel.activeSource.value }
@@ -192,14 +190,22 @@ fun EditTodoDialog(
         ReadOnlyTodoDialog(todo, viewModel, onDismiss)
         return
     }
-    var learningLabel by remember(todo.id, todo.label) { mutableStateOf(todo.label ?: "") }
+    var baselineData by remember(todo.id) { mutableStateOf(viewModel.todoData.value) }
+    val openingSeries = com.todo.app.data.model.TaskSeriesLogic.series(baselineData, todo.id)
+    val progressSections = remember(todo.id) { editorProgressSections(todo, baselineData.timeEntries, com.todo.app.data.model.TaskReference(todo.id), viewModel.timeTrackingEnabled.value) }
+    val progressSubtasks = "subtasks" in progressSections
+    val progressCheckins = "checkins" in progressSections
+    val progressTiming = "timing" in progressSections
+    var showAssociations by remember { mutableStateOf(false) }
+    var showComparison by remember { mutableStateOf(false) }
+    var learningLabel by remember(todo.id) { mutableStateOf(todo.label ?: "") }
 
     val learningTasks by viewModel.learningTasks.collectAsState()
-    val parsedContent = remember(todo.content) { todo.extractCollaboratorContent() }
-    var content by remember(todo.content) { mutableStateOf(parsedContent.cleanContent) }
-    var date by remember(todo.id, todo.date) { mutableStateOf(todo.date ?: "") }
-    var time by remember(todo.time) { mutableStateOf(todo.time ?: "") }
-    var hasDateEnabled by remember(todo.id, todo.date) { mutableStateOf(!todo.date.isNullOrEmpty() && !isWeekDate(todo.date!!) && !isMonthDate(todo.date!!)) }
+    val parsedContent = remember(todo.id) { todo.extractCollaboratorContent() }
+    var content by remember(todo.id) { mutableStateOf(parsedContent.cleanContent) }
+    var date by remember(todo.id) { mutableStateOf(todo.date ?: "") }
+    var time by remember(todo.id) { mutableStateOf(todo.time ?: "") }
+    var hasDateEnabled by remember(todo.id) { mutableStateOf(!todo.date.isNullOrEmpty() && !isWeekDate(todo.date!!) && !isMonthDate(todo.date!!)) }
     var cachedDate by remember(todo.id) { mutableStateOf(if (!todo.date.isNullOrEmpty() && !isWeekDate(todo.date!!) && !isMonthDate(todo.date!!)) todo.date!! else "") }
 
     LaunchedEffect(date) {
@@ -207,23 +213,24 @@ fun EditTodoDialog(
             cachedDate = date
         }
     }
-    var completedDates by remember(todo.completedDates) { mutableStateOf(todo.completedDates) }
-    var subtasks by remember(todo.subtasks) { mutableStateOf(todo.subtasks) }
+    var completedDates by remember(todo.id) { mutableStateOf(todo.completedDates) }
+    var subtasks by remember(todo.id) { mutableStateOf(todo.subtasks) }
     var editingSubtaskId by remember { mutableStateOf<String?>(null) }
-    var targetCount by remember(todo.targetCount) { mutableStateOf(todo.targetCount) }
-    var parentCompleted by remember(todo.completed) { mutableStateOf(todo.completed) }
-    var parentCompletedAt by remember(todo.completedAt) { mutableStateOf(todo.completedAt) }
+    var targetCount by remember(todo.id) { mutableStateOf(todo.targetCount) }
+    var parentCompleted by remember(todo.id) { mutableStateOf(todo.completed) }
+    var parentCompletedAt by remember(todo.id) { mutableStateOf(todo.completedAt) }
 
     // 本次编辑的原始类型保持不变，截止日期推导后再比较最终类型。
     val originalType = remember(todo.id) { todo.taskType to todo.recurring }
-    var selectedTypeUi by remember(todo.id, todo.taskType) { mutableStateOf(todo.taskType) }
+    var selectedTypeUi by remember(todo.id) { mutableStateOf(todo.taskType) }
 
-    var hasReminder by remember(todo.id, todo.reminder) { mutableStateOf(todo.reminder != null) }
-    var reminderDate by remember(todo.id, todo.reminder, todo.date) {
+    var reminderDirty by remember(todo.id) { mutableStateOf(false) }
+    var hasReminder by remember(todo.id) { mutableStateOf(todo.reminder != null) }
+    var reminderDate by remember(todo.id) {
         mutableStateOf(todo.reminder?.reminderDate ?: (if (date.isNotBlank() && !isWeekDate(date) && !isMonthDate(date)) date else ""))
     }
-    var reminderTime by remember(todo.id, todo.reminder) { mutableStateOf(todo.reminder?.reminderTime ?: "09:00") }
-    var reminderRepeatDaily by remember(todo.id, todo.reminder) { mutableStateOf(todo.reminder?.repeatDaily ?: false) }
+    var reminderTime by remember(todo.id) { mutableStateOf(todo.reminder?.reminderTime ?: "09:00") }
+    var reminderRepeatDaily by remember(todo.id) { mutableStateOf(todo.reminder?.repeatDaily ?: false) }
 
     val currentReminder = if (hasReminder) {
         com.todo.app.data.model.Reminder(
@@ -249,13 +256,15 @@ fun EditTodoDialog(
             parentCompletedAt = parentCompletedAt,
             completedDates = completedDates,
             subtasks = subtasks,
-            reminder = currentReminder,
+            reminder = if (reminderDirty) currentReminder else todo.reminder,
             originalTaskType = originalType.first,
             originalRecurring = originalType.second
         )
         if (!saving) saveScope.launch {
             saving = true
-            try { onConfirm(updated.copy(label = com.todo.app.data.model.Learning.label(learningLabel))); onDismiss() }
+            try { onConfirm(updated.copy(label = com.todo.app.data.model.Learning.label(learningLabel),
+                completed = if (updated.taskType == todo.taskType && targetCount == todo.targetCount && completedDates == todo.completedDates && subtasks == todo.subtasks) todo.completed else updated.completed,
+                completedAt = if (updated.taskType == todo.taskType && targetCount == todo.targetCount && completedDates == todo.completedDates && subtasks == todo.subtasks) todo.completedAt else updated.completedAt), baselineData); onDismiss() }
             catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Toast.makeText(saveContext, "保存失败：" + e.message, Toast.LENGTH_LONG).show()
@@ -270,25 +279,37 @@ fun EditTodoDialog(
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
-    if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("确认删除") },
-            text = { Text("您确定要删除这个待办事项吗？") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showDeleteConfirm = false
-                    onDelete()
-                }) {
-                    Text("删除", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("取消")
-                }
-            }
-        )
+    if (showDeleteConfirm) PeriodDeleteDialog(todo.id, viewModel, { showDeleteConfirm = false }, { showDeleteConfirm = false; onDismiss() })
+    if (showAssociations) PeriodAssociationDialog(todo.id, viewModel, onSaved = {
+        val dirty = content != com.todo.app.data.model.TaskSeriesLogic.display(baselineData, todo.id)
+        val latest = viewModel.todoData.value
+        baselineData = baselineData.copy(taskSeries = latest.taskSeries, taskSeriesLinks = latest.taskSeriesLinks)
+        if (!dirty) content = com.todo.app.data.model.TaskSeriesLogic.display(baselineData, todo.id)
+    }) { showAssociations = false }
+    if (showComparison) PeriodComparisonDialog(todo.id, viewModel) { showComparison = false }
+
+    val SubtasksContent: @Composable () -> Unit = {
+                    EditDetailSection(if (subtasks.isEmpty()) "添加子步骤／备注" else "子步骤／备注", if (subtasks.isEmpty()) "" else "${subtasks.count { it.completed }}/${subtasks.size}", initiallyExpanded = subtasks.isNotEmpty()) {
+                        EditTodoSubtasksSection(
+                            todo = todo,
+                            subtasks = subtasks,
+                            onSubtasksChange = { subtasks = it },
+                            editingSubtaskId = editingSubtaskId,
+                            onEditingSubtaskIdChange = { editingSubtaskId = it },
+                            autoCompleteParent = viewModel.configManager.completeParentWithSubtasks,
+                            parentCompleted = parentCompleted,
+                            onParentCompletedChange = { parentCompleted = it },
+                            parentCompletedAt = parentCompletedAt,
+                            onParentCompletedAtChange = { parentCompletedAt = it },
+                            context = LocalContext.current
+                        )
+                    }
+
+    }
+    val CheckinContent: @Composable () -> Unit = {
+        if (selectedTypeUi == TaskType.WEEKLY_CHECKIN || selectedTypeUi == TaskType.MONTHLY_CHECKIN) EditDetailSection("打卡记录", "${completedDates.size} 次", initiallyExpanded = progressCheckins) {
+            EditTodoCheckinSection(selectedTypeUi, todo, targetCount, { targetCount = it }, completedDates, onUpdateCompletedDates, date, showTarget = false)
+        }
     }
 
     Dialog(onDismissRequest = { if (!saving) onDismiss() }) {
@@ -305,6 +326,18 @@ fun EditTodoDialog(
                 )
 
                 Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                    Text("基本信息", style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(content, { content = it }, label = { Text("待办名称") }, modifier = Modifier.fillMaxWidth())
+                    if (todo.date != null) Text(com.todo.app.data.model.TaskSeriesLogic.description(todo.date.orEmpty()))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("进展与记录", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        if (openingSeries != null) TextButton(onClick = { showComparison = true }) { Text("往期对比") }
+                    }
+                    if (progressSubtasks) SubtasksContent()
+                    if (progressTiming) LearningTaskRecords(viewModel, todo, initiallyExpanded = true)
+                    if (progressCheckins) CheckinContent()
+                    if (!progressSubtasks && !progressTiming && !progressCheckins) Text("暂无进展记录，可在下方添加")
+                    Text("更多设置", style = MaterialTheme.typography.titleMedium)
                     EditTodoContentSection(
                         content = content,
                         onContentChange = { content = it },
@@ -320,7 +353,7 @@ fun EditTodoDialog(
                             }
                             hasDateEnabled = checked
                         },
-                        selectedTypeUi = selectedTypeUi
+                        selectedTypeUi = selectedTypeUi, showName = false
                     )
 
                     EditDetailSection("任务类型", when (selectedTypeUi) { TaskType.WEEKLY_CHECKIN -> "周打卡"; TaskType.MONTHLY_CHECKIN -> "月打卡"; else -> "普通待办" }) {
@@ -335,51 +368,30 @@ fun EditTodoDialog(
                     EditDetailSection("提醒", if (hasReminder) listOf(reminderDate, reminderTime).filter { it.isNotBlank() }.joinToString(" ") else "未设置") {
                         EditTodoReminderSection(
                             hasReminder = hasReminder,
-                            onHasReminderChange = { hasReminder = it },
+                            onHasReminderChange = { reminderDirty = true; hasReminder = it },
                             reminderDate = reminderDate,
-                            onReminderDateChange = { reminderDate = it },
+                            onReminderDateChange = { reminderDirty = true; reminderDate = it },
                             reminderTime = reminderTime,
-                            onReminderTimeChange = { reminderTime = it },
+                            onReminderTimeChange = { reminderDirty = true; reminderTime = it },
                             reminderRepeatDaily = reminderRepeatDaily,
-                            onReminderRepeatDailyChange = { reminderRepeatDaily = it }
+                            onReminderRepeatDailyChange = { reminderDirty = true; reminderRepeatDaily = it }
                         )
 
                     }
                     if (selectedTypeUi == TaskType.WEEKLY_CHECKIN || selectedTypeUi == TaskType.MONTHLY_CHECKIN) {
-                        EditDetailSection(
-                            title = if (targetCount == 1) "打卡目标" else "打卡记录",
-                            summary = if (targetCount == 1) "目标 1 次" else "${completedDates.size} 次" + (targetCount?.let { " · 目标 $it 次" } ?: "")
-                        ) {
-                            EditTodoCheckinSection(
-                                selectedTypeUi = selectedTypeUi,
-                                todo = todo,
-                                targetCount = targetCount,
-                                onTargetCountChange = { targetCount = it },
-                                completedDates = completedDates,
-                                onUpdateCompletedDates = onUpdateCompletedDates,
-                                date = date
-                            )
+                        EditDetailSection("打卡目标", targetCount?.toString() ?: "未设置") {
+                            EditTodoCheckinSection(selectedTypeUi, todo, targetCount, { targetCount = it }, completedDates, onUpdateCompletedDates, date, showRecords = false)
                         }
-
+                        if (!progressCheckins) CheckinContent()
                     }
-                    EditDetailSection(if (subtasks.isEmpty()) "添加子步骤／备注" else "子步骤／备注", if (subtasks.isEmpty()) "" else "${subtasks.count { it.completed }}/${subtasks.size}", initiallyExpanded = subtasks.isNotEmpty()) {
-                        EditTodoSubtasksSection(
-                            todo = todo,
-                            subtasks = subtasks,
-                            onSubtasksChange = { subtasks = it },
-                            editingSubtaskId = editingSubtaskId,
-                            onEditingSubtaskIdChange = { editingSubtaskId = it },
-                            autoCompleteParent = viewModel.configManager.completeParentWithSubtasks,
-                            parentCompleted = parentCompleted,
-                            onParentCompletedChange = { parentCompleted = it },
-                            parentCompletedAt = parentCompletedAt,
-                            onParentCompletedAtChange = { parentCompletedAt = it },
-                            context = LocalContext.current
-                        )
-                    }
-                    LearningTaskRecords(viewModel, todo)
+                    EditTodoCompletionSection(todo, parentCompleted, parentCompletedAt) { parentCompletedAt = it }
+                    if (!progressSubtasks) SubtasksContent()
+                    if (!progressTiming) LearningTaskRecords(viewModel, todo)
                     EditDetailSection("标签", com.todo.app.data.model.Learning.label(learningLabel) ?: "未分类") {
                         LearningLabelPicker(learningLabel, com.todo.app.data.model.Learning.availableLabels(learningTasks.values.toList())) { learningLabel = it }
+                    }
+                    if (com.todo.app.data.model.TaskSeriesLogic.type(todo) != null) EditDetailSection("周期关联", "管理往期任务") {
+                        TextButton(onClick = { showAssociations = true }) { Text("管理周期关联") }
                     }
                 }
             }
@@ -426,9 +438,10 @@ private fun EditTodoContentSection(
     onDateChange: (String) -> Unit,
     hasDateEnabled: Boolean,
     onHasDateEnabledChange: (Boolean) -> Unit,
-    selectedTypeUi: String
+    selectedTypeUi: String,
+    showName: Boolean = true
 ) {
-    OutlinedTextField(
+    if (showName) OutlinedTextField(
         value = content,
         onValueChange = onContentChange,
         modifier = Modifier.fillMaxWidth(),
@@ -547,11 +560,13 @@ private fun EditTodoCheckinSection(
     onTargetCountChange: (Int?) -> Unit,
     completedDates: List<String>,
     onUpdateCompletedDates: (List<String>) -> Unit,
-    date: String
+    date: String,
+    showTarget: Boolean = true,
+    showRecords: Boolean = true
 ) {
     Spacer(Modifier.height(12.dp))
     var targetCountText by remember(targetCount) { mutableStateOf(targetCount?.toString() ?: "") }
-    OutlinedTextField(
+    if (showTarget) OutlinedTextField(
         value = targetCountText,
         onValueChange = {
             targetCountText = it
@@ -563,7 +578,7 @@ private fun EditTodoCheckinSection(
         singleLine = true
     )
 
-    if (targetCount != 1) {
+    if (showRecords) {
         Spacer(Modifier.height(12.dp))
         Text("打卡记录 (点击补卡/销卡)", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(4.dp))
@@ -590,79 +605,6 @@ private fun EditTodoSubtasksSection(
     context: Context
 ) {
     Spacer(Modifier.height(16.dp))
-
-    if (parentCompleted && todo.taskType == TaskType.NORMAL) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            var dateText by remember(todo.id, parentCompleted, parentCompletedAt != null) {
-                if (parentCompletedAt != null) {
-                    if (parentCompletedAt.contains('T')) {
-                        try {
-                            val ldt = parseIsoToLocalDateTime(parentCompletedAt)
-                            val mm = String.format("%02d", ldt.monthValue)
-                            val dd = String.format("%02d", ldt.dayOfMonth)
-                            mutableStateOf("${ldt.year}-$mm-$dd")
-                        } catch (_: Exception) {
-                            mutableStateOf(parentCompletedAt.take(10))
-                        }
-                    } else {
-                        mutableStateOf(parentCompletedAt.take(10))
-                    }
-                } else {
-                    val now = LocalDate.now()
-                    val mm = String.format("%02d", now.monthValue)
-                    val dd = String.format("%02d", now.dayOfMonth)
-                    mutableStateOf("${now.year}-$mm-$dd")
-                }
-            }
-
-            var timeText by remember(todo.id, parentCompleted, parentCompletedAt != null) {
-                if (parentCompletedAt != null && parentCompletedAt.contains('T')) {
-                    try {
-                        val ldt = parseIsoToLocalDateTime(parentCompletedAt)
-                        val hh = String.format("%02d", ldt.hour)
-                        val min = String.format("%02d", ldt.minute)
-                        mutableStateOf("$hh:$min")
-                    } catch (_: Exception) {
-                        mutableStateOf("--:--")
-                    }
-                } else {
-                    mutableStateOf("--:--")
-                }
-            }
-
-            val updateCompletedAt = { d: String, t: String ->
-                val dateVal = d.trim()
-                if (dateVal.isNotEmpty()) {
-                    val checkinStr = formatCheckinDateTime(d, t)
-                    onParentCompletedAtChange(checkinStr)
-                }
-            }
-
-            AppDateInput(
-                value = dateText,
-                onValueChange = {
-                    dateText = it
-                    updateCompletedAt(it, timeText)
-                },
-                label = "完成日期",
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            SegmentedTimeInput(
-                value = timeText,
-                onValueChange = { newTime ->
-                    timeText = newTime
-                    updateCompletedAt(dateText, newTime)
-                },
-                label = "完成时间",
-                modifier = Modifier.fillMaxWidth(),
-                allowEmpty = true
-            )
-        }
-    }
 
     var showCopyDialog by remember { mutableStateOf(false) }
     var copyOnlyUncompleted by remember { mutableStateOf(true) }
@@ -1067,4 +1009,87 @@ fun EditMonthCheckinGrid(
             }
         }
     }
+}
+
+@Composable
+private fun EditTodoCompletionSection(todo: Todo, parentCompleted: Boolean, parentCompletedAt: String?, onParentCompletedAtChange: (String?) -> Unit) {
+    if (parentCompleted && todo.taskType == TaskType.NORMAL) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            var dateText by remember(todo.id, parentCompleted, parentCompletedAt != null) {
+                if (parentCompletedAt != null) {
+                    if (parentCompletedAt.contains('T')) {
+                        try {
+                            val ldt = parseIsoToLocalDateTime(parentCompletedAt)
+                            val mm = String.format("%02d", ldt.monthValue)
+                            val dd = String.format("%02d", ldt.dayOfMonth)
+                            mutableStateOf("${ldt.year}-$mm-$dd")
+                        } catch (_: Exception) {
+                            mutableStateOf(parentCompletedAt.take(10))
+                        }
+                    } else {
+                        mutableStateOf(parentCompletedAt.take(10))
+                    }
+                } else {
+                    val now = LocalDate.now()
+                    val mm = String.format("%02d", now.monthValue)
+                    val dd = String.format("%02d", now.dayOfMonth)
+                    mutableStateOf("${now.year}-$mm-$dd")
+                }
+            }
+
+            var timeText by remember(todo.id, parentCompleted, parentCompletedAt != null) {
+                if (parentCompletedAt != null && parentCompletedAt.contains('T')) {
+                    try {
+                        val ldt = parseIsoToLocalDateTime(parentCompletedAt)
+                        val hh = String.format("%02d", ldt.hour)
+                        val min = String.format("%02d", ldt.minute)
+                        mutableStateOf("$hh:$min")
+                    } catch (_: Exception) {
+                        mutableStateOf("--:--")
+                    }
+                } else {
+                    mutableStateOf("--:--")
+                }
+            }
+
+            val updateCompletedAt = { d: String, t: String ->
+                val dateVal = d.trim()
+                if (dateVal.isNotEmpty()) {
+                    val checkinStr = formatCheckinDateTime(d, t)
+                    onParentCompletedAtChange(checkinStr)
+                }
+            }
+
+            AppDateInput(
+                value = dateText,
+                onValueChange = {
+                    dateText = it
+                    updateCompletedAt(it, timeText)
+                },
+                label = "完成日期",
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            SegmentedTimeInput(
+                value = timeText,
+                onValueChange = { newTime ->
+                    timeText = newTime
+                    updateCompletedAt(dateText, newTime)
+                },
+                label = "完成时间",
+                modifier = Modifier.fillMaxWidth(),
+                allowEmpty = true
+            )
+        }
+    }
+
+}
+
+internal fun editorProgressSections(todo: Todo, entries: List<com.todo.app.data.model.TimeEntry>, ref: com.todo.app.data.model.TaskReference, timingEnabled: Boolean = true): Set<String> = buildSet {
+    if (todo.subtasks.isNotEmpty()) add("subtasks")
+    if (timingEnabled && entries.any { !it.deleted && it.task_ref == ref }) add("timing")
+    if (todo.taskType in listOf(TaskType.WEEKLY_CHECKIN, TaskType.MONTHLY_CHECKIN) && todo.completedDates.isNotEmpty()) add("checkins")
 }

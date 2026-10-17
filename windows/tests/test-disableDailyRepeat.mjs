@@ -1,3 +1,4 @@
+import * as seriesHelpers from '../src/taskSeries.js';
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -48,10 +49,10 @@ function harness(todos, completeSubtasks = true) {
         activeSource: { type: 'personal' }, currentEditingSubtasks: [], dateFilter: 'today' };
     let writes = 0;
     const scheduled = [];
-    const names = ['createTodoItemElement', 'saveEditModal', 'openEditModal', 'closeEditModal', 'updateEditModalFields', 'getMetaHtml', 'getMondayFromWeek', 'applyTaskType', 'createAndAddTodo'];
+    const names = ['acceptPeriodMove', 'commitPeriodData', 'createTodoItemElement', 'saveEditModal', 'openEditModal', 'closeEditModal', 'updateEditModalFields', 'getMetaHtml', 'getMondayFromWeek', 'applyTaskType', 'createAndAddTodo'];
     const api = runInNewContext('let _saveQueue=Promise.resolve(),_lastRenderedHash="",activeCheckinDropdown=null,_pendingMidnightRefresh=false,pendingAnimations=0,_currentlyDraggedTodoId=null,_currentlyHoveredHeaderType=null;' +
         names.map(declaration).join('\n') + `;({${names.join(',')}, changeType:${source.slice(typeChange.start, typeChange.end)}, dragHeader:(evt,header)=>{_currentlyHoveredHeaderType=header;return (${source.slice(dragEnd.start,dragEnd.end)})(evt);}})`, {
-        ...dates, ...data, ...learning, appState: state, structuredClone, document, Date,
+        ...dates, ...data, ...learning, ...seriesHelpers, normalizeLearningData: learning.normalizeLearningData, requirePersonalTarget: source => { if (source.type !== "personal") throw new Error("只读"); }, appState: state, structuredClone, document, Date,
         todayStr: dates.getTodayString(), thisWeekStr: dates.getThisWeekString(), thisMonthStr: dates.getThisMonthString(),
         taskTypeSelect: document.getElementById('edit-task-type'),
         deepClone: structuredClone, extractCollaborator: content => ({ cleanContent: content, nickname: null }),
@@ -126,6 +127,11 @@ it('编辑打开/取消不写数据；切换再切回按打开时基准保存标
 });
 
 it('实际保存按截止日期推导后的最终类型清标记，完成日期不改变任务类型', async () => {
+    const switched = harness([legacy()]); switched.api.openEditModal(switched.state.todoData.todos[0]);
+    switched.field('edit-task-type').value = 'weekly_checkin'; switched.api.changeType();
+    await switched.api.saveEditModal();
+    assert.equal(switched.state.todoData.todos[0].task_type, 'weekly_checkin');
+    assert.equal(switched.state.todoData.todos[0].recurring, 'none');
     for (const [selected, date, finalType] of [['weekly_checkin', '', 'weekly_checkin'], ['normal', '2026-W40', 'weekly_checkin'], ['normal', '2026-10', 'monthly_checkin']]) {
         const h = harness([legacy()]); h.api.openEditModal(h.state.todoData.todos[0]);
         h.field('edit-task-type').value = selected;

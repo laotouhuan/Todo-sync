@@ -37,7 +37,7 @@ class ReminderScheduler(private val context: Context) {
         val todayStr = LocalDate.now().toString()
 
         // 1. 单项任务提醒
-        todoData.todos
+        com.todo.app.data.model.TaskSeriesLogic.visible(todoData)
             .filter { !it.deleted && it.reminder != null }
             .forEach { todo ->
                 val reminder = todo.reminder!!

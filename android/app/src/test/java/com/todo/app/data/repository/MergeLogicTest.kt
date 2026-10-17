@@ -290,4 +290,17 @@ class MergeLogicTest {
         assertEquals(merged.timeEntries, MergeUtils.mergeTodoData(cloud, local).timeEntries)
     }
 
+
+    @org.junit.Test fun seriesOnlyRenameTriggersContentChangeAndPreservesLearningData() {
+        val t = com.todo.app.data.model.Todo.create("数学", "2026-W41").copy(taskType = "weekly_checkin")
+        val original = com.todo.app.data.model.TodoData(1, "2026-10-15T12:00:00+08:00", listOf(t))
+        val linked = com.todo.app.data.model.TaskSeriesLogic.import(original, listOf(t), "2026-W42", "2026-10-15T12:00:00+08:00")
+        val renamed = linked.copy(taskSeries = linked.taskSeries.map { it.copy(content = "新名称", content_renamed = true) })
+        val merged = com.todo.app.data.model.MergeUtils.mergeTodoData(linked, renamed)
+        org.junit.Assert.assertTrue(com.todo.app.data.model.MergeUtils.hasContentChanges(merged, linked))
+        org.junit.Assert.assertEquals("新名称", merged.taskSeries.single().content)
+        org.junit.Assert.assertEquals(linked.timeEntries, merged.timeEntries)
+        org.junit.Assert.assertEquals(linked.dailyReviews, merged.dailyReviews)
+    }
+
 }

@@ -110,6 +110,7 @@ class WidgetTimerActivity : ComponentActivity() {
                                 when (timer) {
                                     WidgetTimerState.Disabled -> Text("请在设置中启用计时")
                                     WidgetTimerState.Idle -> {
+                                        com.todo.app.data.model.TaskSeriesLogic.duplicateTimingSeries(data).forEach { Text("${it.content}：本期存在重复任务，请在应用中核对") }
                                         val candidates = widgetTimerCandidates(data)
                                         if (candidates.isEmpty()) Text("暂无可继续计时的最近任务，请在应用中选择任务开始计时")
                                         LazyColumn(Modifier.weight(1f, fill = false)) {

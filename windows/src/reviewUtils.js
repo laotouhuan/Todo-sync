@@ -12,8 +12,8 @@ export function reviewPreview(review) {
     return field ? `${field[1]}：${review[field[0]].split('\n').slice(0, 2).join('\n')}` : '';
 }
 
-export function exportReviews(data, period, target, includeLearning = true, tasks = (data.todos || []).map(todo => ({ todo, ref: taskReference(todo) })), conflicts = undefined) {
-    const resolved = resolveLearningEntries(data.time_entries || [], tasks);
+export function exportReviews(data, period, target, includeLearning = true, tasks = (data.todos || []).map(todo => ({ todo, ref: taskReference(todo) })), conflicts = undefined, source = { type: 'personal' }) {
+    const resolved = resolveLearningEntries(data.time_entries || [], tasks, { data, source });
     const { start, end } = learningRange(period, target);
     const reviews = (data.daily_reviews || []).filter(r => !r.deleted && r.date >= start && r.date < end);
     const dates = new Set(reviews.map(r => r.date));

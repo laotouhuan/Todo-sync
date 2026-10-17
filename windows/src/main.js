@@ -1,3 +1,5 @@
+import { createPeriodTaskView } from './periodTaskView.js';
+import { seriesFor, savePeriodEdit, displayTaskName, periodType, isSeriesDeleted, periodMembers, visibleSeriesTodos } from './taskSeries.js';
 import { learningSnapshot, requirePersonalTarget, createCollaborationSubmissions } from './collaborationView.js';
 import { renderTimeline, bindClockTooltip } from './statsTimelineView.js';
 import { clockMinute, clockTooltipDateTime } from './statsTimeline.js';
@@ -75,9 +77,50 @@ const appState = {
 
 const learningUI = createLearningView({ state: appState, commit: commitLearning,
     redraw: () => render(), sync: async () => { await _saveQueue; await loadData(); }, toast: message => showToast(message),
+    periods: () => periodUI,
     exportFile: ({ filename, content }) => invoke('export_review_markdown', { filename, content }) });
 
-const labelManager = createLabelManager({ getTodos: () => appState.todoData.todos, commit: commitPersonalLabels });
+const periodUI = createPeriodTaskView({ state: appState, commit: commitPeriodData, toast: showToast, relationSaved: refreshEditRelations });
+
+function commitPeriodData(change) {
+    requirePersonalTarget(appState.activeSource);
+    const operation = _saveQueue.then(async () => {
+        requirePersonalTarget(appState.activeSource);
+        const previous = appState.todoData;
+        const next = change(structuredClone(previous));
+        normalizeLearningData(next);
+        appState.todoData = next;
+        if (!await _doSaveData()) { appState.todoData = previous; throw new Error('保存失败，请重试'); }
+        _lastRenderedHash = ''; render();
+    });
+    _saveQueue = operation.catch(() => {}); return operation;
+}
+
+function refreshEditRelations() {
+    const baseline = appState.currentEditingTodo, input = document.getElementById('edit-content');
+    if (!baseline) return;
+    const dirty = input && input.value.trim() !== extractCollaborator(baseline.content).cleanContent;
+    baseline.content = displayTaskName(appState.todoData, baseline.id);
+    if (appState.currentEditingBaseline) appState.currentEditingBaseline.content = baseline.content;
+    if (input && !dirty) input.value = extractCollaborator(baseline.content).cleanContent;
+    appState.currentEditingSeries = structuredClone(seriesFor(appState.todoData, baseline.id));
+    appState.currentEditingLinks = structuredClone(appState.todoData.task_series_links || []);
+    learningUI.compactEditor();
+}
+
+function acceptPeriodMove(before, todoId) {
+    const series = seriesFor(before, todoId); if (!series) return true;
+    const original = before.todos.find(t => t.id === todoId), draft = appState.todoData.todos.find(t => t.id === todoId);
+    if (draft.date === original.date && draft.task_type === original.task_type) return true;
+    try {
+        if (periodType(draft) !== series.period_type && !window.confirm('更改类型将解除这一期的周期关联，历史记录保留。继续？')) { appState.todoData = before; render(); return false; }
+        const updated = savePeriodEdit(before, original, draft, series);
+        appState.todoData.task_series_links = updated.task_series_links;
+        return true;
+    } catch (error) { appState.todoData = before; showToast(error.message); render(); return false; }
+}
+
+const labelManager = createLabelManager({ getTodos: () => visibleSeriesTodos(appState.todoData), commit: commitPersonalLabels });
 
 const collaborationSubmissions = createCollaborationSubmissions({
     write: (id, todoJson) => invoke('write_collaboration_todo', { collabId: id, todoJson }),
@@ -120,7 +163,7 @@ function renderPendingSubmissions() {
 function showReadOnlyTask(todo) {
     const dialog = document.createElement('dialog'); dialog.className = 'learning-dialog';
     const text = (tag, value) => { const node = document.createElement(tag); node.textContent = value; dialog.append(node); };
-    text('h3', '任务详情'); text('p', todo.content);
+    text('h3', '任务详情'); text('p', displayTaskName(appState.collabData, todo.id, todo.content));
     const type = ({ weekly_checkin: '周打卡', monthly_checkin: '月打卡' }[todo.task_type] || '普通待办');
     text('p', `类型：${type} · 标签：${todo.label || '未分类'}`);
     text('p', `截止日期：${todo.date || '未设置'} ${todo.time || ''}`);
@@ -481,9 +524,9 @@ async function loadCollabData(collabId) {
 
 function getActiveTodos() {
     if (appState.activeSource.type === 'collaboration') {
-        return appState.collabData ? appState.collabData.todos : [];
+        return appState.collabData ? appState.collabData.todos.filter(t => !isSeriesDeleted(appState.collabData, t.id)) : [];
     }
-    return appState.todoData.todos;
+    return appState.todoData.todos.filter(t => !isSeriesDeleted(appState.todoData, t.id));
 }
 
 function getCollabName(collabId) {
@@ -955,11 +998,6 @@ async function _doSaveData({ preserveRecords = false } = {}) {
         // 执行物理清理，将删除超 7 天的旧任务彻底抹除，维持 JSON 大小
         if (!preserveRecords) {
             normalizeLearningData(appState.todoData);
-            const deletionTime = new Date().toISOString();
-            for (const entry of appState.todoData.time_entries) {
-                if (!entry.deleted && !entry.ended_at && entry.task_ref.source_type === 'personal' && appState.todoData.todos.some(t => t.id === entry.task_ref.todo_id && t.deleted))
-                    entry.ended_at = entry.updated_at = deletionTime;
-            }
             purgeOldDeletedTodos();
         }
         
@@ -1066,7 +1104,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
         </button>
     `;
     // 用 textContent 设置待办内容，防止 HTML 注入（去除协作署名后缀显示）
-    const { cleanContent } = extractCollaborator(todo.content);
+    const { cleanContent } = extractCollaborator(displayTaskName(appState.activeSource.type === "personal" ? appState.todoData : appState.collabData, todo.id, todo.content));
     li.querySelector('.todo-content').textContent = cleanContent;
 
     const checkinContainer = li.querySelector('.read-only-checkin-container');
@@ -1325,6 +1363,10 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
     }
 
     learningUI.attachTimer(li, todo);
+    if (appState.activeSource.type === 'personal') {
+        const series = seriesFor(appState.todoData, todo.id);
+        if (series && periodMembers(appState.todoData, series.id, todo.date).length > 1) { const note = document.createElement('small'); note.textContent = '该周期存在重复任务，请在周期关联中核对'; li.querySelector('.todo-info').appendChild(note); }
+    }
     return li;
 }
 
@@ -1813,7 +1855,7 @@ async function saveEditModal() {
         return;
     }
 
-    const draft = structuredClone(sourceData.todos[index]);
+    const draft = structuredClone(appState.currentEditingBaseline || appState.currentEditingTodo);
     try {
         const { nickname } = extractCollaborator(appState.currentEditingTodo.content);
         draft.content = nickname ? `${newContent} (由 [${nickname}] 添加)` : newContent;
@@ -1848,9 +1890,9 @@ async function saveEditModal() {
                 } else {
                     draft.date = null;
                 }
-                draft.time = null;
+                if (draft.task_type !== appState.currentEditingOriginalType.task_type) draft.time = null;
             } else {
-                draft.time = null;
+                if (draft.task_type !== appState.currentEditingOriginalType.task_type) draft.time = null;
                 if (taskTypeVal === 'weekly_checkin') {
                     if (!isWeekDate(draft.date)) {
                         draft.date = getThisWeekString();
@@ -1904,6 +1946,8 @@ async function saveEditModal() {
             draft.reminder = null;
         }
 
+        const reminderForm = JSON.stringify(['edit-reminder-switch', 'edit-reminder-date', 'edit-reminder-time', 'edit-reminder-repeat-daily'].map(id => { const field = document.getElementById(id); return (id === 'edit-reminder-switch' || id === 'edit-reminder-repeat-daily') ? field?.checked : field?.value; }));
+        if (reminderForm === appState.currentEditingReminderForm) draft.reminder = (appState.currentEditingBaseline || appState.currentEditingTodo).reminder;
         draft.subtasks = deepClone(appState.currentEditingSubtasks);
 
         if (appState.currentEditingCompletedDates && (draft.task_type === 'weekly_checkin' || draft.task_type === 'monthly_checkin')) {
@@ -1925,12 +1969,11 @@ async function saveEditModal() {
 
         draft.updated_at = new Date().toISOString();
 
-        const operation = _saveQueue.then(async () => {
-            const previous = appState.todoData.todos;
-            appState.todoData.todos = previous.map(t => t.id === draft.id ? draft : t);
-            if (!await _doSaveData()) { appState.todoData.todos = previous; throw new Error('保存失败，请重试'); }
-        });
-        _saveQueue = operation.catch(() => {}); await operation;
+        const baseline = appState.currentEditingBaseline || appState.currentEditingTodo;
+        if (draft.task_type === baseline.task_type && JSON.stringify(draft.completed_dates) === JSON.stringify(baseline.completed_dates) && draft.target_count === baseline.target_count && JSON.stringify(draft.subtasks) === JSON.stringify(baseline.subtasks)) {
+            draft.completed = baseline.completed; draft.completed_at = baseline.completed_at;
+        }
+        await commitPeriodData(latest => savePeriodEdit(latest, baseline, draft, appState.currentEditingSeries, new Date().toISOString(), appState.currentEditingLinks));
         closeEditModal(); _lastRenderedHash = ''; render();
     } catch (e) {
         console.error("Save edit modal failed:", e);
@@ -1987,7 +2030,11 @@ function openTimelineSubtask(todo, subtask) {
 function openEditModal(todo) {
     if (!todo) return;
     if (appState.activeSource.type === 'collaboration') { showReadOnlyTask(todo); return; }
+    todo = { ...(appState.todoData.todos.find(t => t.id === todo.id) || todo), content: displayTaskName(appState.todoData, todo.id) };
     appState.currentEditingTodo = structuredClone(todo);
+    appState.currentEditingBaseline = structuredClone(todo);
+    appState.currentEditingSeries = structuredClone(seriesFor(appState.todoData, todo.id));
+    appState.currentEditingLinks = structuredClone(appState.todoData.task_series_links || []);
     appState.currentEditingOriginalType = { task_type: todo.task_type || 'normal', recurring: todo.recurring || 'none' };
     learningUI.editTask(todo);
 
@@ -2082,6 +2129,7 @@ function openEditModal(todo) {
         console.error("Error populating edit modal:", e);
     }
 
+    appState.currentEditingReminderForm = JSON.stringify(['edit-reminder-switch', 'edit-reminder-date', 'edit-reminder-time', 'edit-reminder-repeat-daily'].map(id => { const field = document.getElementById(id); return (id === 'edit-reminder-switch' || id === 'edit-reminder-repeat-daily') ? field?.checked : field?.value; }));
     learningUI.compactEditor(true);
     modal.classList.add('active');
     const input = document.getElementById('edit-content');
@@ -2132,7 +2180,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     const targetMonthStr = `${appState.statsTargetDate.getFullYear()}-${String(appState.statsTargetDate.getMonth() + 1).padStart(2, '0')}`;
     const labelEl = document.getElementById('stats-date-label');
 
-    const activeTodos = getActiveTodos().filter(t => !t.deleted);
+    const activeTodos = getActiveTodos().filter(t => !t.deleted).map(t => ({ ...t, content: displayTaskName(appState.activeSource.type === "personal" ? appState.todoData : appState.collabData, t.id, t.content) }));
     let periodTodos = [];
     if (appState.statsPeriod === 'day') {
         labelEl.textContent = targetDayStr;
@@ -3029,6 +3077,11 @@ function renderCollapsibleGroup(group, label, isCollapsed, type, themeColor, tod
         render();
     });
 
+    if (!isCollapsed && ['weekly', 'monthly', 'weekly_uncompleted', 'monthly_uncompleted'].includes(type) && appState.activeSource.type === 'personal') {
+        const button = document.createElement('button'); button.className = 'learning-button period-import-button'; button.textContent = '导入';
+        button.onclick = e => { e.stopPropagation(); openImportModal(type.startsWith('weekly') ? 'weekly' : 'monthly'); };
+        header.insertBefore(button, header.querySelector('.badge'));
+    }
     const content = document.createElement('div');
     content.className = 'collapsible-content';
     content.dataset.groupType = type;
@@ -3050,14 +3103,7 @@ function renderCollapsibleGroup(group, label, isCollapsed, type, themeColor, tod
             if (group.length === 0 && (type === 'weekly' || type === 'monthly')) {
                 const emptyTip = document.createElement('div');
                 emptyTip.style.cssText = 'text-align: center; color: var(--text-secondary); padding: 16px; font-size: 0.85rem;';
-                emptyTip.innerHTML = `
-                    <p style="margin-bottom: 8px;">当前周期无打卡计划</p>
-                    <button class="import-period-btn" style="background: var(--accent-color); color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; cursor: pointer; transition: opacity 0.2s;">从上期导入</button>
-                `;
-                emptyTip.querySelector('.import-period-btn').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    openImportModal(type);
-                });
+                emptyTip.textContent = '当前周期无打卡计划，可从往期导入';
                 content.appendChild(emptyTip);
             } else {
                 group.forEach(todo => {
@@ -3097,6 +3143,7 @@ function renderFlatPendingGroup(group, label, themeColor, todayStr, tomorrowStr,
 // ====== Main Render Function ======
 
 function render() {
+    periodUI.refresh();
     renderPendingSubmissions();
     learningUI.refresh();
     labelManager.refresh();
@@ -3148,7 +3195,7 @@ function render() {
         appState.appConfig.time_tracking_enabled !== false
     ].join('|');
     const snapshot = learningSnapshot(appState);
-    const _hash = getActiveTodos().map(t => `${t.id}:${t.updated_at}:${t.completed}`).join('|') + '|' + uiStateHash + '|' + JSON.stringify([snapshot.data.time_entries, snapshot.data.daily_reviews, [...snapshot.conflicts]]);
+    const _hash = JSON.stringify([appState.todoData.task_series, appState.todoData.task_series_links]) + getActiveTodos().map(t => `${t.id}:${t.updated_at}:${t.completed}`).join('|') + '|' + uiStateHash + '|' + JSON.stringify([snapshot.data.time_entries, snapshot.data.daily_reviews, [...snapshot.conflicts]]);
     if (_hash === _lastRenderedHash) return;
     _lastRenderedHash = _hash;
 
@@ -3162,7 +3209,7 @@ function render() {
 
     if (appState.searchQuery) {
         const queryLower = appState.searchQuery.toLowerCase();
-        filteredTodos = filteredTodos.filter(t => t.content.toLowerCase().includes(queryLower));
+        filteredTodos = filteredTodos.filter(t => displayTaskName(appState.activeSource.type === "personal" ? appState.todoData : appState.collabData, t.id, t.content).toLowerCase().includes(queryLower));
     }
 
     if (appState.dateFilter === 'today') {
@@ -3331,6 +3378,7 @@ function render() {
                         const draggedId = evt.item.dataset.id;
                         const todoMap = new Map(appState.todoData.todos.map(t => [t.id, t]));
                         const t = todoMap.get(draggedId);
+                        const moveBaseline = structuredClone(appState.todoData);
                         const originalTaskType = t?.task_type;
                         const originalRecurring = t?.recurring;
 
@@ -3364,6 +3412,7 @@ function render() {
                             }
                             t.order = -Date.now();
                             t.updated_at = new Date().toISOString();
+                            if (!acceptPeriodMove(moveBaseline, draggedId)) return;
                             render();
                             await saveData();
                             return;
@@ -3442,6 +3491,7 @@ function render() {
                         }
                         
                         if (stateChanged) {
+                            if (t && !acceptPeriodMove(moveBaseline, draggedId)) return;
                             render();
                             await saveData();
                         }
@@ -3517,63 +3567,9 @@ function render() {
 
 // ====== Import Modal ======
 window.openImportModal = function(type) {
-    if (appState.activeSource.type !== 'personal') return;
-    appState.currentImportType = type;
-    const importListEl = document.getElementById('import-tasks-list');
-    const titleEl = document.getElementById('import-modal-title');
-    importListEl.innerHTML = '';
-    const targetDateStr = type === 'weekly' ? getLastWeekString() : getLastMonthString();
-    titleEl.textContent = type === 'weekly' ? '从上周导入' : '从上月导入';
-    const currentPeriodStr = type === 'weekly' ? getThisWeekString() : getThisMonthString();
-    const existingTitles = new Set(
-        appState.todoData.todos
-            .filter(t => !t.deleted && t.date === currentPeriodStr)
-            .map(t => t.content)
-    );
-    const candidates = appState.todoData.todos.filter(t => 
-        !t.deleted &&
-        (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') &&
-        t.date === targetDateStr &&
-        !existingTitles.has(t.content)
-    );
-    candidates.sort(sortFunc);
-    appState.currentImportCandidates = candidates;
-    if (appState.currentImportCandidates.length === 0) {
-        importListEl.innerHTML = '<li style="text-align:center;color:var(--text-secondary);padding:24px 10px;">上个周期没有可导入的任务</li>';
-    } else {
-        appState.currentImportCandidates.forEach((todo, idx) => {
-            const li = document.createElement('li');
-            li.className = 'subtask-item';
-            li.setAttribute('data-selected', 'true');
-
-            const box = document.createElement('div');
-            box.className = 'import-checkbox';
-            box.innerHTML = `
-                <svg class="import-checkbox-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
-            `;
-
-            const span = document.createElement('span');
-            span.className = 'import-task-content';
-            span.textContent = todo.content;
-
-            li.appendChild(box);
-            li.appendChild(span);
-
-            li.addEventListener('click', () => {
-                const isSelected = li.getAttribute('data-selected') === 'true';
-                li.setAttribute('data-selected', isSelected ? 'false' : 'true');
-            });
-            importListEl.appendChild(li);
-        });
-    }
-    document.getElementById('import-modal').classList.add('active');
+    if (appState.activeSource.type === 'personal') periodUI.openImport(type === 'weekly' ? 'week' : 'month');
 };
 
-function closeImportModal() {
-    document.getElementById('import-modal').classList.remove('active');
-}
 
 function initApp() {
     learningUI.install();
@@ -4421,9 +4417,8 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
                 todo.updated_at = new Date().toISOString();
                 showToast('已延期至明天');
             } else if (btn.classList.contains('btn-delete')) {
-                todo.deleted = true;
-                todo.updated_at = new Date().toISOString();
-                showToast('已删除任务');
+                periodUI.remove(todo.id);
+                return;
             }
             render();
             await saveData();
@@ -4617,46 +4612,6 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
         });
     }
 
-    // 导入模态框
-    const importCancelBtn = document.getElementById('import-cancel-btn');
-    if (importCancelBtn) importCancelBtn.addEventListener('click', closeImportModal);
-
-    const importConfirmBtnEl = document.getElementById('import-confirm-btn');
-    if (importConfirmBtnEl) importConfirmBtnEl.addEventListener('click', async () => {
-        if (appState.activeSource.type !== 'personal') return;
-        const listItems = document.querySelectorAll('#import-tasks-list .subtask-item');
-        const targetDateStr = appState.currentImportType === 'weekly' ? getThisWeekString() : getThisMonthString();
-        let imported = false;
-        const nowMs = Date.now();
-        let orderOffset = 0;
-        listItems.forEach((li, idx) => {
-            if (li.getAttribute('data-selected') === 'true') {
-                const orig = appState.currentImportCandidates[idx];
-                const newTodo = createTodo(orig.content, targetDateStr);
-                newTodo.task_type = orig.task_type;
-                newTodo.target_count = orig.target_count || null;
-                newTodo.label = orig.label || null;
-                newTodo.time = orig.time || null;
-                // 候选已按上期列表排序，递增排序值保持导入后的相同顺序。
-                newTodo.order = nowMs + orderOffset * 1000;
-                newTodo.created_at = new Date(nowMs - orderOffset * 10).toISOString();
-                orderOffset++;
-                newTodo.subtasks = orig.subtasks ? deepClone(orig.subtasks).map(s => {
-                    s.id = generateUUID();
-                    s.completed = false;
-                    s.completed_at = null;
-                    return s;
-                }) : [];
-                appState.todoData.todos.push(newTodo);
-                imported = true;
-            }
-        });
-        if (imported) {
-            render();
-            await saveData();
-        }
-        closeImportModal();
-    });
 
     const reminderSwitchEl = document.getElementById('edit-reminder-switch');
     if (reminderSwitchEl) {
@@ -4734,7 +4689,7 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
         modalDeleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             if (!appState.currentEditingTodo || appState.activeSource.type !== 'personal') return;
-            if (deleteConfirmModalEl) deleteConfirmModalEl.classList.add('active');
+            periodUI.remove(appState.currentEditingTodo.id, closeEditModal);
         });
     }
 
@@ -4751,13 +4706,7 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
         deleteConfirmBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             if (!appState.currentEditingTodo || appState.activeSource.type !== 'personal') return;
-            const index = appState.todoData.todos.findIndex(t => t.id === appState.currentEditingTodo.id);
-            if (index !== -1) {
-                appState.todoData.todos[index].deleted = true;
-                appState.todoData.todos[index].updated_at = new Date().toISOString();
-                render();
-                await saveData();
-            }
+            periodUI.remove(appState.currentEditingTodo.id, closeEditModal);
             if (deleteConfirmModalEl) deleteConfirmModalEl.classList.remove('active');
             closeEditModal();
         });

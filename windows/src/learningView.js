@@ -1,5 +1,7 @@
+import { seriesFor, timingPendingReason, displayTaskName, duplicateTimingSeries, periodDescription } from './taskSeries.js';
+import { editorProgressSections } from './editorSections.js';
 import { learningSnapshot, requirePersonalTarget } from './collaborationView.js';
-import { normalizeLabel, taskReference, sameTask, learningRange, summarizeLearning, formatDuration, validateTimeEntry, localDay, availableLabels, resolveLearningEntries, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE, canTimeTodo, recentTimingTasks, createRunningTimeEntry } from './timeTracking.js';
+import { normalizeLabel, taskReference, sameTask, learningRange, summarizeLearning, formatDuration, validateTimeEntry, localDay, availableLabels, resolveLearningEntries, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE, canTimeTodo, recentTimingTasks, createRunningTimeEntry, timingTodos, splitTimeEntry } from './timeTracking.js';
 import { sortFunc } from './dateUtils.js';
 import { reviewFields, reviewPreview, exportReviews } from './reviewUtils.js';
 
@@ -27,7 +29,7 @@ function localInput(iso) {
     return localDay(date) + 'T' + [date.getHours(), date.getMinutes(), date.getSeconds()].map(n => String(n).padStart(2, '0')).join(':');
 }
 
-export function createLearningView({ state, commit: commitPersonal, redraw, sync, toast, exportFile }) {
+export function createLearningView({ state, commit: commitPersonal, redraw, sync, toast, exportFile, periods }) {
     const readOnly = () => state.activeSource.type === 'collaboration';
     const enabled = () => readOnly() || state.appConfig.time_tracking_enabled !== false;
     const commit = change => { requirePersonalTarget(state.activeSource); return commitPersonal(change); };
@@ -36,7 +38,8 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
     const data = () => learningSnapshot(state).data;
     const entries = () => data().time_entries || [];
     const knownTasks = () => learningSnapshot(state).tasks;
-    const resolvedEntries = () => resolveLearningEntries(entries(), knownTasks());
+    const resolvedEntries = () => resolveLearningEntries(entries(), knownTasks(), { data: data(), source: state.activeSource });
+    const pendingReason = entry => resolvedEntries().find(e => e.id === entry.id)?.pending_reason || '';
     const entryLabel = entry => resolvedEntries().find(e => e.id === entry.id)?.label_snapshot || '未分类';
     const running = () => entries().filter(e => !e.deleted && e.ended_at == null);
     let labelFilter, banner, lastConflict = '', reviewLeave, refreshLabelPicker, refreshTimerPicker, timer;
@@ -57,6 +60,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             requireEnabled();
             d.time_entries = d.time_entries.map(entry => {
                 if (entry.id !== id || entry.deleted || entry.ended_at != null) return entry;
+                if (timingPendingReason(d, entry)) throw new Error('请先核对实际结束时间');
                 const finished = finishTimeEntry(entry, new Date().toISOString());
                 if (finished.deleted) discarded++;
                 return finished;
@@ -128,15 +132,17 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             const today = localDay(new Date());
             let candidates;
             if (other) {
-                candidates = state.todoData.todos.filter(canTimeTodo)
+                candidates = timingTodos(state.todoData)
                     .sort((a, b) => Number(b.date === today) - Number(a.date === today) || sortFunc(a, b))
                     .filter(todo => todo.content.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()))
                     .map(todo => ({ todo }));
-            } else candidates = recentTimingTasks(state.todoData.todos, state.todoData.time_entries || []);
+            } else candidates = recentTimingTasks(state.todoData.todos, state.todoData.time_entries || [], state.todoData);
+            duplicateTimingSeries(state.todoData).forEach(s => list.append(el('p', s.content + '：本期存在重复任务，请到周期关联中核对')));
             if (!candidates.length) list.append(el('p', other ? '暂无匹配的可计时任务' : '暂无可继续计时的最近任务，请选择其他任务'));
             for (const { todo, startedAt } of candidates) {
                 const item = button('', () => select(todo.id)); item.classList.add('learning-timer-candidate'); item.disabled = busy;
                 item.append(el('span', todo.content));
+                if (!seriesFor(state.todoData, todo.id) && ['weekly_checkin', 'monthly_checkin'].includes(todo.task_type)) item.append(el('small', periodDescription(todo.date)));
                 if (startedAt) {
                     const value = localInput(startedAt).replace('T', ' ').slice(0, 16);
                     item.append(el('small', '上次计时：' + (value.startsWith(today) ? value.replace(today, '今天') : value)));
@@ -156,7 +162,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         const now = new Date().toISOString();
         const dialog = modal(original ? '编辑计时记录' : '补录计时记录');
         dialog.dataset.timing = 'true';
-        dialog.append(el('p', '所属任务：' + (original?.task_content_snapshot || todo?.content || '')));
+        dialog.append(el('p', '所属任务：' + (original ? resolvedEntries().find(e => e.id === original.id)?.display_content || original.task_content_snapshot : todo?.content || '')));
         const start = input('datetime-local', localInput(original?.started_at || now), '开始日期和时间', dialog); start.step = '1';
         const end = input('datetime-local', localInput(original ? original.ended_at : now), '结束日期和时间（运行中的记录可留空）', dialog); end.step = '1';
         dialog.append(el('p', '所属任务标签：' + (original ? entryLabel(original) : normalizeLabel(todo?.label) || '未分类') + '（在任务编辑页修改）'));
@@ -169,8 +175,11 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
                     ended_at: end.value ? new Date(end.value).toISOString() : null, updated_at: new Date().toISOString() };
                 await commit(d => {
                     requireEnabled();
+                    const latest = d.time_entries.find(e => e.id === original?.id);
+                    if (original && JSON.stringify(latest) !== JSON.stringify(original)) throw new Error('记录已变化，请保留输入并核对最新记录');
+                    if (original && timingPendingReason(d, original) && !updated.ended_at) throw new Error('请填写实际结束时间');
                     if (!updated.ended_at && !d.time_entries.some(e => e.id === updated.id && !e.deleted && !e.ended_at)) throw new Error('该记录已结束，请填写结束时间');
-                    const failure = validateTimeEntry(updated, d.time_entries); if (failure) throw new Error(failure);
+                    const failure = validateTimeEntry(updated, d.time_entries, Date.now(), !!(original && timingPendingReason(d, original))); if (failure) throw new Error(failure);
                     d.time_entries = [...d.time_entries.filter(e => e.id !== updated.id), updated];
                 }); dialog.close(); changed();
             } catch (e) { error.textContent = e.message || String(e); }
@@ -181,10 +190,10 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         for (const entry of [...list].sort((a, b) => Number(!b.ended_at) - Number(!a.ended_at) || b.started_at.localeCompare(a.started_at))) {
             const row = el('div', null, 'learning-record');
             const info = resolvedEntries().find(e => e.id === entry.id);
-            row.append(el('div', `${entry.task_content_snapshot} · ${entryLabel(entry)}${info?.task_unavailable ? ' · 原任务不可用' : info?.task_deleted ? ' · 原任务已删除' : ''}`),
-                el('div', `${localInput(entry.started_at).replace('T', ' ')} → ${entry.ended_at ? localInput(entry.ended_at).replace('T', ' ') : '进行中'}`));
+            row.append(el('div', `${info?.display_content || entry.task_content_snapshot} · ${entryLabel(entry)}${info?.task_unavailable ? ' · 原任务不可用' : info?.task_deleted ? ' · 原任务已删除' : ''}`),
+                el('div', `${localInput(entry.started_at).replace('T', ' ')} → ${entry.ended_at ? localInput(entry.ended_at).replace('T', ' ') : pendingReason(entry) || '进行中'}`));
             if (entry.ended_at) row.append(el('small', formatDuration(Date.parse(entry.ended_at) - Date.parse(entry.started_at))));
-            else row.append(clock(entry));
+            else if (!pendingReason(entry)) row.append(clock(entry));
             if (conflicts().has(entry.id)) row.append(el('small', '待核对：与其他计时重叠，未计入统计'));
             if (!readOnly()) row.append(button('编辑记录', () => editEntry(entry, todo, ref, () => recordList(host, list.map(e => entries().find(n => n.id === e.id) || e).filter(e => !e.deleted), todo, ref))),
                 button('删除', () => run(async () => { await remove(entry); row.remove(); })));
@@ -209,7 +218,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
     }
     function editTask(todo) {
         const parent = document.querySelector('#edit-modal .modal-content'); if (!parent) return;
-        parent.querySelector('.learning-edit-extra')?.remove();
+        parent.querySelectorAll('.learning-edit-extra, [data-timing-section], #edit-label-section, #edit-series-section').forEach(n => n.remove());
         const host = el('section', null, 'learning-edit-extra');
         const ref = taskReference(todo, state.activeSource);
         const recordDetails = el('details', null, 'edit-section');
@@ -219,7 +228,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             button(readOnly() ? '查看计时记录' : '管理计时记录', () => showRecords(entries().filter(e => !e.deleted && sameTask(e.task_ref, ref)), '计时记录', todo, ref)));
         if (!readOnly()) recordDetails.append(button('补录计时记录', () => editEntry(null, todo, ref, () => compactEditor())));
         host.append(recordDetails);
-        const labelDetails = el('details', null, 'edit-section');
+        const labelDetails = el('details', null, 'edit-section'); labelDetails.id = 'edit-label-section';
         labelDetails.append(el('summary', '标签：' + (todo.label || '未分类'))); host.append(labelDetails);
         if (readOnly()) { (parent.querySelector('.modal-body') || parent).append(host); return; }
         const label = el('input'); label.type = 'hidden'; label.value = todo.label || ''; label.id = 'edit-learning-label'; labelDetails.append(label);
@@ -237,6 +246,9 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             const picker = modal('新建标签'); const name = input('text', '', '标签名称', picker);
             picker.append(button('确认', () => { select(normalizeLabel(name.value)); picker.close(); }), button('取消', () => picker.close()));
         }));
+        if (periods && ['weekly_checkin', 'monthly_checkin'].includes(todo.task_type)) {
+            const manage = el('details', null, 'edit-section'); manage.id = 'edit-series-section'; manage.append(el('summary', '周期关联'), button('管理周期关联', () => periods().associations(todo.id))); host.append(manage);
+        }
         const body = parent.querySelector('.modal-body');
         if (body) body.append(host); else parent.insertBefore(host, parent.querySelector('.modal-footer'));
     }
@@ -253,7 +265,9 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         const date = section('edit-date-section', [byId('edit-date-time-row')]);
         date.hidden = type.value !== 'normal'; date.firstChild.textContent = '截止日期：' + (byId('edit-has-date-switch').checked ? byId('edit-date').value || '待设置' : '未设置');
         section('edit-reminder-section', [byId('edit-reminder-row')]).firstChild.textContent = '提醒：' + (byId('edit-reminder-switch').checked ? [byId('edit-reminder-date').value, byId('edit-reminder-time').value].filter(Boolean).join(' ') : '未设置');
-        const checkin = section('edit-checkin-section', [byId('target-count-group'), byId('edit-checkin-grid-group')]);
+        const target = section('edit-target-section', [byId('target-count-group')]);
+        target.hidden = !['weekly_checkin', 'monthly_checkin'].includes(type.value); target.firstChild.textContent = '打卡目标：' + (byId('edit-target-count').value || '未设置');
+        const checkin = section('edit-checkin-section', [byId('edit-checkin-grid-group')]);
         checkin.hidden = !['weekly_checkin', 'monthly_checkin'].includes(type.value);
         checkin.firstChild.textContent = '打卡记录：' + (state.currentEditingCompletedDates || []).length + ' 次' + (byId('edit-target-count').value ? ' · 目标 ' + byId('edit-target-count').value + ' 次' : '');
         const completed = section('edit-completed-section', [byId('edit-completed-at-row')]);
@@ -267,15 +281,40 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         }
         const items = state.currentEditingSubtasks || [];
         subtasks.firstChild.textContent = items.length ? '子步骤／备注：' + items.filter(t => t.completed).length + '/' + items.length : '添加子步骤／备注';
-        if (reset) { parent.querySelectorAll('details').forEach(d => { d.open = false; }); subtasks.open = items.length > 0; parent.scrollTop = 0; }
         const todo = state.currentEditingTodo;
         if (enabled() && todo && byId('edit-records-summary')) {
             const list = entries().filter(e => !e.deleted && sameTask(e.task_ref, taskReference(todo, state.activeSource)));
-            const range = learningRange('day', new Date()); const summary = summarizeLearning(resolvedEntries(), range.start, range.end, undefined, conflicts());
-            const parts = summary.parts.filter(p => list.some(e => e.id === p.entry.id));
             const conflictIds = conflicts();
-            byId('edit-records-summary').textContent = '计时记录：今日 ' + formatDuration(parts.reduce((sum, p) => sum + p.duration, 0)) + ' · ' + parts.length + ' 次' + (list.some(e => !e.ended_at) ? ' · 进行中' : '') + (list.some(e => conflictIds.has(e.id)) ? ' · 待核对' : '');
+            const parts = list.filter(e => !conflictIds.has(e.id)).flatMap(splitTimeEntry);
+            byId('edit-records-summary').textContent = '关联计时：' + formatDuration(parts.reduce((sum, p) => sum + p.duration, 0)) + ' · ' + parts.length + ' 次' + (list.some(e => !e.ended_at && !pendingReason(e)) ? ' · 进行中' : '') + (list.some(e => conflictIds.has(e.id) || pendingReason(e)) ? ' · 待核对' : '');
         }
+        if (reset) {
+            let progress = byId('edit-progress'), more = byId('edit-more');
+            if (!progress) {
+                const title = el('h4', '基本信息', 'edit-group-heading'); parent.prepend(title);
+                progress = el('section'); progress.id = 'edit-progress'; more = el('section'); more.id = 'edit-more'; parent.append(progress, more);
+            }
+            parent.querySelectorAll('.edit-section').forEach(n => parent.append(n));
+            progress.replaceChildren(el('h4', '进展与记录', 'edit-group-heading')); more.replaceChildren(el('h4', '更多设置', 'edit-group-heading'));
+            const sections = ['edit-type-section', 'edit-date-section', 'edit-reminder-section', 'edit-target-section', 'edit-checkin-section', 'edit-completed-section', 'edit-subtasks-section'];
+            const record = parent.querySelector('[data-timing-section]');
+            sections.map(byId).filter(Boolean).forEach(n => { n.open = false; more.append(n); });
+            if (record) { record.open = false; more.append(record); }
+            for (const id of ['edit-label-section', 'edit-series-section']) if (byId(id)) more.append(byId(id));
+            const included = editorProgressSections({ ...todo, subtasks: items, completed_dates: state.currentEditingCompletedDates || [] }, entries(), taskReference(todo, state.activeSource), enabled());
+            if (included.includes('subtasks')) { progress.append(subtasks); subtasks.open = true; }
+            if (record && included.includes('timing')) { progress.append(record); record.open = true; }
+            if (included.includes('checkins')) { progress.append(checkin); checkin.open = true; }
+            if (progress.children.length === 1) progress.append(el('p', '暂无进展记录，可在下方添加'));
+            let period = byId('edit-period-description');
+            if (!period) { period = el('p'); period.id = 'edit-period-description'; byId('edit-content').after(period); }
+            period.textContent = ['weekly_checkin', 'monthly_checkin'].includes(todo.task_type) ? periodDescription(todo.date) : '';
+            parent.scrollTop = 0;
+        }
+        const progressHeading = byId('edit-progress')?.querySelector('h4');
+        if (todo && seriesFor(state.todoData, todo.id) && periods && progressHeading) {
+            if (!progressHeading.querySelector('button')) progressHeading.append(button('往期对比', () => periods().compare(todo.id)));
+        } else { progressHeading?.querySelector('button')?.remove(); }
         if (!parent.dataset.compactListening) {
             parent.dataset.compactListening = 'true';
             parent.addEventListener('input', () => compactEditor()); parent.addEventListener('change', () => compactEditor());
@@ -338,7 +377,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         include.parentElement.dataset.timingSection = 'true'; include.parentElement.hidden = !enabled();
         const error = el('p', '', 'learning-error'); d.append(error);
         d.append(button('导出文件', async () => {
-            try { const result = exportReviews(data(), period, target, enabled() && include.checked, knownTasks(), conflicts()); const saved = await exportFile(result); if (saved) { toast('文件已保存'); d.close(); } }
+            try { const result = exportReviews(data(), period, target, enabled() && include.checked, knownTasks(), conflicts(), state.activeSource); const saved = await exportFile(result); if (saved) { toast('文件已保存'); d.close(); } }
             catch (e) { error.textContent = e.message || String(e); }
         }), button('取消', () => d.close()));
     }
@@ -357,7 +396,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             showRecords([...new Map(summary.parts.filter(p => (p.entry.label_snapshot || '未分类') === g.label).map(p => [p.entry.id, p.entry])).values()]);
         })));
         if (summary.running) learning.append(el('p', `${summary.running} 条进行中，尚未计入汇总`));
-        if (summary.pending) learning.append(button(`${summary.pending} 条待核对记录未计入 · 查看`, () => showRecords(entries().filter(e => !e.deleted && conflicts().has(e.id) &&
+        if (summary.pending) learning.append(button(`${summary.pending} 条待核对记录未计入 · 查看`, () => showRecords(entries().filter(e => !e.deleted && (conflicts().has(e.id) || pendingReason(e)) &&
             Date.parse(e.started_at) < Date.parse(end + 'T00:00:00') && (e.ended_at == null || Date.parse(e.ended_at) > Date.parse(start + 'T00:00:00'))), '核对计时记录')));
         if (enabled()) host.append(learning);
         const review = el('section', null, 'learning-card'); review.append(el('h3', readOnly() ? '每日复盘' : '我的复盘'), button('导出 Markdown', () => exportDialog()));
@@ -389,8 +428,10 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         const startButton = document.getElementById('start-timer-btn');
         if (startButton) startButton.hidden = !enabled() || readOnly() || active.length > 0;
         if (active.length === 1) {
-            banner.append(el('span', active[0].task_content_snapshot), clock(active[0]));
-            if (!readOnly()) banner.append(button('结束', () => run(() => stop(active[0].id))));
+            const reason = pendingReason(active[0]);
+            banner.append(el('span', resolvedEntries().find(e => e.id === active[0].id)?.display_content || active[0].task_content_snapshot));
+            if (reason) banner.append(el('span', reason)); else banner.append(clock(active[0]));
+            if (!readOnly() && !reason) banner.append(button('结束', () => run(() => stop(active[0].id))));
             banner.append(button('记录', () => showRecords(active)));
         }
         if (active.length > 1) {
@@ -411,6 +452,11 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
     }
     async function prepareDisable() {
         const active = structuredClone((state.todoData.time_entries || []).filter(e => !e.deleted && !e.ended_at)); if (!active.length) return true;
+        if (active.some(e => timingPendingReason(state.todoData, e))) {
+            const choice = await choices('有结束时间待核对的记录；请先核对实际结束时间，或仅关闭本机计时功能。', [['核对记录', 'review'], ['仅关闭本机计时功能', 'hide'], ['取消', 'cancel']]);
+            if (choice === 'review') showRecords(active, '核对实际结束时间');
+            return choice === 'hide';
+        }
         const answer = await choices(`有 ${active.length} 条计时正在运行：${active.map(e => e.task_content_snapshot).join('、')}。结束操作将全部结束于当前时间并影响统计；仅关闭本机功能会保留运行记录，重新开启或在其他设备处理。`,
             [['仅关闭本机计时功能', 'hide'], ['结束计时并关闭', 'stop'], ['取消', 'cancel']]);
         if (answer === 'cancel') return false;

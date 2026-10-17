@@ -358,6 +358,7 @@ class TodoRepository(private val context: Context) {
                 personalStore.commitLocked(updated)
                 uploadChannel.trySend(Unit)
                 requestWidgetRefresh()
+                refreshReminders(updated)
                 Result.success(Unit)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -393,11 +394,14 @@ class TodoRepository(private val context: Context) {
         }
     }
 
-    suspend fun saveTimeEntry(entry: com.todo.app.data.model.TimeEntry): Result<Unit> = changeLearning { data ->
+    suspend fun saveTimeEntry(entry: com.todo.app.data.model.TimeEntry, expected: com.todo.app.data.model.TimeEntry? = null): Result<Unit> = changeLearning { data ->
         require(configManager.timeTrackingEnabled) { "本机任务计时已关闭" }
+        if (expected != null) require(data.timeEntries.find { it.id == entry.id } == expected) { "记录已变化，请保留输入并核对最新记录" }
+        val pending = data.timeEntries.find { it.id == entry.id }?.let { com.todo.app.data.model.TaskSeriesLogic.pending(data, it) } != null
         if (!entry.deleted) {
+            require(!pending || entry.ended_at != null) { "请填写实际结束时间" }
             require(entry.ended_at != null || data.timeEntries.any { it.id == entry.id && it.ended_at == null && !it.deleted }) { "补录必须填写结束时间" }
-            val error = com.todo.app.data.model.Learning.validate(entry, data.timeEntries)
+            val error = com.todo.app.data.model.Learning.validate(entry, data.timeEntries, allowShort = pending)
             require(error == null) { error ?: "记录无效" }
         }
         data.copy(timeEntries = com.todo.app.data.model.Learning.mergeTimes(data.timeEntries.filter { it.id != entry.id } + entry.copy(
@@ -453,23 +457,6 @@ class TodoRepository(private val context: Context) {
             id = existing?.id ?: review.id, created_at = existing?.created_at ?: review.created_at, updated_at = nowIso())))
     }
 
-    /** 将源 Todo 克隆到新周期，重置完成状态和子任务 */
-    private fun cloneTodoForNewPeriod(source: Todo, targetDateStr: String): Todo {
-        return Todo.create(source.content, targetDateStr).copy(
-            label = source.label,
-            taskType = source.taskType,
-            targetCount = source.targetCount,
-            completed = false,
-            completedAt = null,
-            completedDates = emptyList(),
-            subtasks = source.subtasks.map { sub ->
-                sub.copy(id = UUID.randomUUID().toString(), completed = false, completedAt = null)
-            },
-            createdAt = nowIso(),
-            updatedAt = nowIso()
-        )
-    }
-
     /** 同步获取当前内存中的最新数据（非挂起），供 Glance provideContent 内部使用 */
     fun getCurrentData(): TodoData = _todoData.value
 
@@ -517,11 +504,9 @@ class TodoRepository(private val context: Context) {
             last_updated = nowIso(),
             todos = purged,
             reminderSettings = previous.reminderSettings,
-            timeEntries = previous.timeEntries.map { entry ->
-                if (!entry.deleted && entry.ended_at == null && entry.task_ref.source_type == "personal" && todos.any { it.id == entry.task_ref.todo_id && it.deleted })
-                    entry.copy(ended_at = nowIso(), updated_at = nowIso()) else entry
-            },
-            dailyReviews = previous.dailyReviews
+            timeEntries = previous.timeEntries,
+            dailyReviews = previous.dailyReviews,
+            taskSeries = previous.taskSeries, taskSeriesLinks = previous.taskSeriesLinks
         )
         personalStore.commitLocked(updated)
         requestWidgetRefresh()
@@ -578,6 +563,15 @@ class TodoRepository(private val context: Context) {
         val current = _todoData.value.todos.toMutableList()
         val index = current.indexOfFirst { it.id == todo.id }
         if (index != -1) {
+            val data = _todoData.value
+            if (com.todo.app.data.model.TaskSeriesLogic.series(data, todo.id) != null) {
+                val updated = com.todo.app.data.model.TaskSeriesLogic.edit(data, data,
+                    todo.copy(content = com.todo.app.data.model.TaskSeriesLogic.display(data, todo.id)))
+                    .copy(last_updated = nowIso())
+                personalStore.commitLocked(updated.copy(todos = purgeOldDeletedTodos(updated.todos)))
+                requestWidgetRefresh(); refreshReminders(updated); uploadChannel.trySend(Unit)
+                return@withLock
+            }
             current[index] = todo.copy(updatedAt = nowIso())
             saveTodos(current)
         }
@@ -585,6 +579,18 @@ class TodoRepository(private val context: Context) {
 
     suspend fun batchUpdateTodos(updatedTodos: List<Todo>) = mutex.withLock {
         withContext(Dispatchers.IO) { personalStore.loadLocked() }
+        if (updatedTodos.any { com.todo.app.data.model.TaskSeriesLogic.series(_todoData.value, it.id) != null }) {
+            var updated = _todoData.value
+            updatedTodos.forEach { todo ->
+                if (updated.todos.any { it.id == todo.id }) {
+                    updated = com.todo.app.data.model.TaskSeriesLogic.edit(updated, updated,
+                        todo.copy(content = com.todo.app.data.model.TaskSeriesLogic.display(updated, todo.id)))
+                }
+            }
+            personalStore.commitLocked(updated.copy(last_updated = nowIso(), todos = purgeOldDeletedTodos(updated.todos)))
+            requestWidgetRefresh(); refreshReminders(updated); uploadChannel.trySend(Unit)
+            return@withLock
+        }
         val current = _todoData.value.todos.toMutableList()
         val indexMap = current.withIndex().associate { (i, t) -> t.id to i }
         val now = nowIso()
@@ -597,17 +603,19 @@ class TodoRepository(private val context: Context) {
         saveTodos(current)
     }
 
+    suspend fun changePeriods(change: (TodoData) -> TodoData): Result<Unit> = changeLearning { data ->
+        com.todo.app.data.model.TaskSeriesLogic.validate(change(data))
+    }
+
     suspend fun deleteTodo(id: String) = mutex.withLock {
         withContext(Dispatchers.IO) { personalStore.loadLocked() }
         val current = _todoData.value.todos.toMutableList()
         val index = current.indexOfFirst { it.id == id }
         if (index != -1) {
-            val updated = current[index].copy(
-                deleted = true,
-                updatedAt = nowIso()
-            )
-            current[index] = updated
-            saveTodos(current)
+            val data = _todoData.value
+            val updated = com.todo.app.data.model.TaskSeriesLogic.delete(data, com.todo.app.data.model.TaskSeriesLogic.deletion(data, id))
+            personalStore.commitLocked(updated.copy(last_updated = nowIso()))
+            requestWidgetRefresh(); refreshReminders(updated); uploadChannel.trySend(Unit)
         }
     }
 
@@ -679,28 +687,12 @@ class TodoRepository(private val context: Context) {
      * @return Number of tasks actually imported
      */
     private suspend fun doImport(candidates: List<Todo>, targetPeriodStr: String): Int {
-        val current = _todoData.value.todos.toMutableList()
-        val existingTitles = current.filter { !it.deleted && it.date == targetPeriodStr }.map { it.content }.toSet()
-
-        val nowEpochMs = System.currentTimeMillis()
-        var importCount = 0
-        var orderOffset = 0L
-
-        candidates.forEach { src ->
-            if (existingTitles.contains(src.content)) return@forEach
-            val cloned = cloneTodoForNewPeriod(src, targetPeriodStr).copy(
-                order = (nowEpochMs + orderOffset * 1000).toDouble(),
-                createdAt = java.time.Instant.ofEpochMilli(nowEpochMs + orderOffset * 10).toString()
-            )
-            current.add(cloned)
-            orderOffset++
-            importCount++
-        }
-
-        if (importCount > 0) {
-            saveTodos(current)
-        }
-        return importCount
+        if (candidates.isEmpty()) return 0
+        val latest = personalStore.loadLocked()
+        val updated = com.todo.app.data.model.TaskSeriesLogic.import(latest, candidates, targetPeriodStr).copy(last_updated = nowIso())
+        personalStore.commitLocked(updated)
+        requestWidgetRefresh(); refreshReminders(updated); uploadChannel.trySend(Unit)
+        return candidates.size
     }
 
     suspend fun importSelectedFromLastPeriod(type: String, selectedIds: List<String>) = mutex.withLock { withContext(Dispatchers.IO) {

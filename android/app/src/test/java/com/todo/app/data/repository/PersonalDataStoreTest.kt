@@ -255,4 +255,19 @@ class PersonalDataStoreTest {
         assertTrue(settingsCalled)
         assertNull(store.data.value.timeEntries.single().ended_at)
     }
+
+    @Test fun failedSeriesWriteKeepsOriginalFileAndPublishedCollections() = runBlocking {
+        val task = todo.copy(date = "2026-W41", taskType = TaskType.WEEKLY_CHECKIN)
+        val linked = TaskSeriesLogic.import(data.copy(todos = listOf(task)), listOf(task), "2026-W42", "2026-10-15T12:00:00+08:00")
+        val target = file().apply { writeText(encode(linked)) }
+        val before = target.readText(); var fail = true
+        val store = PersonalDataStore(target) { text -> if (fail) throw IOException("模拟失败") else target.writeText(text) }
+        assertEquals(linked, store.ensureLoaded())
+        val changed = linked.copy(taskSeries = linked.taskSeries.map { it.copy(content = "新名称", content_renamed = true) })
+        assertTrue(runCatching { store.commitLocked(changed) }.isFailure)
+        assertEquals(linked, store.data.value); assertEquals(before, target.readText())
+        fail = false; store.commitLocked(changed)
+        assertEquals(changed, store.data.value); assertEquals(changed, Json.decodeFromString<TodoData>(target.readText()))
+    }
+
 }

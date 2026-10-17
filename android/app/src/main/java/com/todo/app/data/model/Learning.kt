@@ -14,7 +14,9 @@ data class TimeEntry(
     val id: String, val task_ref: TaskReference, val started_at: String,
     val created_at: String, val updated_at: String,
     val task_content_snapshot: String = "", val label_snapshot: String? = null,
-    val ended_at: String? = null, val deleted: Boolean = false
+    val ended_at: String? = null, val deleted: Boolean = false,
+    @kotlinx.serialization.Transient val display_content: String? = null,
+    @kotlinx.serialization.Transient val pending_reason: String? = null
 )
 
 @Serializable
@@ -50,13 +52,13 @@ object Learning {
         return count < target
     }
 
-    fun recentTimingTasks(todos: List<Todo>, entries: List<TimeEntry>, zone: ZoneId = ZoneId.systemDefault()): List<RecentTimingTask> {
+    fun recentTimingTasks(todos: List<Todo>, entries: List<TimeEntry>, zone: ZoneId = ZoneId.systemDefault(), data: TodoData = TodoData(1, "", todos)): List<RecentTimingTask> {
         if (entries.any { !it.deleted && it.ended_at == null }) return emptyList()
-        val available = todos.filter { canTimeTodo(it, zone) }.associateBy { it.id }
+        val available = TaskSeriesLogic.timingTodos(data, LocalDate.now(zone)).associateBy { TaskSeriesLogic.series(data, it.id)?.id ?: it.id }
         val latest = mutableMapOf<String, RecentTimingTask>()
         for (entry in entries) {
             if (entry.deleted || entry.task_ref.source_type != "personal" || entry.task_ref.source_id != null) continue
-            val todo = available[entry.task_ref.todo_id] ?: continue
+            val todo = available[TaskSeriesLogic.series(data, entry.task_ref.todo_id)?.id ?: entry.task_ref.todo_id] ?: continue
             val start = instant(entry.started_at) ?: continue
             val end = instant(entry.ended_at) ?: continue
             if (Duration.between(start, end) <= minimumDuration) continue
@@ -88,13 +90,15 @@ object Learning {
     fun availableLabels(todos: List<Todo>): List<String> = todos.filterNot { it.deleted }.mapNotNull { label(it.label) }.distinct().sorted()
 
     // 仅返回统计副本，原始快照不因任务标签变更而批量回写。
-    fun resolveEntries(entries: List<TimeEntry>, tasks: Map<TaskReference, Todo>): List<TimeEntry> {
+    fun resolveEntries(entries: List<TimeEntry>, tasks: Map<TaskReference, Todo>, data: TodoData? = null, sourceId: String? = null): List<TimeEntry> {
         val latest = entries.groupBy { it.task_ref }.mapValues { (_, records) ->
             records.maxWith(compareBy<TimeEntry> { instant(it.updated_at) ?: Instant.EPOCH }.thenBy { it.id })
         }
         return entries.map { e ->
             val todo = tasks[e.task_ref]
-            e.copy(label_snapshot = label(if (todo != null) todo.label else latest[e.task_ref]?.label_snapshot))
+            val scoped = if (sourceId == null) e.task_ref.source_type == "personal" && e.task_ref.source_id == null else e.task_ref.source_type == "collaboration" && e.task_ref.source_id == sourceId
+            e.copy(pending_reason = if (data != null && scoped) TaskSeriesLogic.pending(data, if (sourceId == null) e else e.copy(task_ref = TaskReference(e.task_ref.todo_id))) else null, display_content = if (data != null && scoped) TaskSeriesLogic.display(data, e.task_ref.todo_id, e.task_content_snapshot) else todo?.content ?: e.task_content_snapshot,
+                label_snapshot = label(if (todo != null) todo.label else latest[e.task_ref]?.label_snapshot))
         }
     }
     // 与 JavaScript 一致的 UTF-16 长度及排序，避免同时间戳合并方向影响结果。
@@ -110,7 +114,7 @@ object Learning {
         records.maxWith(compareBy<T> { instant(time(it))?.toEpochMilli() ?: 0L }.thenBy { deleted(it) }.thenBy { canonical(content(it)) })
     }
     fun mergeTimes(a: List<TimeEntry>, b: List<TimeEntry> = emptyList()): List<TimeEntry> = merge(
-        a.map { it.copy(label_snapshot = label(it.label_snapshot)) }, b.map { it.copy(label_snapshot = label(it.label_snapshot)) },
+        a.map { it.copy(label_snapshot = label(it.label_snapshot), display_content = null, pending_reason = null) }, b.map { it.copy(label_snapshot = label(it.label_snapshot)) },
         { it.id }, { it.updated_at }, { it.deleted }, { json.encodeToJsonElement(it) })
     fun mergeReviews(a: List<DailyReview>, b: List<DailyReview> = emptyList()): List<DailyReview> =
         merge(a, b, { it.date }, { it.updated_at }, { it.deleted }, { json.encodeToJsonElement(it) })
@@ -141,13 +145,13 @@ object Learning {
         } }
         return ids
     }
-    fun validate(entry: TimeEntry, entries: List<TimeEntry>, now: Instant = Instant.now()): String? {
+    fun validate(entry: TimeEntry, entries: List<TimeEntry>, now: Instant = Instant.now(), allowShort: Boolean = false): String? {
         val start = instant(entry.started_at) ?: return "请输入有效的开始日期和时间"
         val end = instant(entry.ended_at)
         if (entry.ended_at != null && end == null) return "请输入有效的结束日期和时间"
         if (start > now || (end != null && end > now)) return "不能记录未来的学习时间"
         if (end != null && end <= start) return "结束时间必须晚于开始时间"
-        if (end != null && Duration.between(start, end) <= minimumDuration) return SHORT_TIME_ENTRY_MESSAGE
+        if (!allowShort && end != null && Duration.between(start, end) <= minimumDuration) return SHORT_TIME_ENTRY_MESSAGE
         if (overlaps(entries.filter { it.id != entry.id } + entry).contains(entry.id)) return "与其他计时记录重叠，请检查起止时间"
         return null
     }
@@ -161,7 +165,7 @@ object Learning {
             it.date >= start && it.date < end && (selectedLabel == null || (label(it.entry.label_snapshot) ?: "未分类") == selectedLabel) }
         return LearningSummary(parts.sumOf { it.duration }, parts.size, parts,
             parts.groupBy { label(it.entry.label_snapshot) ?: "未分类" }.map { (name, list) -> LearningGroup(name, list.sumOf { it.duration }, list.size) }.sortedByDescending { it.duration },
-            relevant.count { it.id in conflicts }, relevant.count { it.ended_at == null })
+            relevant.count { it.id in conflicts || it.pending_reason != null }, relevant.count { it.ended_at == null && it.pending_reason == null })
     }
     fun duration(ms: Long, clock: Boolean = false): String {
         val sec = (ms / 1000).coerceAtLeast(0); val h = sec / 3600; val m = sec % 3600 / 60; val s = sec % 60
@@ -172,8 +176,8 @@ object Learning {
     fun preview(review: DailyReview): String = fields(review).firstOrNull { it.second.isNotBlank() }?.let { "${it.first}：${it.second.lines().take(2).joinToString("\n")}" } ?: ""
     fun export(data: TodoData, period: String, date: LocalDate, includeLearning: Boolean = true, zone: ZoneId = ZoneId.systemDefault(),
         tasks: Map<TaskReference, Todo> = data.todos.associateBy { TaskReference(it.id) },
-        conflicts: Set<String> = overlaps(data.timeEntries)): Pair<String, String> {
-        val resolved = resolveEntries(data.timeEntries, tasks)
+        conflicts: Set<String> = overlaps(data.timeEntries), sourceId: String? = null): Pair<String, String> {
+        val resolved = resolveEntries(data.timeEntries, tasks, data, sourceId)
         val (start, end) = range(period, date)
         val reviews = data.dailyReviews.filter { !it.deleted && it.date >= start.toString() && it.date < end.toString() }
         val totals = summary(resolved, start, end, zone, conflicts = conflicts)

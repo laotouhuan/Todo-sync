@@ -29,5 +29,7 @@ data class TodoData(
     val todos: List<Todo>,
     @SerialName("reminder_settings") val reminderSettings: ReminderSettings = ReminderSettings(),
     @SerialName("time_entries") val timeEntries: List<TimeEntry> = emptyList(),
-    @SerialName("daily_reviews") val dailyReviews: List<DailyReview> = emptyList()
+    @SerialName("daily_reviews") val dailyReviews: List<DailyReview> = emptyList(),
+    @SerialName("task_series") val taskSeries: List<TaskSeries> = emptyList(),
+    @SerialName("task_series_links") val taskSeriesLinks: List<TaskSeriesLink> = emptyList()
 )

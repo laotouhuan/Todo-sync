@@ -239,4 +239,17 @@ class SerializationTest {
         assertEquals("数学", jsonFormat.decodeFromString<TodoData>(encoded).todos.single().label)
     }
 
+
+    @Test fun seriesCollectionsDefaultAndRoundTripWithoutDisplayFields() {
+        val old = jsonFormat.decodeFromString<TodoData>("""{"version":1,"last_updated":"2026-10-15T12:00:00+08:00","todos":[]}""")
+        assertTrue(old.taskSeries.isEmpty()); assertTrue(old.taskSeriesLinks.isEmpty())
+        val todo = Todo.create("数学", "2026-W41").copy(taskType = "weekly_checkin")
+        val linked = com.todo.app.data.model.TaskSeriesLogic.import(old.copy(todos = listOf(todo)), listOf(todo), "2026-W42", "2026-10-15T12:00:00+08:00")
+        val encoded = jsonFormat.encodeToString(linked)
+        assertEquals(linked, jsonFormat.decodeFromString<TodoData>(encoded))
+        val entry = com.todo.app.data.model.TimeEntry("e", com.todo.app.data.model.TaskReference(todo.id), "2026-10-15T09:00:00Z", "2026-10-15T09:00:00Z", "2026-10-15T09:00:00Z", display_content = "显示名称", pending_reason = "待核对")
+        val raw = jsonFormat.encodeToString(entry)
+        assertFalse(raw.contains("display_content")); assertFalse(raw.contains("pending_reason"))
+    }
+
 }

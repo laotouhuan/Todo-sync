@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun LabelManagerView(viewModel: TodoViewModel) {
     val data by viewModel.todoData.collectAsState()
+    val todos = remember(data) { TaskSeriesLogic.visible(data) }
     var query by remember { mutableStateOf("") }
     var label by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf(setOf<String>()) }
@@ -29,11 +30,11 @@ fun LabelManagerView(viewModel: TodoViewModel) {
     var notice by remember { mutableStateOf("") }
     var detail by remember { mutableStateOf<Todo?>(null) }
     val scope = rememberCoroutineScope()
-    val groups = remember(data.todos) { LabelUtils.groups(data.todos) }
-    val members = data.todos.filter { !it.deleted && Learning.label(it.label) == label }
-    LaunchedEffect(data.todos) { selected = selected.intersect(members.map { it.id }.toSet()) }
+    val groups = remember(todos) { LabelUtils.groups(todos) }
+    val members = todos.filter { !it.deleted && Learning.label(it.label) == label }
+    LaunchedEffect(todos) { selected = selected.intersect(members.map { it.id }.toSet()) }
     fun propose(caption: String, whole: Boolean, clear: Boolean = false) {
-        val next = LabelUtils.plan(data.todos, label, if (whole) null else selected)
+        val next = LabelUtils.plan(todos, label, if (whole) null else selected)
         if (next.expected.isEmpty()) return
         plan = next; target = if (clear) "" else label.orEmpty(); clearing = clear; title = caption; error = ""
     }

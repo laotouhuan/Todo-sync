@@ -66,4 +66,20 @@ class EditTodoDialogTest {
         assertEquals(RecurringType.DAILY_REPEAT, save(mixed).recurring)
         assertEquals(RecurringType.NONE, save(mixed, TaskType.NORMAL, "2026-10-08").recurring)
     }
+
+    @Test fun progressSectionsCoverAllContentCombinationsAndTimingPermission() {
+        for (mask in 0..7) {
+            val todo = legacy().copy(taskType = TaskType.WEEKLY_CHECKIN, date = "2026-W42",
+                subtasks = if (mask and 1 != 0) listOf(com.todo.app.data.model.Subtask("s", "步骤", false)) else emptyList(),
+                completedDates = if (mask and 4 != 0) listOf("2026-10-15") else emptyList())
+            val ref = com.todo.app.data.model.TaskReference(todo.id)
+            val entries = if (mask and 2 != 0) listOf(com.todo.app.data.model.TimeEntry("e", ref, "2026-10-15T09:00:00Z", "2026-10-15T09:00:00Z", "2026-10-15T09:00:00Z")) else emptyList()
+            val sections = editorProgressSections(todo, entries, ref)
+            assertEquals(mask and 1 != 0, "subtasks" in sections)
+            assertEquals(mask and 2 != 0, "timing" in sections)
+            assertEquals(mask and 4 != 0, "checkins" in sections)
+            assertFalse("timing" in editorProgressSections(todo, entries, ref, false))
+        }
+    }
+
 }

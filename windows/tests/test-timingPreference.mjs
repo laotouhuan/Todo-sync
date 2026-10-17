@@ -1,3 +1,4 @@
+import * as seriesHelpers from '../src/taskSeries.js';
 import { learningSnapshot, requirePersonalTarget } from '../src/collaborationView.js';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +14,7 @@ const statements = parse(source, { ecmaVersion: 'latest', sourceType: 'module' }
 const declaration = statements.find(n => n.type === 'ExportNamedDeclaration').declaration;
 const localInput = statements.find(n => n.type === 'FunctionDeclaration' && n.id.name === 'localInput');
 function harness(entries = [], enabled = true, now = Date.now()) {
-    const state = { appConfig: { time_tracking_enabled: enabled }, todoData: { todos: [], time_entries: structuredClone(entries), daily_reviews: [] }, activeSource: { type: 'personal' }, currentView: 'list' };
+    const state = { appConfig: { time_tracking_enabled: enabled }, todoData: { todos: entries.filter(e => e.task_ref?.todo_id).map(e => ({ id: e.task_ref.todo_id, content: "已有任务", completed: false })), time_entries: structuredClone(entries), daily_reviews: [] }, activeSource: { type: 'personal' }, currentView: 'list' };
     let commits = 0, fail = false, scheduled = 0, cleared = 0, afterSync = () => {};
     const buttons = [], dialogs = [], errors = [];
     class FixedDate extends Date {
@@ -37,7 +38,7 @@ function harness(entries = [], enabled = true, now = Date.now()) {
     const startButton = Object.assign(element('button'), { hidden: true });
     let banner;
     const create = runInNewContext(source.slice(localInput.start, localInput.end) + '\n' + source.slice(declaration.start, declaration.end) + ';createLearningView', {
-        ...helpers, sortFunc, learningSnapshot, requirePersonalTarget, structuredClone, Date: FixedDate,
+        ...helpers, ...seriesHelpers, sortFunc, learningSnapshot, requirePersonalTarget, structuredClone, Date: FixedDate,
         el: element, button: (text, action) => {
             const b = Object.assign(element('button', text), { action });
             Object.defineProperty(b, 'text', { get: () => b.textContent }); buttons.push(b); return b;

@@ -92,7 +92,7 @@ class ReminderReceiver : BroadcastReceiver() {
     }
 
     private fun handleTaskReminder(context: Context, todoData: TodoData, todoId: String) {
-        val todo = todoData.todos.find { it.id == todoId } ?: return
+        val todo = com.todo.app.data.model.TaskSeriesLogic.visible(todoData).find { it.id == todoId } ?: return
         if (todo.completed || todo.deleted) return
 
         val notification = NotificationHelper.buildTaskNotification(
@@ -108,7 +108,7 @@ class ReminderReceiver : BroadcastReceiver() {
         val rule = todoData.reminderSettings.globalRules.find { it.id == ruleId } ?: return
         if (!rule.enabled) return
 
-        val evaluation = evaluateReminderRule(rule, todoData.todos, LocalDate.now())
+        val evaluation = evaluateReminderRule(rule, com.todo.app.data.model.TaskSeriesLogic.visible(todoData), LocalDate.now())
         if (!evaluation.shouldTrigger) return
 
         val resolvedBody = renderReminderTemplate(rule.body, evaluation, LocalTime.now())

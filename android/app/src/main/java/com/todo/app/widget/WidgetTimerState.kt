@@ -15,16 +15,17 @@ internal fun widgetTimerState(data: TodoData, enabled: Boolean, now: Instant = I
     val running = data.timeEntries.filter { !it.deleted && it.ended_at == null }
     if (running.isEmpty()) return WidgetTimerState.Idle
     if (running.size > 1) return WidgetTimerState.Attention("有 ${running.size} 条计时待处理")
+    TaskSeriesLogic.pending(data, running.single())?.let { return WidgetTimerState.Attention(it) }
     val start = Learning.instant(running.single().started_at)
     if (start == null || start > now) return WidgetTimerState.Attention("计时记录待核对")
-    return WidgetTimerState.Running(running.single())
+    return WidgetTimerState.Running(running.single().copy(display_content = LearningViewData(data, emptySet()).display(running.single())))
 }
 
 internal fun widgetTimerTitle(entry: TimeEntry): String =
-    entry.task_content_snapshot.takeIf { it.isNotBlank() } ?: "未命名任务"
+    (entry.display_content ?: entry.task_content_snapshot).takeIf { it.isNotBlank() } ?: "未命名任务"
 
 internal fun widgetTimerCandidates(data: TodoData): List<RecentTimingTask> =
-    Learning.recentTimingTasks(data.todos, data.timeEntries)
+    Learning.recentTimingTasks(data.todos, data.timeEntries, data = data)
 
 internal fun isWidgetTimingTodo(state: WidgetTimerState, todoId: String): Boolean =
     state is WidgetTimerState.Running && state.entry.task_ref == TaskReference(todoId)

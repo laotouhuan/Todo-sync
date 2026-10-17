@@ -120,7 +120,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
             val todayStr = dates.today
 
             val todayFocus = run {
-                val focusGroups = classifyForTodayFocus(currentData.todos, dates.today, dates.thisWeek, dates.thisMonth)
+                val focusGroups = classifyForTodayFocus(com.todo.app.data.model.TaskSeriesLogic.visible(currentData), dates.today, dates.thisWeek, dates.thisMonth)
                 val todayTasks = focusGroups.todayTasks
                 val weekTasks = focusGroups.weekTasks
                 val monthTasks = focusGroups.monthTasks

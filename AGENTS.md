@@ -57,7 +57,11 @@ to-do list/
 └── windows/                   # Windows 端（Tauri 2）
     ├── src/                   # 前端（纯 HTML/CSS/JS，无框架）
     │   ├── index.html
-    │   ├── main.js            # 应用状态、交互、待办迁移与合并、协作入口
+    │   ├── main.js            # 应用状态、交互与协作入口
+    │   ├── dataMerge.js       # 待办迁移、完整数据合并与内容变更判定
+    │   ├── taskSeries.js      # 周/月任务身份、关联、导入与删除
+    │   ├── periodTaskView.js  # 周期导入、关联、删除与对比界面
+    │   ├── editorSections.js  # 编辑会话分区规则
     │   ├── dateUtils.js       # 日期、任务创建与分组
     │   ├── timeTracking.js    # 计时、标签、学习记录归一化与合并
     │   ├── reviewUtils.js     # 复盘预览与 Markdown 导出
@@ -147,7 +151,9 @@ to-do list/
     "global_rules": []
   },
   "time_entries": [],             // 学习计时记录；旧文件缺失时默认为 []
-  "daily_reviews": []             // 每日复盘记录；旧文件缺失时默认为 []
+  "daily_reviews": [],            // 每日复盘记录；旧文件缺失时默认为 []
+  "task_series": [],              // 跨周期身份与当前名称；旧文件默认为 []
+  "task_series_links": []         // Todo 与系列关联（含解除标记）；旧文件默认为 []
 }
 ```
 
@@ -159,6 +165,8 @@ to-do list/
 | `reminder_settings.global_rules[]` | 规则含 `id`、`time`；`enabled` 默认 `true`、`condition` 默认 `unconditional`、`task_scope` 默认 `all`、`title` / `body` 默认空字符串 |
 | `time_entries[]` | 含 `id`、`created_at`、`updated_at`、`task_ref`、`started_at`；`deleted` 默认 `false`、`ended_at` 默认 `null`（仍在计时）、`task_content_snapshot` 默认空字符串、`label_snapshot` 默认 `null` |
 | `time_entries[].task_ref` | `todo_id` 必填；`source_type` 默认 `personal`，另可为 `collaboration`；`source_id` 默认 `null`，引用协作任务时记录协作源 ID |
+| `task_series[]` | 系列 ID、名称及独立名称时钟、周/月类型、创建/更新时间；`content_renamed` 默认 `false`，`deleted` 默认 `false`，`deleted_at` 默认 `null` |
+| `task_series_links[]` | 按 `todo_id` 唯一，含 `series_id`、`period`、创建/更新时间；`deleted` 默认 `false`，解除关联时保存 `next_series_id` |
 | `daily_reviews[]` | 含 `id`、`date`（YYYY-MM-DD）、`created_at`、`updated_at`；`deleted` 默认 `false`；`fact`、`obstacle`、`effective_action`、`next_step` 默认空字符串 |
 
 计时与复盘存放在个人数据文件中；计时记录可通过 `task_ref` 引用协作任务。不能把个人计时、复盘写入对方共享清单。任务的当前标签与计时记录的 `label_snapshot` 分别表示当前分类和历史快照，修改标签时须保留两者的语义。
@@ -166,10 +174,10 @@ to-do list/
 ### ⚠️ 数据契约铁律
 
 1. **Schema 优先**：修改共享数据结构时，**必须先更新对应 Schema**（待办及学习记录为 `todo_data.schema.json`，协作源配置为 `collaborations.schema.json`），再同步修改两端代码。
-2. **字段一致性**：Android 的 `Todo.kt`、`TodoData.kt`、`Learning.kt`、`Collaboration.kt` 与 Windows 的 `dateUtils.js`、`main.js`、`timeTracking.js` 中对应对象的序列化字段必须与 Schema 一致。
+2. **字段一致性**：Android 的 `Todo.kt`、`TodoData.kt`、`Learning.kt`、`TaskSeries.kt`、`Collaboration.kt` 与 Windows 的 `dateUtils.js`、`taskSeries.js`、`timeTracking.js` 中对应对象的序列化字段必须与 Schema 一致。
 3. **新增字段必须有默认值**：为保持向后兼容，新增字段必须提供合理的默认值（如 `deleted` 默认 `false`）。
 4. **不可删除字段**：已发布的字段不可删除，只能标记废弃（deprecated）。
-5. **整文件操作保留扩展数据**：加载、迁移、保存、同步、备份与恢复个人数据时，必须保留提醒设置、计时和复盘。处理旧文件时补默认值，不得用仅含 `todos` 的对象覆盖已有完整数据。
+5. **整文件操作保留扩展数据**：加载、迁移、保存、同步、备份与恢复个人数据时，必须保留提醒设置、计时、复盘、系列与关联。处理旧文件时补默认值，不得用仅含 `todos` 的对象覆盖已有完整数据。
 
 ---
 
@@ -192,6 +200,7 @@ to-do list/
 |----------|-------------|
 | **待办基础字段** | 按 `id` 合并，选择 `updated_at` 较新的版本；旧记录缺失该字段时使用 `created_at`（Windows 回退，Android 模型默认值）。有效时间相同时保留本地版本；仅一端存在的任务直接纳入。任务结果按 `created_at` 降序排列 |
 | **打卡记录 `completed_dates`** | 在基础字段之外单独按日期前缀归并：同一天双方都有记录时保留较长的记录（等长取本地）；单边的纯日期记录保留，单边带时间记录仅在其时间晚于另一端任务更新时间时保留。此规则同时处理补卡与销卡，不能简单取并集。随后重新计算周/月任务是否达到 `target_count` |
+| **任务系列与关联** | 系列名称独立合并：明确改名优先于初始化，再比 `content_updated_at`；系列删除单调保留，独立于名称。关联按 `todo_id` 合并，同时间解除标记优先，`next_series_id` 保留解除后的新身份 |
 | **全局提醒设置** | 使用 `reminder_settings.updated_at` 选择整份设置；有独立有效时间戳的一端优先。双方都缺少有效时间戳的旧数据优先保留非空规则，否则回退到文件 `last_updated` 比较 |
 | **计时记录** | `time_entries` 按记录 `id` 合并，选择更新时间较新的整条记录 |
 | **每日复盘** | `daily_reviews` 按 `date` 合并，即使记录 ID 不同，同一天也只保留更新时间较新的整篇复盘；不逐字段拼接 |
@@ -199,7 +208,7 @@ to-do list/
 
 计时与复盘在更新时间相同时优先保留 `deleted: true` 的记录；删除状态也相同时按规范化内容排序确定结果，保证交换合并方向及重复同步时结果稳定。这一规则不能直接套用到普通待办的同时间戳处理上。
 
-**实现入口**：Windows 为 `src/main.js` 的 `mergeTodoData()`、`mergeReminderSettings()`、`resolveCheckinConflict()`、`mergeCollaborations()`，以及 `src/timeTracking.js` 的 `mergeLearningRecords()`；Android 为 `data/model/MergeUtils.kt`、`data/model/Learning.kt`，协作源配置合并在 `data/repository/TodoRepository.kt`。
+**实现入口**：Windows 为 `src/dataMerge.js` 的 `mergeTodoData()`、`mergeReminderSettings()`、`resolveCheckinConflict()`，`src/main.js` 的 `mergeCollaborations()`，以及 `src/timeTracking.js` 的 `mergeLearningRecords()`；Android 为 `data/model/MergeUtils.kt`、`data/model/Learning.kt` 与 `data/model/TaskSeries.kt`，协作源配置合并在 `data/repository/TodoRepository.kt`。
 
 ### 5.3 删除记录的保留与清理
 
@@ -207,6 +216,8 @@ to-do list/
 - 两端的 `purgeOldDeletedTodos()` 会清理删除超过 7 天的任务记录，按 `updated_at` 判断，缺失时回退到 `created_at`。实现分别位于 Windows `src/main.js` 和 Android `data/repository/TodoRepository.kt`，保留天数由各自的 `PURGE_DELETED_AFTER_DAYS` 定义。
 - 该保留期针对待办记录，不应自动套用到计时、复盘或协作源配置。修改清理或合并逻辑时，应覆盖长期离线端重新同步、删除标记和时间戳异常等边界。
 - 当前异常时间戳处理存在差异：Windows 会清除时间戳无法解析的已删除任务，Android 会保留。修改相关逻辑时须核对两端实现，不能假定所有清理边界已一致。
+
+系列与关联不随 Todo 的七天清理删除。历史计时继续引用原 Todo ID；改名仅更新系列名称时钟，不批量改写 Todo 或计时快照。个人任务已删除、系列已删除或引用任务已缺失时，未结束计时派生为待核对，普通保存、加载与同步均不补写结束时间；显式删除只结束确认界面列出的仍在运行记录。协作引用按来源解析，不能套用个人清单的缺失判定。修改相关行为前阅读 [周期任务方案](docs/period-task-continuity-plan.md)。
 
 ### 5.4 文件安全
 
@@ -263,8 +274,9 @@ Windows 端使用以下机制保证文件安全：
 |--------|-------------|-------------|
 | **待办模型与创建** | `src/dateUtils.js` → `createTodo()`；`src/main.js` → `appState.todoData` | `data/model/Todo.kt`、`data/model/TodoData.kt` |
 | **数据持久化** | `src-tauri/src/todo_store.rs` | `data/repository/TodoRepository.kt` |
-| **待办迁移与合并** | `src/main.js` → `migrateAndNormalize()`、`mergeTodoData()` | `data/model/MergeUtils.kt`（由 Repository 调用） |
+| **待办迁移与合并** | `src/dataMerge.js` → `migrateAndNormalize()`、`mergeTodoData()` | `data/model/MergeUtils.kt`（由 Repository 调用） |
 | **WebDAV** | `src-tauri/src/todo_store.rs` → `sync_to_cloud()` / `fetch_from_cloud()` | `data/WebDavClient.kt` |
+| **周期任务延续与对比** | `src/taskSeries.js`、`periodTaskView.js` | `data/model/TaskSeries.kt`、`ui/view/PeriodTaskDialogs.kt` |
 | **日期、语法解析与分组** | `src/dateUtils.js` | `data/model/TodoDateUtils.kt`、`TodoDateParser.kt`、`TodoGrouper.kt` |
 | **配置管理** | `src-tauri/src/todo_store.rs` → `AppConfig` | `data/ConfigManager.kt` |
 | **UI 入口** | `src/index.html` + `src/main.js` | `MainActivity.kt` |
@@ -314,6 +326,7 @@ Windows 构建门禁与测试位于 `windows/tests/`；Android 测试见 §9.3�
 | **构建门禁** | `check-build.mjs` | JS 语法、命名导入/导出、import 位置、HTML 脚本引用、Schema 文件结构、关键函数作用域 | `npm run check` |
 | **日期与任务工具** | `test-dateUtils.mjs` | 日期、任务创建、输入解析与分组 | `npm run test:unit` |
 | **数据逻辑** | `test-dataLogic.mjs` | 待办迁移与合并、提醒设置、学习数据保存与协作写入隔离、Schema 字段检查 | `npm run test:data` |
+| **周期延续与编辑分区** | `test-taskSeries.mjs`、`test-editorSections.mjs` | 关系与同步、导入、删除、编辑冲突、对比与分区组合 | `npm run test` |
 | **计时与标签** | `test-timeTracking.mjs` | 跨日计时、重叠处理、任务来源、学习记录合并 | `npm run test` |
 | **复盘导出** | `test-reviewUtils.mjs` | 复盘预览、Markdown 导出与统计选项 | `npm run test` |
 | **时间线** | `test-statsTimeline.mjs` | 标签归类、完成记录、计时圆弧与日期边界 | `npm run test` |
@@ -338,6 +351,7 @@ Windows 构建门禁与测试位于 `windows/tests/`；Android 测试见 §9.3�
 | **构建门禁** | 内置 Lint | 编译检查 + API 兼容性 + 代码规范 | `./gradlew lintDebug` |
 | **单元测试** | `TodoDateUtilsTest.kt`, `StatsUtilsTest.kt` | 日期工具 + 统计计算纯函数 | `./gradlew testDebugUnitTest` |
 | **数据逻辑** | `MergeLogicTest.kt`, `SerializationTest.kt` | 合并策略 + 序列化兼容性 | `./gradlew testDebugUnitTest` |
+| **周期延续** | `TaskSeriesTest.kt` | 系列与关联、导入、名称合并、删除待核对、编辑冲突和周期对比 | `./gradlew testDebugUnitTest` |
 | **计时与复盘** | `LearningTest.kt` | 跨日计时、标签、学习记录合并、兼容性与导出 | `./gradlew testDebugUnitTest` |
 | **时间线** | `StatsTimelineTest.kt` | 完成记录、计时圆弧、标签与日期边界 | `./gradlew testDebugUnitTest` |
 | **提醒规则** | `ReminderRuleEvaluatorTest.kt` | 提醒条件、任务范围与完成判定 | `./gradlew testDebugUnitTest` |

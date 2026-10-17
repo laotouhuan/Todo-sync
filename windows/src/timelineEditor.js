@@ -46,7 +46,7 @@ export function selectTimelineRecord(entries, open) {
     const dialog = element('dialog'); dialog.className = 'learning-dialog timeline-detail';
     dialog.append(element('h3', '选择计时记录'));
     unique.forEach(entry => {
-        const button = element('button', `${entry.task_content_snapshot} · ${new Date(entry.started_at).toLocaleString()} — ${entry.ended_at ? new Date(entry.ended_at).toLocaleString() : '进行中'}`);
+        const button = element('button', `${entry.display_content || entry.task_content_snapshot} · ${new Date(entry.started_at).toLocaleString()} — ${entry.ended_at ? new Date(entry.ended_at).toLocaleString() : '进行中'}`);
         button.className = 'learning-button'; button.onclick = () => { dialog.close(); open(entry); }; dialog.append(button);
     });
     const close = element('button', '关闭'); close.onclick = () => dialog.close(); dialog.append(close);

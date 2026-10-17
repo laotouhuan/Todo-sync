@@ -1,3 +1,4 @@
+import * as seriesHelpers from '../src/taskSeries.js';
 import { requirePersonalTarget } from '../src/collaborationView.js';
 import { parse as parseSource } from 'acorn';
 import { runInNewContext } from 'node:vm';
@@ -789,14 +790,14 @@ describe('学习保存失败与串行队列', () => {
         const state = {appConfig:{},todoData:{todos:[original]},activeSource:{type:'personal'},currentEditingTodo:structuredClone(original),currentEditingOriginalType:{task_type:'normal',recurring:'none'},currentEditingSubtasks:[]};
         const fields = {'edit-content':{value:'新内容'},'edit-learning-label':{value:'数学'}};
         const calls = [];
-        const save = runInNewContext('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";'+declaration('saveEditModal')+';saveEditModal', {
-            requirePersonalTarget, ...learningHelpers,...dateHelpers,structuredClone,appState:state,document:{getElementById:id=>fields[id]},
+        const save = runInNewContext('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";'+declaration('commitPeriodData')+declaration('saveEditModal')+';saveEditModal', {
+            requirePersonalTarget, ...learningHelpers,...dateHelpers,...seriesHelpers,structuredClone,appState:state,document:{getElementById:id=>fields[id]},
             extractCollaborator:()=>({nickname:null}),deepClone:structuredClone,closeEditModal:()=>closed++,render:()=>{},
             showToast:m=>notices.push(m),console:{error:()=>{}},_doSaveData:async()=>success,invoke:async(cmd,args)=>calls.push([cmd,args])
         });
         await save(); assert.equal(closed,0); assert.equal(state.todoData.todos[0].label,'旧标签');
         assert.equal(fields['edit-learning-label'].value,'数学'); assert.ok(notices.length);
-        success=true; await save(); assert.equal(closed,1); assert.equal(state.todoData.todos[0].label,'数学');
+        success=true; await save(); assert.equal(closed,1,notices.join(";")); assert.equal(state.todoData.todos[0].label,'数学');
         state.activeSource={type:'collaboration',id:'source'}; state.collabData={todos:[structuredClone(original)]};
         fields['edit-learning-label'].value='协作'; await save();
         assert.equal(calls.length,0); assert.equal(state.collabData.todos[0].label,'旧标签');

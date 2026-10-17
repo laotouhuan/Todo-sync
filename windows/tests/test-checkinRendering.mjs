@@ -1,3 +1,4 @@
+import { displayTaskName, seriesFor, periodMembers } from '../src/taskSeries.js';
 import { parse } from 'acorn';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
@@ -40,9 +41,9 @@ function renderTask(taskType, targetCount, expanded = false) {
         date: taskType === 'weekly_checkin' ? '2026-W40' : '2026-09'
     };
     const render = runInNewContext(source.slice(declaration.start, declaration.end) + ';createTodoItemElement', {
-        ...dateHelpers,
+        ...dateHelpers, displayTaskName, seriesFor, periodMembers,
         document: { createElement: element },
-        appState: { expandedTaskIds: new Set(expanded ? [todo.id] : []), dateFilter: 'today' },
+        appState: { activeSource: { type: 'personal' }, todoData: { todos: [todo] }, expandedTaskIds: new Set(expanded ? [todo.id] : []), dateFilter: 'today' },
         getMetaHtml: () => '',
         extractCollaborator: content => ({ cleanContent: content }),
         getWeeklyCompletedCount: () => 0,

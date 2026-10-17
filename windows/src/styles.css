@@ -1193,6 +1193,16 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   font-weight: 500;
 }
 
+/* 导入按钮借用标题栏的内边距，不撑高展开后的标题行。 */
+.collapsible-header .period-import-button {
+  align-self: stretch;
+  flex-shrink: 0;
+  margin: -4px 0;
+  padding: 0 10px;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
 .collapsible-content {
   display: none;
   padding: 10px 12px 12px 12px;
@@ -2804,7 +2814,7 @@ textarea {
 #edit-modal .edit-fixed-header h3 { text-align: center; margin: 0 0 12px; }
 .edit-fixed-actions { display: flex; gap: 10px; }
 .edit-fixed-actions .modal-btn { flex: 1; min-width: 0; margin: 0; }
-#edit-modal .modal-body { min-height: 0; padding-top: 14px; gap: 10px; overscroll-behavior: contain; }
+#edit-modal .modal-body { min-height: 0; padding-top: 14px; gap: 10px; color: var(--text-primary); overscroll-behavior: contain; }
 #edit-modal .modal-body > * { flex-shrink: 0; }
 .edit-section { border-bottom: 1px solid var(--border-color); padding: 2px 0 8px; }
 .edit-section[hidden] { display: none; }
@@ -3030,3 +3040,109 @@ textarea {
 
 /* 备份弹窗从设置中打开时位于设置之上。 */
 #backup-modal { z-index: var(--z-modal-confirm); }
+
+/* 编辑区块的位置在一次会话内保持稳定。 */
+#edit-modal .edit-group-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0 10px;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: .82rem;
+  font-weight: 500;
+  line-height: 1.6;
+  letter-spacing: .06em;
+  text-shadow: none;
+}
+#edit-modal .modal-body > .edit-group-heading:first-child { margin-top: 0; }
+#edit-modal .edit-group-heading::after { content: ''; flex: 1; height: 1px; background: var(--border-color); }
+#edit-modal .edit-group-heading > button { order: 1; flex-shrink: 0; letter-spacing: normal; }
+#edit-modal .add-subtask-row { margin: 8px 0 12px; }
+#edit-name-scope { color: var(--text-secondary); font-size: .8rem; margin: 8px 0; }
+dialog[data-period-dialog] section { padding: 10px 0; border-bottom: 1px solid var(--border-color); }
+dialog[data-period-dialog] select, dialog[data-period-dialog] input[type="search"] { max-width: 100%; margin: 6px 0; }
+dialog[data-period-dialog] label { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+dialog[data-period-dialog] [role="alert"] { color: var(--danger-color, #e35d6a); }
+
+/* 共用选择器：保留原生键盘操作，统一弹窗、设置与统计中的外观。 */
+:is(.custom-select, .throughput-select, .learning-card select, .learning-dialog select, #settings-modal select, .settings-dialog select) {
+  appearance: none;
+  color-scheme: dark;
+  min-height: 36px;
+  max-width: 100%;
+  padding: 8px 32px 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--select-option-bg);
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%), linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%);
+  background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: .85rem;
+  cursor: pointer;
+}
+:is(.custom-select, .throughput-select, .learning-card select, .learning-dialog select, #settings-modal select, .settings-dialog select):focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+:is(.custom-select, .throughput-select, .learning-card select, .learning-dialog select, #settings-modal select, .settings-dialog select) option {
+  background: var(--select-option-bg);
+  color: var(--text-primary);
+}
+dialog[data-period-dialog] > section > select { width: 100%; }
+.period-help { color: var(--text-secondary); font-size: .75rem; line-height: 1.6; margin: 8px 0; }
+.period-association-overview { padding: 8px 0 16px; border-bottom: 1px solid var(--border-color); }
+.period-association-overview h4 { font-size: 1rem; font-weight: 500; overflow-wrap: anywhere; margin-bottom: 6px; }
+.period-association .period-text-button { background: transparent; border-color: transparent; margin: 0; padding: 5px 0; color: var(--text-secondary); text-align: left; }
+.period-association .period-text-button:hover { color: var(--accent-hover); }
+.period-association-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.period-association-actions .learning-button { margin: 0; }
+.period-association .period-association-choice { display: flex; gap: 10px; align-items: center; padding: 8px 0; }
+.period-association .period-association-choice input { flex: 0 0 auto; margin: 0; }
+.period-association [hidden] { display: none !important; }
+.period-association-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; gap: 12px; }
+.period-association-footer .learning-button { margin: 0; }
+.period-history-list { list-style: none; margin: 0 0 16px; padding: 0; font-variant-numeric: tabular-nums; }
+.period-history-row { display: grid; grid-template-columns: 6em minmax(0, 1fr) 2.5em; column-gap: 10px; padding: 6px 0; align-items: start; }
+.period-history-dates > span { white-space: nowrap; }
+.period-history-note { grid-column: 2 / -1; color: var(--text-secondary); }
+.period-history > .learning-button { margin: 0; }
+.learning-dialog { color-scheme: dark; }
+.period-comparison-fields, .period-comparison-summaries { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+dialog[data-period-dialog] .period-comparison-fields label { display: block; color: var(--text-secondary); font-size: .8rem; margin: 10px 0 0; min-width: 0; }
+.period-comparison-fields select { width: 100%; }
+.period-comparison-modes { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; margin-top: 12px; border-radius: 9px; background: var(--bg-secondary); }
+.period-comparison-modes .learning-button { flex: 1; margin: 0; border-color: transparent; background: transparent; white-space: nowrap; }
+.period-comparison-modes .learning-button[aria-pressed=true] { background: var(--accent-color); color: #fff; }
+.period-summary { padding: 12px 0; min-width: 0; overflow-wrap: anywhere; }
+.period-summary h4 { font-size: .8rem; font-weight: 500; color: var(--text-secondary); margin: 0 0 6px; }
+.period-summary > p { font-size: .8rem; }
+.period-summary .period-total { font-size: 1.15rem; font-weight: 500; color: var(--text-primary); margin-bottom: 6px; }
+.period-summary .period-help { font-size: .7rem; }
+.period-comparison .period-help { margin: 6px 0; }
+.period-comparison-delta { padding: 10px 0; border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); font-size: .85rem; }
+.period-chart-title { font-size: .9rem; font-weight: 500; margin: 16px 0 10px; }
+.period-chart-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: .75rem; color: var(--text-secondary); margin-bottom: 12px; }
+.period-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+.period-color-0 { background: var(--accent-color); }
+.period-color-1 { background: #8c9aaf; }
+.period-chart { display: flex; gap: 8px; }
+.period-chart-axis { height: 160px; display: flex; flex-direction: column; justify-content: space-between; color: var(--text-secondary); font-size: .65rem; text-align: right; flex: 0 0 48px; }
+.period-chart-scroll { flex: 1; min-width: 0; overflow-x: auto; padding-bottom: 5px; }
+.period-chart-columns { display: grid; grid-template-columns: repeat(var(--day-count), minmax(32px, 1fr)); min-width: calc(var(--day-count) * 32px); }
+.period-day { min-width: 0; padding: 0 3px; background: transparent; color: var(--text-secondary); border: 0; border-radius: 5px; font: inherit; cursor: pointer; }
+.period-day[aria-pressed=true] { background: var(--bg-secondary); color: var(--text-primary); }
+.period-bar-pair { display: flex; align-items: flex-end; justify-content: center; gap: 3px; height: 160px; border-bottom: 1px solid var(--border-color); background: linear-gradient(to top, transparent calc(50% - 1px), var(--border-color) 50%, transparent calc(50% + 1px)); }
+.period-bar { display: block; width: 10px; height: 0; border-radius: 3px 3px 0 0; }
+.period-bar-missing { height: auto; background: none; color: var(--text-secondary); font-size: .65rem; }
+.period-bar-zero { height: 2px; opacity: .5; }
+.period-day-label { display: block; font-size: .7rem; padding: 7px 0; white-space: nowrap; }
+.period-day-detail { border-top: 1px solid var(--border-color); margin-top: 10px; padding-top: 10px; font-size: .8rem; }
+.period-day-delta { margin-top: 4px; color: var(--text-secondary); }
+@media (max-width: 400px) {
+  .period-comparison-fields { grid-template-columns: 1fr; gap: 0; }
+  .period-comparison { padding: 14px; }
+}

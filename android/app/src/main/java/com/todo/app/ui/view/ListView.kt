@@ -624,6 +624,9 @@ fun ClassicListView(viewModel: TodoViewModel) {
                             Surface(shadowElevation = elevation.value) {
                                 when (item) {
                                     is FocusItem.Header -> {
+                                        var showImport by remember(item.key) { mutableStateOf(false) }
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(Modifier.weight(1f)) {
                                         GroupHeader(
                                             title = item.title,
                                             color = item.color,
@@ -631,6 +634,10 @@ fun ClassicListView(viewModel: TodoViewModel) {
                                             isHovered = (hoveredHeaderKey == item.key),
                                             onClick = item.onToggleExpand
                                         )
+                                            }
+                                            if (!isReadOnly && item.isExpanded && item.key in listOf("HEADER_WEEK", "HEADER_MONTH")) TextButton(onClick = { showImport = true }) { Text("导入") }
+                                        }
+                                        if (showImport) PeriodImportDialog(if (item.key == "HEADER_WEEK") "week" else "month", viewModel) { showImport = false }
                                     }
                                     is FocusItem.Task -> {
                                         Box(modifier = if (isReadOnly) Modifier else Modifier.detectReorderAfterLongPress(reorderState)) {
@@ -645,11 +652,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                                         }
                                     }
                                     is FocusItem.EmptyPlaceholder -> {
-                                        ImportLastPeriodCard(
-                                            message = item.message,
-                                            type = item.period,
-                                            viewModel = viewModel
-                                        )
+                                        Text(item.message, modifier = Modifier.padding(16.dp))
                                     }
                                 }
                             }
@@ -850,12 +853,8 @@ fun ClassicListView(viewModel: TodoViewModel) {
             viewModel = viewModel,
             todo = todo,
             onDismiss = { showEditDialogFor = null },
-            onConfirm = { updated ->
-                viewModel.saveEditedTodo(updated, editSource)
-                showEditDialogFor = null
-            },
-            onDelete = {
-                viewModel.deleteTodo(todo.id)
+            onConfirm = { updated, baseline ->
+                viewModel.saveEditedTodo(updated, editSource, baseline)
                 showEditDialogFor = null
             }
         )
@@ -916,6 +915,9 @@ fun TodoItemRow(
     checkinDate: String? = null
 ) {
     val isReadOnly = viewModel.activeSource.collectAsState().value is TodoViewModel.ActiveSource.Collaboration
+    val periodData by viewModel.todoData.collectAsState()
+    val rowSeries = com.todo.app.data.model.TaskSeriesLogic.series(periodData, todo.id)
+    val duplicatePeriod = !isReadOnly && rowSeries != null && com.todo.app.data.model.TaskSeriesLogic.members(periodData, rowSeries.id, todo.date).size > 1
     val coroutineScope = rememberCoroutineScope()
     val offsetX = remember { Animatable(0f) }
     val density = androidx.compose.ui.platform.LocalDensity.current.density
@@ -1052,6 +1054,7 @@ fun TodoItemRow(
                         }
                         val parsedMeta = remember(todo.content) { todo.extractCollaboratorContent() }
                         val meta = mutableListOf<String>()
+                        if (duplicatePeriod) meta.add("该周期存在重复任务")
                         todo.date?.let {
                             val dateLabel = todo.getDateLabel(todayStr, tomorrowStr)
                             val statusLabel = todo.getCompletionStatusLabel()
@@ -1260,125 +1263,8 @@ fun TodoItemRow(
 // ====== ImportLastPeriodCard ======
 
 @Composable
-fun ImportLastPeriodCard(
-    message: String,
-    type: String,
-    viewModel: TodoViewModel
-) {
-    val coroutineScope = rememberCoroutineScope()
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var showDialog by remember { mutableStateOf(false) }
-
-    val todos by viewModel.todos.collectAsState(initial = emptyList())
-    val today = java.time.LocalDate.now()
-    val sourcePeriodStr = remember(type, today) {
-        if (type == "weekly") {
-            weekStringOf(today.minusWeeks(1))
-        } else {
-            monthStringOf(today.minusMonths(1))
-        }
-    }
-    val targetPeriodStr = remember(type, today) {
-        if (type == "weekly") {
-            weekStringOf(today)
-        } else {
-            monthStringOf(today)
-        }
-    }
-    val candidates = remember(todos, sourcePeriodStr, targetPeriodStr) {
-        val existingTitles = todos.filter { !it.deleted && it.date == targetPeriodStr }.map { it.content }.toSet()
-        todos.filter {
-            !it.deleted &&
-            (it.taskType == TaskType.WEEKLY_CHECKIN || it.taskType == TaskType.MONTHLY_CHECKIN) &&
-            it.date == sourcePeriodStr &&
-            !existingTitles.contains(it.content)
-        }.sortedWith(com.todo.app.data.model.TodoComparator)
-    }
-
-    val selectedIds = remember(candidates) {
-        val map = mutableStateMapOf<String, Boolean>()
-        candidates.forEach { map[it.id] = true }
-        map
-    }
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp, horizontal = 12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Button(
-                onClick = {
-                    if (candidates.isEmpty()) {
-                        android.widget.Toast.makeText(context, "上一周期没有打卡任务可供导入", android.widget.Toast.LENGTH_SHORT).show()
-                    } else {
-                        showDialog = true
-                    }
-                },
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("从上期导入", style = MaterialTheme.typography.labelLarge)
-            }
-        }
-    }
-
-    if (showDialog) {
-        AlertDialog(
-            onDismissRequest = { showDialog = false },
-            title = { Text(if (type == "weekly") "从上周导入" else "从上月导入") },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                    candidates.forEach { todo ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { selectedIds[todo.id] = !(selectedIds[todo.id] ?: false) }
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Checkbox(
-                                checked = selectedIds[todo.id] ?: false,
-                                onCheckedChange = { checked -> selectedIds[todo.id] = checked }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = todo.content, style = MaterialTheme.typography.bodyLarge)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val chosenIds = selectedIds.filter { it.value }.keys.toList()
-                        if (chosenIds.isNotEmpty()) {
-                            coroutineScope.launch {
-                                viewModel.importSelectedFromLastPeriod(type, chosenIds)
-                            }
-                        }
-                        showDialog = false
-                    }
-                ) {
-                    Text("导入选中项")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDialog = false }) {
-                    Text("取消")
-                }
-            }
-        )
-    }
+fun ImportLastPeriodCard(message: String, type: String, viewModel: TodoViewModel) {
+    var show by remember { mutableStateOf(false) }
+    TextButton(onClick = { show = true }) { Text("导入") }
+    if (show) PeriodImportDialog(if (type == "weekly") "week" else "month", viewModel) { show = false }
 }

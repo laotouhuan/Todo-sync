@@ -379,6 +379,171 @@
           "updated_at"
         ]
       }
+    },
+    "task_series": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content_updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "content_renamed": {
+            "type": "boolean",
+            "default": false
+          },
+          "period_type": {
+            "type": "string",
+            "enum": [
+              "week",
+              "month"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted": {
+            "type": "boolean",
+            "default": false
+          },
+          "deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "default": null
+          }
+        },
+        "required": [
+          "id",
+          "content",
+          "content_updated_at",
+          "period_type",
+          "created_at",
+          "updated_at"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "deleted": {
+                  "const": true
+                }
+              },
+              "required": [
+                "deleted"
+              ]
+            },
+            "then": {
+              "properties": {
+                "deleted_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "deleted_at"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "task_series_links": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "properties": {
+          "todo_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "series_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "period": {
+            "type": "string",
+            "pattern": "^\\d{4}-(W\\d{2}|\\d{2})$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted": {
+            "type": "boolean",
+            "default": false
+          },
+          "next_series_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "default": null
+          }
+        },
+        "required": [
+          "todo_id",
+          "series_id",
+          "period",
+          "created_at",
+          "updated_at"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "deleted": {
+                  "const": true
+                }
+              },
+              "required": [
+                "deleted"
+              ]
+            },
+            "then": {
+              "properties": {
+                "next_series_id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "next_series_id"
+              ]
+            },
+            "else": {
+              "properties": {
+                "next_series_id": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ]
+      }
     }
   },
   "required": [

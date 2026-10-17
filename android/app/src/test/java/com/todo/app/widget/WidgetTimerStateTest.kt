@@ -12,12 +12,19 @@ class WidgetTimerStateTest {
     private fun data(vararg entries: TimeEntry) = TodoData(1, "", emptyList(), timeEntries = entries.toList())
 
     @Test fun runningTimerDoesNotDependOnVisibleTasksAndKeepsSnapshot() {
-        val state = widgetTimerState(data(entry), true, now) as WidgetTimerState.Running
-        assertEquals("旧快照", widgetTimerTitle(state.entry))
+        val todo = Todo.create("当前名称", "2026-09-20").copy(id = "task")
+        val state = widgetTimerState(data(entry).copy(todos = listOf(todo)), true, now) as WidgetTimerState.Running
+        assertEquals("当前名称", widgetTimerTitle(state.entry))
+        assertEquals("旧快照", state.entry.task_content_snapshot)
         assertTrue(isWidgetTimingTodo(state, "task"))
         assertEquals("未命名任务", widgetTimerTitle(entry.copy(task_content_snapshot = " ")))
         val collaboration = WidgetTimerState.Running(entry.copy(task_ref = TaskReference("task", "collaboration", "source")))
         assertFalse(isWidgetTimingTodo(collaboration, "task"))
+        assertTrue(widgetTimerState(data(entry), true, now) is WidgetTimerState.Attention)
+        assertTrue(widgetTimerState(data(entry).copy(todos = listOf(todo.copy(deleted = true))), true, now) is WidgetTimerState.Attention)
+        val foreign = entry.copy(task_ref = TaskReference("task", "collaboration", "source"))
+        val foreignState = widgetTimerState(data(foreign).copy(todos = listOf(todo)), true, now) as WidgetTimerState.Running
+        assertEquals("旧快照", widgetTimerTitle(foreignState.entry))
     }
 
     @Test fun disabledHidesConflictsAndInvalidRecords() {

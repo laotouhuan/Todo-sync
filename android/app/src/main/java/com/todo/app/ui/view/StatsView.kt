@@ -182,12 +182,8 @@ fun StatsView(viewModel: TodoViewModel) {
             viewModel = viewModel,
             todo = todo,
             onDismiss = { showEditDialogFor = null },
-            onConfirm = { updated -> 
-                viewModel.saveEditedTodo(updated, editSource)
-                showEditDialogFor = null
-            },
-            onDelete = {
-                viewModel.deleteTodo(todo.id)
+            onConfirm = { updated, baseline ->
+                viewModel.saveEditedTodo(updated, editSource, baseline)
                 showEditDialogFor = null
             }
         )

@@ -174,5 +174,5 @@ test('按日期归并异 ID 复盘、同时间墓碑优先、双向及重复合�
     assert.deepEqual(merged,mergeLearningRecords(merged,[b],'date'));
     assert.equal(mergeLearningRecords([b],[{...b,deleted:true}],'date')[0].deleted,true);
     assert.equal(canonicalLearning({b:null,a:'😀'}),'os1:as2:😀s1:bne');
-    assert.deepEqual(normalizeLearningData({todos:[]}),{todos:[],time_entries:[],daily_reviews:[]});
+    assert.deepEqual(normalizeLearningData({todos:[]}),{todos:[],time_entries:[],daily_reviews:[],task_series:[],task_series_links:[]});
 });
