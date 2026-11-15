@@ -199,7 +199,7 @@ internal fun InsightsContent(viewModel: TodoViewModel, navigation: InsightsNavig
     var period by remember { mutableStateOf("day") }
     var targetDate by remember { mutableStateOf(LocalDate.now()) }
     val planning = if (activeSource is TodoViewModel.ActiveSource.Personal)
-        rememberPersonalPlanning(viewModel.configManager, viewModel::updatePlanningSync) else null
+        rememberPersonalPlanning(viewModel) else null
     val listState = rememberLazyListState()
     var scrollTarget by remember { mutableStateOf<String?>(null) }
     fun navigate(nextPeriod: String, day: LocalDate = targetDate, scroll: String? = null) = navigation.request {

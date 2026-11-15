@@ -84,6 +84,17 @@ export async function openRecordSandbox(invoke, target, onState, onError, interv
     }
     return {
         binding,
+        // 手动刷新沿用当前会话和队列，不关闭会话或丢弃尚未保存的草稿。
+        sync: async () => {
+            try {
+                const next = transport ? await syncOnce() : await enqueue(() => openRecordJournal(invoke, binding));
+                onState(next);
+                return next;
+            } catch (error) {
+                onError(error);
+                throw error;
+            }
+        },
         change: (action, observedRevision) => enqueue(async () => {
             if (pendingIntent) throw new Error('RECORD_RETRY_PENDING');
             const latest = await openRecordJournal(invoke, binding);

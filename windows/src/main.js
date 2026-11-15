@@ -302,14 +302,18 @@ function deepClone(obj) {
 const SyncState = { IDLE: 'idle', SYNCING: 'syncing', ERROR: 'error' };
 let todoSyncState = SyncState.IDLE;
 let planningSyncState = SyncState.IDLE;
+let todoSyncError = '';
+let planningSyncError = '';
 
-function setSyncStatus(state) {
+function setSyncStatus(state, message = '待办或协作配置同步失败，请重试') {
     todoSyncState = state;
+    todoSyncError = state === SyncState.ERROR ? message : '';
     renderSyncStatus();
 }
 
-function setPlanningSyncStatus(state) {
+function setPlanningSyncStatus(state, message = '计划与评分同步失败，请重试') {
     planningSyncState = state;
+    planningSyncError = state === SyncState.ERROR ? message : '';
     renderSyncStatus();
 }
 
@@ -319,6 +323,10 @@ function renderSyncStatus() {
         if (appState.activeSource.type === 'personal') states.push(planningSyncState);
         statusEl.classList.toggle('error', states.includes(SyncState.ERROR));
         statusEl.classList.toggle('syncing', !states.includes(SyncState.ERROR) && states.includes(SyncState.SYNCING));
+        const errors = [todoSyncError];
+        if (appState.activeSource.type === 'personal') errors.push(planningSyncError);
+        statusEl.title = errors.filter(Boolean).join('；') || (states.includes(SyncState.SYNCING) ? '正在同步' : '同步正常');
+        statusEl.setAttribute('aria-label', statusEl.title);
     }
 }
 
@@ -603,7 +611,7 @@ async function loadData() {
                     await dataStore.commit(data => data, { ticket: stamp, force: true });
                 } else {
                     console.error("WebDAV pull failed, using local cache:", e);
-                    setSyncStatus(SyncState.ERROR);
+                    setSyncStatus(SyncState.ERROR, '待办云端读取失败，请检查网络或同步配置');
                     if (typeof e === 'string' && e.includes("云端同步目录不存在")) {
                         showToast(e);
                     } else {
@@ -644,7 +652,7 @@ async function loadData() {
                         await invoke("sync_collaborations_to_cloud", { data: JSON.stringify(localCollabs) });
                     } else {
                         console.error("Fetch collaborations from cloud failed:", e);
-                        setSyncStatus(SyncState.ERROR);
+                        setSyncStatus(SyncState.ERROR, '协作配置同步失败，请重试');
                         showToast("协作配置同步失败，云端旧凭据可能尚未清理，请重试");
                     }
                 }
@@ -656,14 +664,14 @@ async function loadData() {
             updateSourceSelector();
         });
 
-        if (statusEl && !statusEl.classList.contains('error')) {
+        if (todoSyncState !== SyncState.ERROR) {
             setTimeout(() => setSyncStatus(SyncState.IDLE), 500);
         }
-        return true;
+        return todoSyncState !== SyncState.ERROR;
     } catch (e) {
         if (!isCurrent()) return;
         console.error("Failed to load data:", e);
-        setSyncStatus(SyncState.ERROR);
+        setSyncStatus(SyncState.ERROR, '本机数据或凭据读取失败，请检查后重试');
         showToast("数据加载失败，请检查本机数据或凭据存储后重试");
     }
 }
@@ -3730,6 +3738,14 @@ function initApp() {
     formEl = document.getElementById('add-form');
     inputEl = document.getElementById('todo-input');
     statusEl = document.getElementById('sync-status');
+    statusEl?.addEventListener('click', () => showToast(statusEl.title));
+    statusEl?.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            showToast(statusEl.title);
+        }
+    });
+    renderSyncStatus();
 
     // 添加新待办表单
     if (formEl) {
@@ -3774,15 +3790,29 @@ function initApp() {
     const manualSyncBtn = document.getElementById('manual-sync-btn');
     if (manualSyncBtn) {
         manualSyncBtn.addEventListener('click', async () => {
-            if (manualSyncBtn.classList.contains('sync-success')) return;
+            if (manualSyncBtn.disabled) return;
 
             const svg = manualSyncBtn.querySelector('svg');
             const svgPath = svg ? svg.querySelector('path') : null;
+            manualSyncBtn.classList.remove('sync-success');
+            if (svgPath) svgPath.setAttribute('d', REFRESH_SVG_PATH);
             if (svg) svg.classList.add('sync-spin');
-            
-            await loadData();
-            
-            if (svg) svg.classList.remove('sync-spin');
+            manualSyncBtn.disabled = true;
+            try {
+                const loaded = await loadData();
+                const planningReady = appState.activeSource.type !== 'personal' ||
+                    !statsPlanningController || await statsPlanningController.sync();
+                if (!loaded || !planningReady || statusEl?.classList.contains('error')) {
+                    showToast(statusEl?.classList.contains('error') ? statusEl.title : '同步尚未完成，请稍后重试');
+                    return;
+                }
+            } catch (error) {
+                showToast('同步未完成：' + (error?.message ?? error));
+                return;
+            } finally {
+                if (svg) svg.classList.remove('sync-spin');
+                manualSyncBtn.disabled = false;
+            }
             if (svgPath) {
                 svgPath.setAttribute('d', CHECKMARK_SVG_PATH);
                 manualSyncBtn.classList.add('sync-success');

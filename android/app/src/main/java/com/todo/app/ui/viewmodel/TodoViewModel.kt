@@ -251,11 +251,16 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
             initialValue = HealthMetrics()
         )
     val isSyncing = repository.isSyncing
-    private val _planningSync = MutableStateFlow<Pair<String, com.todo.app.data.model.SyncPhase>?>(null)
-    internal val planningSync = _planningSync.asStateFlow()
+    internal val personalPlanning = com.todo.app.data.repository.createPersonalPlanningRepository(configManager.context, configManager)
+    internal val planningSync = personalPlanning.state.map { snapshot -> snapshot.settings?.let { it.first to snapshot.phase } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    private val _personalSyncRunning = MutableStateFlow(false)
+    internal val personalSyncRunning = _personalSyncRunning.asStateFlow()
+    private val _personalSyncCompletedAt = MutableStateFlow(0L)
+    internal val personalSyncCompletedAt = _personalSyncCompletedAt.asStateFlow()
 
-    internal fun updatePlanningSync(target: String, phase: com.todo.app.data.model.SyncPhase) {
-        if (configManager.personalPlanningTarget() == target) _planningSync.value = target to phase
+    internal fun refreshPlanning() {
+        viewModelScope.launch { personalPlanning.sync() }
     }
 
     val syncOutcome = kotlinx.coroutines.flow.combine(repository.syncOutcome, collabSyncState.outcome, activeSource) { personal, collaboration, source ->
@@ -435,13 +440,35 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     }
 
     fun syncWithCloud() {
+        if (_personalSyncRunning.value) return
+        _personalSyncRunning.value = true
+        _personalSyncCompletedAt.value = 0L
+        val settings = configManager.planningSettings()
         viewModelScope.launch {
             try {
-                repository.syncWithCloud(includeCollaborations = true)
+                val personal = try {
+                    repository.syncWithCloud(includeCollaborations = true, notifySuccess = false)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _uiEvent.emit("个人数据同步失败: ${e.message}")
+                    null
+                }
+                val planning = personalPlanning.sync()
+                if (configManager.planningSettings() != settings) return@launch
+                if (!planning) {
+                    val snapshot = personalPlanning.state.value
+                    _uiEvent.emit(snapshot.loadError ?: snapshot.syncError ?: "计划与评分同步未完成，请重试")
+                } else if (personal?.isSuccess == true) {
+                    _personalSyncCompletedAt.value = System.currentTimeMillis()
+                    _uiEvent.emit("个人数据、协作配置与计划评分同步完成")
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _uiEvent.emit("同步失败: ${e.message}")
+            } finally {
+                _personalSyncRunning.value = false
             }
         }
     }

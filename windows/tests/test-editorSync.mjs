@@ -29,8 +29,9 @@ function harness(mode = 'local') {
     const notices = [], io = []; let config = structuredClone(state.appConfig), hook = async () => {}, childSave;
     const key = cfg => cfg.sync_mode === 'webdav' ? cfg.webdav_filepath : cfg.sync_path;
     const context = { ...dates, ...merge, normalizeLearningData, applyReminderSettingsEdit, normalizeReminderSettings, requirePersonalTarget, appState: state, structuredClone, Date, JSON,
-        render() {}, closeEditModal() {}, updateSourceSelector() {}, learningUI: { refresh() {} }, setSyncStatus() {},
-        SyncState: {}, statusEl: null, showToast: message => notices.push(message), console: { log() {}, error() {} },
+        render() {}, closeEditModal() {}, updateSourceSelector() {}, learningUI: { refresh() {} },
+        setSyncStatus(state) { context.todoSyncState = state; }, todoSyncState: 'idle',
+        SyncState: { IDLE: 'idle', SYNCING: 'syncing', ERROR: 'error' }, statusEl: null, showToast: message => notices.push(message), console: { log() {}, error() {} },
         setTimeout() {}, purgeOldDeletedTodos() {}, window: { confirm: () => true },
         document: { getElementById: () => null, querySelector: () => null },
         editTimelineSubtask: (_task, _child, save) => { childSave = save; },
@@ -60,6 +61,9 @@ function harness(mode = 'local') {
 }
 
 for (const mode of ['local', 'webdav']) {
+    test(`${mode} 加载成功返回同步成功结果`, async () => {
+        assert.equal(await harness(mode).api.loadData(), true);
+    });
     test(`${mode} 实际设置保存保留原位置扩展，表单未改提醒不推进时钟`, async () => {
         const h = harness(mode);
         const original = normalizeReminderSettings({ updated_at: '2026-10-01T00:00:00Z', future: { keep: true },
@@ -96,6 +100,13 @@ for (const mode of ['local', 'webdav']) {
         assert.equal(h.state.todoData.reminder_settings.enabled, true);
     });
 }
+
+test('云端读取失败不能作为手动同步成功结果', async () => {
+    const h = harness('webdav');
+    h.hook(async cmd => { if (cmd === 'fetch_from_cloud') throw new Error('模拟网络失败'); });
+    assert.equal(await h.api.loadData(), false);
+    assert.ok(h.notices.some(message => message.includes('同步失败')));
+});
 
 for (const secondFails of [false, true]) {
     test(`前一次编辑失败，排队新增${secondFails ? '失败并保留输入' : '成功且不会被回滚丢失'}`, async () => {

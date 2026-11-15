@@ -287,7 +287,7 @@ class TodoRepository(private val context: Context) {
         }
     }
 
-    suspend fun syncWithCloud(includeCollaborations: Boolean = false): SyncOutcome {
+    suspend fun syncWithCloud(includeCollaborations: Boolean = false, notifySuccess: Boolean = true): SyncOutcome {
         val configurationId = cloudSyncState.configurationId()
         val endpoint = syncEndpoint()
         return withContext(Dispatchers.IO) {
@@ -312,7 +312,7 @@ class TodoRepository(private val context: Context) {
                         )
                     }
                     reportSyncFailure(result)
-                    if (includeCollaborations && result.isSuccess && result.operationId == syncOutcome.value.operationId)
+                    if (notifySuccess && includeCollaborations && result.isSuccess && result.operationId == syncOutcome.value.operationId)
                         _uiEvent.trySend(UiEvent.ShowMessage("个人数据与协作配置同步完成"))
                     result
                 } finally {

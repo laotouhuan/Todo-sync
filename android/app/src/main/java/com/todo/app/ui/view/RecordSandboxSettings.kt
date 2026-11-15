@@ -40,12 +40,10 @@ import com.todo.app.data.model.LearningViewData
 import com.todo.app.data.model.TodoData
 import com.todo.app.data.model.WeeklyPlanning
 import com.todo.app.data.model.SyncPhase
-import com.todo.app.data.ConfigManager
 import com.todo.app.data.repository.RecordSandbox
 import com.todo.app.data.repository.RecordSandboxTarget
 import com.todo.app.data.repository.RecordSandboxView
 import com.todo.app.data.repository.PlanningCloudConnection
-import com.todo.app.data.repository.retainsLocalPlanning
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -72,135 +70,56 @@ internal class PersonalPlanningState(
 )
 
 @Composable
-internal fun rememberPersonalPlanning(config: ConfigManager, updatePlanningSync: (String, SyncPhase) -> Unit): PersonalPlanningState {
+internal fun rememberPersonalPlanning(viewModel: com.todo.app.ui.viewmodel.TodoViewModel): PersonalPlanningState {
+    val config = viewModel.configManager
+    val repository = viewModel.personalPlanning
     val targets = remember(config) { config.planningTargets() }
     val settings by targets.collectAsState(initial = config.planningSettings())
-    val (target, cloud) = settings
-    // 重建页内会话时保留磁盘日志；旧目标的状态不能经过重组投到新目标。
+    val snapshot by repository.state.collectAsState()
+    // 页面只管理编辑草稿；同步会话由 ViewModel 持有，返回列表后仍可手动同步。
     return key(settings) {
-        val context = LocalContext.current
         val scope = rememberCoroutineScope()
-        var session by remember { mutableStateOf<RecordSandbox?>(null) }
-        var state by remember { mutableStateOf<RecordSandboxView?>(null) }
-        var busy by remember { mutableStateOf(false) }
+        val current = snapshot.takeIf { it.settings == settings }
+        var writing by remember { mutableStateOf(false) }
         var status by remember { mutableStateOf("") }
-        var connectedCloud by remember { mutableStateOf(false) }
-        var reload by remember { mutableIntStateOf(0) }
-        var loadError by remember { mutableStateOf(false) }
-        var syncFailed by remember { mutableStateOf(false) }
         var actionDate by remember { mutableStateOf<String?>(null) }
         var afterSave by remember { mutableStateOf<(() -> Unit)?>(null) }
-        LaunchedEffect(settings, reload) {
-            loadError = false
-            try {
-                val (opened, retained) = withContext(Dispatchers.IO) {
-                    val preferences = context.getSharedPreferences("personal-planning", android.content.Context.MODE_PRIVATE)
-                    val key = "target-$target"
-                    val fixed = synchronized(planningPreferencesLock) {
-                        preferences.getString(key, null)?.let { Json.decodeFromString<RecordSandboxTarget>(it) }
-                            ?: RecordSandboxTarget(UUID.randomUUID().toString(), UUID.randomUUID().toString(), Instant.now().toString())
-                                .also { check(preferences.edit().putString(key, Json.encodeToString(RecordSandboxTarget.serializer(), it)).commit()) }
-                    }
-                    val legacy = RecordSandbox(context.filesDir, fixed, localOnly = true)
-                    val retain = cloud != null && legacy.open().preview.retainsLocalPlanning()
-                    val synced = if (cloud != null && !retain)
-                        RecordSandbox(context.filesDir, cloud.target(fixed.actorId), localOnly = true, cloud = cloud)
-                    else legacy
-                    synced to retain
-                }
-                if (config.planningSettings() != settings) return@LaunchedEffect
-                connectedCloud = cloud != null && !retained
-                updatePlanningSync(target, when {
-                    connectedCloud -> SyncPhase.RUNNING
-                    retained -> SyncPhase.FAILED
-                    else -> SyncPhase.IDLE
-                })
-                val initial = opened.open()
-                if (config.planningSettings() != settings) return@LaunchedEffect
-                checkNotNull(initial.preview.view)
-                state = initial
-                session = opened
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                if (config.planningSettings() != settings) return@LaunchedEffect
-                loadError = true
-                if (cloud != null) updatePlanningSync(target, SyncPhase.FAILED)
-            }
-        }
-        LaunchedEffect(session, connectedCloud) {
-            val opened = session ?: return@LaunchedEffect
-            if (!connectedCloud) return@LaunchedEffect
+        LaunchedEffect(settings) {
             while (config.planningSettings() == settings) {
-                if (!busy) {
-                    try {
-                        val next = opened.sync()
-                        if (!busy && config.planningSettings() == settings) {
-                            if (next.preview.view != null) state = next
-                            syncFailed = next.syncIncomplete || next.preview.view == null
-                            updatePlanningSync(target, when {
-                                syncFailed -> SyncPhase.FAILED
-                                next.preview.journal.pending.isNotEmpty() -> SyncPhase.RUNNING
-                                else -> SyncPhase.IDLE
-                            })
-                        }
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (_: com.todo.app.data.repository.RecordTransportIntegrityException) {
-                        if (config.planningSettings() == settings) {
-                            syncFailed = true
-                            updatePlanningSync(target, SyncPhase.FAILED)
-                        }
-                        break
-                    } catch (_: Exception) {
-                        if (config.planningSettings() == settings) {
-                            syncFailed = true
-                            updatePlanningSync(target, SyncPhase.FAILED)
-                        }
-                    }
-                }
+                if (!writing) repository.sync()
                 delay(15000)
             }
         }
-        fun write(operation: suspend (RecordSandbox) -> Pair<RecordSandboxView, Boolean>) {
-            val selected = session ?: return
-            if (busy || config.planningSettings() != settings) return
-            busy = true
+        fun write(operation: suspend () -> Pair<RecordSandboxView, Boolean>) {
+            if (writing || config.planningSettings() != settings) return
+            writing = true
             status = ""
             scope.launch {
                 try {
-                    if (config.planningSettings() == settings) {
-                        val (result, saved) = operation(selected)
-                        if (config.planningSettings() != settings) return@launch
-                        state = result
-                        if (saved) {
-                            afterSave?.invoke()
-                        }
-                        afterSave = null
-                        if (connectedCloud && state?.preview?.journal?.pending?.isNotEmpty() == true) {
-                            updatePlanningSync(target, SyncPhase.RUNNING)
-                        }
-                    }
+                    val (_, saved) = operation()
+                    if (config.planningSettings() != settings) return@launch
+                    if (saved) afterSave?.invoke()
+                    afterSave = null
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
                     status = "保存未确认（${error.message}）"
                 } finally {
-                    busy = false
+                    writing = false
                 }
             }
         }
-        PersonalPlanningState(settings, state?.preview?.view, busy, loadError, syncFailed, status, actionDate,
+        PersonalPlanningState(settings, current?.data?.preview?.view, writing || current?.loading == true,
+            current?.loadError != null, current?.phase == SyncPhase.FAILED, status, actionDate,
             change = { action, onSaved ->
-                val revision = state?.revision
-                if (!busy && revision != null) {
+                if (!writing && current?.data != null) {
                     actionDate = action["date"]?.jsonPrimitive?.content
                     afterSave = onSaved
-                    write { it.change(action, revision) to true }
+                    write { repository.change(settings, action, current.data.revision) }
                 }
             },
-            retry = { write { it.retryWithResult() } },
-            reload = { if (loadError) reload++ })
+            retry = { write { repository.retry(settings) } },
+            reload = { viewModel.refreshPlanning() })
     }
 }
 
@@ -313,8 +232,6 @@ internal fun DailyRating(state: PersonalPlanningState, date: LocalDate) {
         OutlinedButton(enabled = !state.busy, onClick = state.retry) { Text("重试保存评分") }
     }
 }
-
-private val planningPreferencesLock = Any()
 
 internal class InsightsNavigation {
     val guards = mutableListOf<(() -> Unit) -> Unit>()

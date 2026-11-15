@@ -136,6 +136,7 @@ header {
 }
 
 .status-indicator {
+  cursor: pointer;
   width: 8px;
   height: 8px;
   border-radius: 50%;

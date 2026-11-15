@@ -192,6 +192,8 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?, requestNavigation
     val collabs by viewModel.collaborations.collectAsState()
     val syncOutcome by viewModel.syncOutcome.collectAsState()
     val planningSync by viewModel.planningSync.collectAsState()
+    val personalSyncRunning by viewModel.personalSyncRunning.collectAsState()
+    val personalSyncCompletedAt by viewModel.personalSyncCompletedAt.collectAsState()
     val showSearchBar by viewModel.showSearchBar.collectAsState()
     var showSourceMenu by remember { mutableStateOf(false) }
 
@@ -200,17 +202,19 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?, requestNavigation
         is TodoViewModel.ActiveSource.Personal -> "personal"
         is TodoViewModel.ActiveSource.Collaboration -> "collaboration:${source.collab.id}:${source.collab.updatedAt}"
     }
-    val isLoading = syncOutcome.target == target && syncOutcome.phase == SyncPhase.RUNNING
+    val isLoading = syncOutcome.target == target && syncOutcome.phase == SyncPhase.RUNNING || !isReadOnly && personalSyncRunning
     val planningPhase = planningSync?.takeIf { !isReadOnly && it.first == viewModel.configManager.personalPlanningTarget() }?.second
     val planningPending = planningPhase == SyncPhase.RUNNING
     val syncFailed = syncOutcome.target == target && syncOutcome.isFailure || planningPhase == SyncPhase.FAILED
     val showProgress = !syncFailed && (isLoading || planningPending)
     var showSuccess by remember(syncOutcome, activeSource) { mutableStateOf(false) }
 
-    LaunchedEffect(syncOutcome, activeSource) {
-        showSuccess = syncOutcome.showsSuccess(target)
+    LaunchedEffect(syncOutcome, activeSource, personalSyncCompletedAt, personalSyncRunning, planningPhase) {
+        val completedAt = if (isReadOnly) syncOutcome.completedAt else personalSyncCompletedAt
+        showSuccess = !isLoading && !syncFailed && !planningPending &&
+            (if (isReadOnly) syncOutcome.showsSuccess(target) else completedAt > 0 && System.currentTimeMillis() - completedAt < 1500)
         if (showSuccess) {
-            delay((syncOutcome.completedAt + 1500 - System.currentTimeMillis()).coerceAtLeast(0))
+            delay((completedAt + 1500 - System.currentTimeMillis()).coerceAtLeast(0))
             showSuccess = false
         }
     }

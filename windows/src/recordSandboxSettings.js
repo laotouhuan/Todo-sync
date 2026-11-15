@@ -18,11 +18,18 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
     let session, state, shownView, shownPlan, busy = false, reportError = false, closeRequested = false, month = false;
     let sourceKey = null, connectedKey, statsPeriod = 'day';
     let config, connectedConfig, cloudActive = false, cloudState = 'syncing', visible = false;
+    let planningStatus = 'idle', planningError = '', retainedLocalPlanning = false;
     const drafts = new Map();
     const listeners = new Set();
-    let loadError = '', ratingDate, weekDraft, opening = false, onWriteSaved;
+    let loadError = '', lastOperationError = '', ratingDate, weekDraft, opening = false, onWriteSaved;
     const isCurrent = () => Boolean(sourceKey && connectedKey === sourceKey && connectedConfig === config);
     const notify = () => listeners.forEach(listener => listener());
+
+    function publishSync(state, message = '') {
+        planningStatus = state;
+        planningError = state === 'error' ? message || planningError || '计划与评分同步失败，请重试' : '';
+        onPlanningSync(state, planningError);
+    }
 
     function element(tag, text, parent) {
         const node = document.createElement(tag);
@@ -48,7 +55,7 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
     function update(next) {
         if (personal && !next.view && state?.view) {
             cloudState = 'error';
-            onPlanningSync('error');
+            publishSync('error', '计划与评分暂不可用，本机已有内容已保留，请重试读取');
             notify();
             return;
         }
@@ -57,11 +64,20 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
             if (next.journal.fault || next.listFailed || next.readFailures?.length || next.uploadFailures?.length) cloudState = 'error';
             else if (next.listFailed !== undefined) cloudState = 'idle';
             if (connectedKey === sourceKey && connectedConfig === config) {
-                onPlanningSync(cloudState === 'idle' && next.journal.pending.length ? 'syncing' : cloudState);
+                let reason = '';
+                if (next.journal.fault) reason = '计划与评分同步已暂停，需要核对数据完整性';
+                else if (next.listFailed) reason = '计划与评分云端目录读取失败，请检查网络或同步配置';
+                else if (next.readFailures?.length) reason = '部分云端计划与评分读取失败，请重试';
+                else if (next.uploadFailures?.length) reason = '部分计划与评分尚未上传，请重试';
+                publishSync(cloudState === 'idle' && next.journal.pending.length ? 'syncing' : cloudState, reason);
             }
         }
         if (personal) {
             loadError = next.view ? '' : '无法读取本机计划与评分';
+            if (!cloudActive && isCurrent()) {
+                if (loadError) publishSync('error', loadError);
+                else if (!retainedLocalPlanning) publishSync('idle');
+            }
             if (loadError && !reportError) report(loadError, 'retry');
             notify();
         }
@@ -261,6 +277,7 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
         form.disabled = true;
         retry.disabled = true;
         reportError = false;
+        lastOperationError = '';
         if (personal) {
             report('');
             if (retrySave && !ratingDate) report('正在保存计划…');
@@ -272,6 +289,7 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
             return true;
         } catch (error) {
             reportError = true;
+            lastOperationError = String(error?.message ?? error);
             report(`操作未确认（${error?.message ?? error}）`, retrySave ? 'retry' : 'error');
             return false;
         } finally {
@@ -326,9 +344,11 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
         }
         if (personal && (key !== sourceKey || connection !== config)) return;
         cloudActive = Boolean(cloud);
+        retainedLocalPlanning = retainedLocal;
         cloudState = 'syncing';
         if (personal && connectedKey === sourceKey && connectedConfig === config) {
-            onPlanningSync(cloudActive ? 'syncing' : retainedLocal ? 'error' : 'idle');
+            publishSync(cloudActive ? 'syncing' : retainedLocal ? 'error' : 'idle', retainedLocal ?
+                '本机已有独立的计划与评分，已保留在本机，尚未接入云端计划同步' : '');
         }
         session = await openRecordSandbox(invoke, cloud?.target ?? target, next => {
             if (!personal || (key === sourceKey && connection === config)) update(next);
@@ -336,9 +356,13 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
             if (personal && (key !== sourceKey || connection !== config)) return;
             if (cloudActive) {
                 cloudState = 'error';
-                if (connectedKey === sourceKey && connectedConfig === config) onPlanningSync('error');
+                if (connectedKey === sourceKey && connectedConfig === config) publishSync('error',
+                    `计划与评分同步失败（${error?.message ?? error}）`);
                 notify();
-            } else if (!reportError) report(`同步未完成（${error?.message ?? error}）`, 'error');
+            } else {
+                publishSync('error', `计划与评分读取失败（${error?.message ?? error}）`);
+                if (!reportError) report(`同步未完成（${error?.message ?? error}）`, 'error');
+            }
         }, cloud ? 15000 : 5000, { localOnly: personal, webDav: cloud?.webDav });
         form.hidden = false;
         if (start) start.hidden = true;
@@ -367,8 +391,8 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
         }).then(() => { if (personal && sourceKey) void refresh(); });
     }
     stop?.addEventListener('click', close);
-    async function refresh() {
-        if (busy || !sourceKey || session || !visible) return;
+    async function refresh(force = false) {
+        if (busy || !sourceKey || session || (!visible && !force)) return;
         const key = sourceKey;
         const connection = config;
         opening = true;
@@ -386,10 +410,10 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
         });
         opening = false;
         if ((!opened || !state?.view) && sourceKey === key && config === connection) {
-            loadError = '无法读取本机计划与评分';
+            loadError = opened ? '无法读取本机计划与评分' : `计划与评分加载失败：${lastOperationError}`;
             report(loadError, 'retry');
             retry.textContent = '重试读取';
-            onPlanningSync('error');
+            publishSync('error', loadError);
         }
         notify();
         if (sourceKey && (sourceKey !== key || config !== connection)) void refresh();
@@ -409,7 +433,7 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
             if (title) title.textContent = period === 'month' ? '月评分' : '周计划与评分';
             if (key !== previousKey || config !== previousConfig) {
                 loadError = '';
-                onPlanningSync('idle');
+                publishSync('idle');
                 notify();
             }
             if (session && (connectedKey !== key || connectedConfig !== config)) {
@@ -425,6 +449,21 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
         const snapshot = () => isCurrent() ? state?.view : undefined;
         return {
             setContext, snapshot,
+            async sync() {
+                if (busy || !sourceKey) return false;
+                // 手动同步覆盖计划与评分，不以统计页是否打开作为前置条件。
+                if (!session) {
+                    await refresh(true);
+                }
+                if (session && isCurrent() && !loadError) {
+                    try {
+                        await session.sync();
+                    } catch {
+                        return false;
+                    }
+                } else return false;
+                return planningStatus === 'idle';
+            },
             subscribe(listener) {
                 listeners.add(listener);
                 return () => listeners.delete(listener);
