@@ -101,7 +101,9 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     data object Settings : Screen("settings", "设置", Icons.Filled.Settings)
 
     companion object {
-        val items = listOf(List, Stats, Settings)
+        // 首次访问子页面时，父类初始化不能提前缓存尚未完成初始化的单例。
+        val items: kotlin.collections.List<Screen>
+            get() = listOf(List, Stats, Settings)
     }
 }
 
