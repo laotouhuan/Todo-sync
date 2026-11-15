@@ -32,7 +32,8 @@ test('列表与编辑入口均遵守子步骤联动偏好', () => {
                 complete_subtasks_with_parent: enabled,
                 complete_parent_with_subtasks: enabled
             } };
-            runInNewContext(branch, { appState, t: task, todo: task, draft: task, allCompleted: true });
+            if (!branch.includes('complete_subtasks_with_parent')) task.subtasks.forEach(s => { s.completed = true; });
+            runInNewContext(branch, { appState, current: task, t: task, todo: task, draft: task, allCompleted: true });
             if (branch.includes('complete_subtasks_with_parent')) {
                 assert.equal(task.subtasks[1].completed, enabled === true);
                 assert.equal(task.subtasks[0].completed_at, originalTime);
@@ -41,7 +42,8 @@ test('列表与编辑入口均遵守子步骤联动偏好', () => {
                 assert.equal(task.completed, enabled === true);
                 if (enabled) assert.ok(task.completed_at);
                 task.completed = false;
-                runInNewContext(branch, { appState, todo: task, draft: task, allCompleted: false });
+                task.subtasks[1].completed = false;
+                runInNewContext(branch, { appState, current: task, todo: task, draft: task, allCompleted: false });
                 assert.equal(task.completed, false);
             }
         }

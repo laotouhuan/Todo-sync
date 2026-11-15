@@ -1,6 +1,8 @@
 import { mergeSeriesData } from './taskSeries.js';
 import { getISOWeekString, isMonthDate, isWeekDate } from './dateUtils.js';
 import { mergeLearningRecords, normalizeLabel, normalizeLearningData } from './timeTracking.js';
+import { chooseNormalTodo, choosePeriodTodoBase, normalizeNormalTodo, normalizePeriodTodo, todoTimestampMillis } from './normalTodoConflict.js';
+import { chooseReminderSettings, normalizeReminderSettings } from './reminderSettingsConflict.js';
 
 const deepClone = value => structuredClone(value);
 
@@ -46,9 +48,14 @@ export function migrateAndNormalize(todo) {
 export function getWeeklyCompletedCount(todo) {
     if (!todo.completed_dates || !todo.date) return 0;
     return todo.completed_dates.filter(dStr => {
-        const parts = dStr.split('-');
-        if (parts.length !== 3) return false;
-        const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        // 与打卡按日期前缀归组一致，兼容 Z、正负偏移及旧纯日期。
+        const day = dStr.split('T')[0];
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+        const parsed = new Date(day + 'T00:00:00Z');
+        if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== day) return false;
+        const date = new Date(0);
+        date.setFullYear(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate());
+        date.setHours(12, 0, 0, 0);
         return getISOWeekString(date) === todo.date;
     }).length;
 }
@@ -60,51 +67,40 @@ export function getMonthlyCompletedCount(todo) {
 
 export function resolveCheckinConflict(checkinL, checkinC, lTime, cTime) {
     if (checkinL && checkinC) {
-        return checkinL.length >= checkinC.length ? checkinL : checkinC;
+        if (checkinL.length !== checkinC.length) return checkinL.length > checkinC.length ? checkinL : checkinC;
+        const rank = value => { const time = checkinMillis(value); return Number.isFinite(time) ? time : -Infinity; };
+        const left = rank(checkinL), right = rank(checkinC);
+        if (left !== right) return left > right ? checkinL : checkinC;
+        // 同毫秒或双方无法解释的旧表示使用 UTF-16 固定序，不依赖本机角色。
+        return checkinL >= checkinC ? checkinL : checkinC;
     }
     if (checkinL) {
         if (checkinL.length <= 10) return checkinL;
-        return new Date(checkinL).getTime() > cTime ? checkinL : null;
+        return checkinMillis(checkinL) > cTime ? checkinL : null;
     }
     if (checkinC) {
         if (checkinC.length <= 10) return checkinC;
-        return new Date(checkinC).getTime() > lTime ? checkinC : null;
+        return checkinMillis(checkinC) > lTime ? checkinC : null;
     }
     return null;
 }
 
-export function mergeReminderSettings(localData, cloudData) {
-    const ls = localData?.reminder_settings;
-    const cs = cloudData?.reminder_settings;
-    if (!ls && !cs) return { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] };
-    if (!ls) return deepClone(cs);
-    if (!cs) return deepClone(ls);
+function checkinMillis(value) {
+    try { return todoTimestampMillis(value); }
+    catch { return NaN; }
+}
 
-    const lSettingsTime = Date.parse(ls.updated_at || '');
-    const cSettingsTime = Date.parse(cs.updated_at || '');
-    const hasLocalSettingsTime = Number.isFinite(lSettingsTime);
-    const hasCloudSettingsTime = Number.isFinite(cSettingsTime);
-
-    // 新格式仅比较提醒设置自己的时间戳，普通待办的 last_updated 不参与判断。
-    if (hasLocalSettingsTime || hasCloudSettingsTime) {
-        if (!hasLocalSettingsTime) return deepClone(cs);
-        if (!hasCloudSettingsTime) return deepClone(ls);
-        return deepClone(cSettingsTime > lSettingsTime ? cs : ls);
+function normalizeCheckinDates(dates) {
+    const days = new Map();
+    for (const date of dates) {
+        const day = date.split('T')[0];
+        days.set(day, days.has(day) ? resolveCheckinConflict(days.get(day), date, 0, 0) : date);
     }
+    return [...days.values()].sort();
+}
 
-    // 兼容旧数据：空规则与非空规则冲突时优先保住非空规则。
-    if (stableSerialize(ls) === stableSerialize(cs)) return deepClone(ls);
-    const localRules = Array.isArray(ls.global_rules) ? ls.global_rules : [];
-    const cloudRules = Array.isArray(cs.global_rules) ? cs.global_rules : [];
-    if (localRules.length > 0 && cloudRules.length === 0) return deepClone(ls);
-    if (cloudRules.length > 0 && localRules.length === 0) return deepClone(cs);
-
-    // 两端旧配置均非空且不同，只能回退旧版文件时间。
-    const lDataTime = Date.parse(localData?.last_updated || '');
-    const cDataTime = Date.parse(cloudData?.last_updated || '');
-    return deepClone(
-        Number.isFinite(cDataTime) && (!Number.isFinite(lDataTime) || cDataTime > lDataTime) ? cs : ls
-    );
+export function mergeReminderSettings(localData, cloudData) {
+    return chooseReminderSettings(localData, cloudData);
 }
 
 function todoDataContentSnapshot(data) {
@@ -129,7 +125,7 @@ function canonicalizeForComparison(value) {
         return value.map(canonicalizeForComparison);
     }
     if (value && typeof value === 'object') {
-        const result = {};
+        const result = Object.create(null);
         Object.keys(value).sort().forEach(key => {
             result[key] = canonicalizeForComparison(value[key]);
         });
@@ -146,12 +142,41 @@ export function hasTodoDataContentChanges(first, second) {
     return stableSerialize(todoDataContentSnapshot(first)) !== stableSerialize(todoDataContentSnapshot(second));
 }
 
+function normalizeTodoList(todos) {
+    const byId = new Map();
+    for (const raw of todos) {
+        const migrated = migrateAndNormalize(raw);
+        let todo = migrated;
+        if (migrated.task_type === 'normal') todo = normalizeNormalTodo(migrated);
+        else if (isPeriodTodo(migrated)) todo = normalizePeriodTodo(migrated);
+        if (isPeriodTodo(todo)) {
+            todo.completed_dates = normalizeCheckinDates(todo.completed_dates || []);
+        }
+        const previous = byId.get(todo.id);
+        // 同类重复 ID 使用与跨端一致的基础版本选择，混合类型保持旧行为。
+        if (previous?.task_type === 'normal' && todo.task_type === 'normal') byId.set(todo.id, chooseNormalTodo(previous, todo));
+        else if (previous && isPeriodTodo(previous) && isPeriodTodo(todo)) byId.set(todo.id, choosePeriodTodoBase(previous, todo));
+        else byId.set(todo.id, todo);
+    }
+    return [...byId.values()];
+}
+
+function isPeriodTodo(todo) {
+    return todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin';
+}
+
 export function mergeTodoData(localData, cloudData) {
-    if (localData) normalizeLearningData(localData);
-    if (cloudData) normalizeLearningData(cloudData);
+    if (localData) {
+        normalizeLearningData(localData);
+        localData.reminder_settings = normalizeReminderSettings(localData.reminder_settings);
+    }
+    if (cloudData) {
+        normalizeLearningData(cloudData);
+        cloudData.reminder_settings = normalizeReminderSettings(cloudData.reminder_settings);
+    }
     if (!localData || !localData.todos) {
         if (cloudData && cloudData.todos) {
-            cloudData.todos.forEach(migrateAndNormalize);
+            cloudData.todos = normalizeTodoList(cloudData.todos);
         }
         const data = cloudData || { version: 1, last_updated: new Date().toISOString(), todos: [] };
         if (!data.reminder_settings) {
@@ -160,15 +185,15 @@ export function mergeTodoData(localData, cloudData) {
         return { data, changed: true };
     }
     if (!cloudData || !cloudData.todos) {
-        localData.todos.forEach(migrateAndNormalize);
+        localData.todos = normalizeTodoList(localData.todos);
         if (!localData.reminder_settings) {
             localData.reminder_settings = { updated_at: null, enabled: true, privacy_mode: false, global_rules: [] };
         }
         return { data: localData, changed: false };
     }
 
-    localData.todos.forEach(migrateAndNormalize);
-    cloudData.todos.forEach(migrateAndNormalize);
+    localData.todos = normalizeTodoList(localData.todos);
+    cloudData.todos = normalizeTodoList(cloudData.todos);
 
     const localMap = new Map(localData.todos.map(t => [t.id, t]));
     const cloudMap = new Map(cloudData.todos.map(t => [t.id, t]));
@@ -178,18 +203,23 @@ export function mergeTodoData(localData, cloudData) {
     for (const [id, lTodo] of localMap) {
         const cTodo = cloudMap.get(id);
         if (cTodo) {
-            const lTime = new Date(lTodo.updated_at || lTodo.created_at || 0).getTime();
-            const cTime = new Date(cTodo.updated_at || cTodo.created_at || 0).getTime();
+            if (lTodo.task_type === 'normal' && cTodo.task_type === 'normal') {
+                // 普通任务选整条，不再拼接日期或生成新的任务更新时间。
+                mergedTodos.push(deepClone(chooseNormalTodo(lTodo, cTodo)));
+                continue;
+            }
             let merged;
-            if (cTime > lTime) {
-                merged = deepClone(cTodo);
-                changed = true;
+            if (isPeriodTodo(lTodo) && isPeriodTodo(cTodo)) {
+                merged = deepClone(choosePeriodTodoBase(lTodo, cTodo));
             } else {
-                merged = deepClone(lTodo);
+                const lTime = new Date(lTodo.updated_at || lTodo.created_at || 0).getTime();
+                const cTime = new Date(cTodo.updated_at || cTodo.created_at || 0).getTime();
+                merged = deepClone(cTime > lTime ? cTodo : lTodo);
+                if (cTime > lTime) changed = true;
             }
             // completed_dates 智能合并：支持销卡（删除打卡）同步与离线补卡合并
-            const lDates = lTodo.completed_dates || [];
-            const cDates = cTodo.completed_dates || [];
+            const lDates = normalizeCheckinDates(lTodo.completed_dates || []);
+            const cDates = normalizeCheckinDates(cTodo.completed_dates || []);
             const allDateParts = [...new Set([
                 ...lDates.map(d => d.split('T')[0]),
                 ...cDates.map(d => d.split('T')[0])
@@ -197,9 +227,11 @@ export function mergeTodoData(localData, cloudData) {
 
             const mergedDates = [];
             allDateParts.forEach(datePart => {
-                const checkinL = lDates.find(d => d.startsWith(datePart));
-                const checkinC = cDates.find(d => d.startsWith(datePart));
-                const resolved = resolveCheckinConflict(checkinL, checkinC, lTime, cTime);
+                const checkinL = lDates.find(d => d.split('T')[0] === datePart);
+                const checkinC = cDates.find(d => d.split('T')[0] === datePart);
+                const resolved = resolveCheckinConflict(checkinL, checkinC,
+                    checkinMillis(lTodo.updated_at ?? lTodo.created_at ?? ''),
+                    checkinMillis(cTodo.updated_at ?? cTodo.created_at ?? ''));
                 if (resolved) {
                     mergedDates.push(resolved);
                 }

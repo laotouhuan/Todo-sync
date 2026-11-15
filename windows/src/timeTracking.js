@@ -54,14 +54,27 @@ export function recentTimingTasks(todos, entries, data = { todos }) {
         const start = timingTimestamp(entry.started_at), end = timingTimestamp(entry.ended_at);
         if (!todo || !Number.isFinite(start) || !Number.isFinite(end) || end - start <= 30000) continue;
         const previous = latest.get(todo.id);
-        if (!previous || start > previous.time) latest.set(todo.id, { todo, startedAt: entry.started_at, time: start });
+        if (!previous || start > previous.time) latest.set(todo.id, { todo, startedAt: entry.started_at, endedAt: entry.ended_at, time: start });
     }
     return [...latest.values()].sort((a, b) => {
         if (a.time !== b.time) return b.time - a.time;
         if (a.todo.id === b.todo.id) return 0;
         return a.todo.id < b.todo.id ? -1 : 1;
     })
-        .slice(0, 5).map(({ todo, startedAt }) => ({ todo, startedAt }));
+        .slice(0, 5).map(({ todo, startedAt, endedAt }) => ({ todo, startedAt, endedAt }));
+}
+
+export function lastTimedText(endedAt, now = new Date()) {
+    const end = new Date(endedAt);
+    const elapsed = now.getTime() - end.getTime();
+    if (localDay(end) === localDay(now) && elapsed >= 0) {
+        const minutes = Math.floor(elapsed / 60000);
+        if (minutes === 0) return '上次结束：刚刚';
+        const hours = Math.floor(minutes / 60);
+        return `上次结束：${hours ? `${hours}小时` : ''}${minutes % 60 || !hours ? `${minutes % 60}分钟` : ''}前`;
+    }
+    const pad = value => String(value).padStart(2, '0');
+    return `上次结束：${localDay(end)} ${pad(end.getHours())}:${pad(end.getMinutes())}`;
 }
 
 export function createRunningTimeEntry(data, todoId, now = new Date().toISOString()) {

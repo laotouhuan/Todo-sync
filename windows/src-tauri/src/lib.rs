@@ -1,4 +1,8 @@
 mod todo_store;
+pub mod record_journal;
+mod record_recovery;
+mod record_folder;
+mod record_webdav;
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -246,6 +250,19 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            record_recovery::preview_record_recovery,
+            record_recovery::open_personal_planning_target,
+            record_folder::prepare_record_sandbox_folder,
+            record_recovery::prepare_record_recovery_commit,
+            record_recovery::commit_record_recovery,
+            record_recovery::export_record_fault_evidence,
+            record_folder::list_record_folder,
+            record_folder::read_record_folder,
+            record_folder::write_record_folder,
+            record_webdav::request_record_webdav,
+            record_webdav::initialize_planning_webdav,
+            todo_store::read_personal_target,
+            todo_store::activate_personal_target,
             get_app_version,
             start_drag,
             set_always_on_top,

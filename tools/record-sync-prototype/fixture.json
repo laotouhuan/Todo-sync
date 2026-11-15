@@ -1,0 +1,86 @@
+{
+  "protocol": 1,
+  "dataset_id": "7dd247a0-d621-47e0-9a65-0b7cc65c2325",
+  "data": {
+    "version": 1,
+    "last_updated": "2026-11-02T00:00:00.000Z",
+    "todos": [
+      {
+        "id": "10000000-0000-4000-8000-000000000001",
+        "content": "原型预置任务",
+        "date": "2026-11-02",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-02T00:00:00.000Z",
+        "updated_at": "2026-11-02T00:00:00.000Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "normal",
+        "completed_dates": [],
+        "target_count": null,
+        "label": null,
+        "reminder": null,
+        "subtasks": []
+      }
+    ],
+    "reminder_settings": {
+      "updated_at": null,
+      "enabled": true,
+      "privacy_mode": false,
+      "global_rules": []
+    },
+    "time_entries": [],
+    "daily_reviews": [
+      {
+        "id": "20000000-0000-4000-8000-000000000001",
+        "date": "2026-11-02",
+        "created_at": "2026-11-02T00:00:00.000Z",
+        "updated_at": "2026-11-02T00:00:00.000Z",
+        "deleted": false,
+        "fact": "原型预置复盘",
+        "obstacle": "",
+        "effective_action": "",
+        "next_step": ""
+      }
+    ],
+    "task_series": [],
+    "task_series_links": [],
+    "weekly_plan_versions": [
+      {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "week_start": "2026-11-02",
+        "base_version_id": null,
+        "days": ["原型预置周一安排", "", "", "", "", "", ""],
+        "change_reason": "",
+        "created_at": "2026-11-02T00:00:00.000Z",
+        "updated_at": "2026-11-02T00:00:00.000Z",
+        "deleted": false,
+        "deleted_at": null
+      }
+    ],
+    "weekly_plan_selections": [
+      {
+        "id": "40000000-0000-4000-8000-000000000001",
+        "week_start": "2026-11-02",
+        "version_id": "30000000-0000-4000-8000-000000000001",
+        "parent_selection_ids": [],
+        "kind": "save",
+        "created_at": "2026-11-02T00:00:00.000Z",
+        "updated_at": "2026-11-02T00:00:00.000Z"
+      }
+    ],
+    "daily_ratings": [
+      {
+        "id": "50000000-0000-4000-8000-000000000001",
+        "date": "2026-11-02",
+        "score": 3,
+        "created_at": "2026-11-02T00:00:00.000Z",
+        "updated_at": "2026-11-02T00:00:00.000Z",
+        "deleted": false
+      }
+    ],
+    "prototype_extension": { "preserved": true }
+  }
+}

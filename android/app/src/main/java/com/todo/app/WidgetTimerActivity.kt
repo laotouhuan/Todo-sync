@@ -119,7 +119,7 @@ class WidgetTimerActivity : ComponentActivity() {
                                                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                                                     Column(Modifier.fillMaxWidth()) {
                                                         Text(candidate.todo.content)
-                                                        Text(Learning.lastTimedText(candidate.startedAt), style = MaterialTheme.typography.bodySmall)
+                                                        Text(Learning.lastTimedText(candidate.endedAt), style = MaterialTheme.typography.bodySmall)
                                                     }
                                                 }
                                             }

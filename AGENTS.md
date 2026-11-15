@@ -198,15 +198,17 @@ to-do list/
 
 | 数据类别 | 当前合并规则 |
 |----------|-------------|
-| **待办基础字段** | 按 `id` 合并，选择 `updated_at` 较新的版本；旧记录缺失该字段时使用 `created_at`（Windows 回退，Android 模型默认值）。有效时间相同时保留本地版本；仅一端存在的任务直接纳入。任务结果按 `created_at` 降序排列 |
-| **打卡记录 `completed_dates`** | 在基础字段之外单独按日期前缀归并：同一天双方都有记录时保留较长的记录（等长取本地）；单边的纯日期记录保留，单边带时间记录仅在其时间晚于另一端任务更新时间时保留。此规则同时处理补卡与销卡，不能简单取并集。随后重新计算周/月任务是否达到 `target_count` |
+| **普通待办** | 迁移后双方均为 `normal` 时按 `id` 选择整条：缺少 `updated_at` 时回退 `created_at`，比较实际 epoch 毫秒；同毫秒按归一业务内容的固定 UTF-16 编码取较大者，业务相同再以完整规范 JSON 的 SHA-256 决胜。保留未知扩展及数组顺序；同侧重复普通 ID 使用相同规则。完整规范及边界见 [ADR-0003](docs/adr/0003-normal-todo-deterministic-whole-record.md) |
+| **周期任务基础字段** | 双方均为周／月任务时，按实际 epoch 毫秒选择较新整条基础版本，同毫秒沿普通任务的归一业务固定键及完整候选摘要决胜；同侧重复周期 ID 使用同样规则，日期仍另行归并。规范及兼容边界见 [ADR-0005](docs/adr/0005-period-base-deterministic-whole-record.md) |
+| **普通／周期混合类型** | 仅一侧是周期任务时继续原基础版本选择与额外打卡路径；结果保持既有 `created_at` 降序排列，外层数组顺序不在固定决胜规范内 |
+| **打卡记录 `completed_dates`** | 按 `T` 前日期精确分组：同日较长记录优先，等长取实际 epoch 毫秒较晚者，同毫秒以 UTF-16 字符串序决胜；同侧去重用相同规则。单边纯日期保留，带时间记录须严格晚于对端任务更新时间（毫秒）才保留，随后重算目标次数与完成状态。不是简单取并集，完整边界见 [ADR-0004](docs/adr/0004-checkin-millisecond-deterministic-ties.md) |
 | **任务系列与关联** | 系列名称独立合并：明确改名优先于初始化，再比 `content_updated_at`；系列删除单调保留，独立于名称。关联按 `todo_id` 合并，同时间解除标记优先，`next_series_id` 保留解除后的新身份 |
-| **全局提醒设置** | 使用 `reminder_settings.updated_at` 选择整份设置；有独立有效时间戳的一端优先。双方都缺少有效时间戳的旧数据优先保留非空规则，否则回退到文件 `last_updated` 比较 |
+| **全局提醒设置** | 整份选择：独立 `updated_at` 实际毫秒优先；均无有效独立时间时先保留单侧非空规则，再回退文件 `last_updated` 毫秒。平局按归一业务固定键及完整候选摘要决胜；保留规则顺序、未知扩展和原时钟。见 [ADR-0006](docs/adr/0006-reminder-settings-deterministic-ties.md) |
 | **计时记录** | `time_entries` 按记录 `id` 合并，选择更新时间较新的整条记录 |
 | **每日复盘** | `daily_reviews` 按 `date` 合并，即使记录 ID 不同，同一天也只保留更新时间较新的整篇复盘；不逐字段拼接 |
 | **协作源配置** | `collaborations.json` 的配置按 `id` 和 `updated_at` 合并，保留删除标记；独立于个人待办数据合并 |
 
-计时与复盘在更新时间相同时优先保留 `deleted: true` 的记录；删除状态也相同时按规范化内容排序确定结果，保证交换合并方向及重复同步时结果稳定。这一规则不能直接套用到普通待办的同时间戳处理上。
+计时与复盘在更新时间相同时优先保留 `deleted: true` 的记录；删除状态也相同时按规范化内容排序确定结果。普通待办没有额外删除优先位，按整条业务内容固定序决胜；周／月打卡的额外规则仍独立处理。
 
 **实现入口**：Windows 为 `src/dataMerge.js` 的 `mergeTodoData()`、`mergeReminderSettings()`、`resolveCheckinConflict()`，`src/main.js` 的 `mergeCollaborations()`，以及 `src/timeTracking.js` 的 `mergeLearningRecords()`；Android 为 `data/model/MergeUtils.kt`、`data/model/Learning.kt` 与 `data/model/TaskSeries.kt`，协作源配置合并在 `data/repository/TodoRepository.kt`。
 

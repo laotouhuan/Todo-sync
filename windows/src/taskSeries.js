@@ -165,15 +165,20 @@ export function importCandidates(data, type, now = new Date()) {
 }
 
 export function importPeriods(original, references, target, now = new Date().toISOString(), generate = uuid) {
+    return importPeriodsAt(original, references, target, now, generate, type => currentPeriod(type, new Date(now)));
+}
+
+// 周期由调用者的日历确定；重放可用记录中的固定日期和身份。
+export function importPeriodsAt(original, references, target, now, generate, periodAtAction) {
     const data = normalizeSeriesData(structuredClone(original)), used = new Set();
     for (const [index, reference] of references.entries()) {
         const source = data.todos.find(t => t.id === reference.id);
         if (!source || source.deleted || !same(source, reference) || !periodType(source) || !periodRange(source.date)
-            || target !== currentPeriod(periodType(source), new Date(now)) || source.date >= target) throw new Error('参考任务或周期已变化，请重新选择');
+            || target !== periodAtAction(periodType(source)) || source.date >= target) throw new Error('参考任务或周期已变化，请重新选择');
         const id = identity(data, source, now, generate), series = ensureSeries(data, source, id, now);
         if (used.has(id) || periodMembers(data, id, target).length || periodMembers(data, id, source.date).length > 1) throw new Error('本期已存在或参考期重复，请重新选择');
         used.add(id); setLink(data, source, id, now);
-        const todo = { ...createTodo(series.content, target), id: generate(), task_type: source.task_type, time: source.time ?? null,
+        const todo = { ...createTodo(series.content, target, [], { id: generate(), at: now }), task_type: source.task_type, time: source.time ?? null,
             label: source.label ?? null, target_count: source.target_count ?? null, reminder: null,
             subtasks: (source.subtasks || []).map(s => ({ ...s, id: generate(), completed: false, completed_at: null })),
             created_at: now, updated_at: now, order: Date.parse(now) + index * 1000 };

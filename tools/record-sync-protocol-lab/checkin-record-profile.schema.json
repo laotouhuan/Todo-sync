@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "周期打卡独立记录实验操作",
+  "description": "operation_set 为 lab-personal-checkin/1；打卡动作仅针对固定基线中的有效周期任务。",
+  "oneOf": [
+    { "$ref": "./learning-record-profile.schema.json" },
+    { "$ref": "#/definitions/checkinOperation" }
+  ],
+  "definitions": {
+    "checkinOperation": {
+      "type": "object",
+      "required": ["type", "todo_id", "day", "updated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["checkin.mark", "checkin.clear"] },
+        "todo_id": { "type": "string", "minLength": 1, "description": "固定基线中的周期任务 ID，可为旧身份。" },
+        "day": { "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "updated_at": { "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/updated_at" },
+        "value": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/completed_dates/items"
+        }
+      },
+      "if": { "properties": { "type": { "const": "checkin.mark" } } },
+      "then": { "required": ["value"] },
+      "else": { "not": { "required": ["value"] } }
+    }
+  }
+}

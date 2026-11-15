@@ -127,12 +127,16 @@ fun TodoApp(viewModel: TodoViewModel) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val insightsNavigation = remember { com.todo.app.ui.view.InsightsNavigation() }
+    androidx.activity.compose.BackHandler(enabled = currentRoute == Screen.Stats.route) {
+        insightsNavigation.request { navController.popBackStack() }
+    }
     val discardedShortTimers by viewModel.discardedShortTimers.collectAsState()
 
     Scaffold(
         topBar = {
             Column {
-                AppTopBar(viewModel = viewModel, currentRoute = currentRoute)
+                AppTopBar(viewModel = viewModel, currentRoute = currentRoute, requestNavigation = insightsNavigation::request)
                 com.todo.app.ui.view.CollaborationSubmissionBanner(viewModel)
                 com.todo.app.ui.view.LearningBanner(viewModel)
             }
@@ -148,12 +152,14 @@ fun TodoApp(viewModel: TodoViewModel) {
                         label = { Text(screen.title) },
                         selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
                         onClick = {
-                            navController.navigate(screen.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+                            insightsNavigation.request {
+                                navController.navigate(screen.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
                             }
                         }
                     )
@@ -163,7 +169,7 @@ fun TodoApp(viewModel: TodoViewModel) {
     ) { innerPadding ->
         NavHost(navController, startDestination = Screen.List.route, Modifier.padding(innerPadding)) {
             composable(Screen.List.route) { ListView(viewModel) }
-            composable(Screen.Stats.route) { StatsView(viewModel) }
+            composable(Screen.Stats.route) { StatsView(viewModel, insightsNavigation) }
             composable(Screen.Settings.route) { SettingsView(viewModel) }
         }
     }
@@ -179,10 +185,11 @@ fun TodoApp(viewModel: TodoViewModel) {
 }
 
 @Composable
-fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?) {
+fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?, requestNavigation: (() -> Unit) -> Unit = { it() }) {
     val activeSource by viewModel.activeSource.collectAsState()
     val collabs by viewModel.collaborations.collectAsState()
     val syncOutcome by viewModel.syncOutcome.collectAsState()
+    val planningSync by viewModel.planningSync.collectAsState()
     val showSearchBar by viewModel.showSearchBar.collectAsState()
     var showSourceMenu by remember { mutableStateOf(false) }
 
@@ -192,7 +199,10 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?) {
         is TodoViewModel.ActiveSource.Collaboration -> "collaboration:${source.collab.id}:${source.collab.updatedAt}"
     }
     val isLoading = syncOutcome.target == target && syncOutcome.phase == SyncPhase.RUNNING
-    val syncFailed = syncOutcome.target == target && syncOutcome.isFailure
+    val planningPhase = planningSync?.takeIf { !isReadOnly && it.first == viewModel.configManager.personalPlanningTarget() }?.second
+    val planningPending = planningPhase == SyncPhase.RUNNING
+    val syncFailed = syncOutcome.target == target && syncOutcome.isFailure || planningPhase == SyncPhase.FAILED
+    val showProgress = !syncFailed && (isLoading || planningPending)
     var showSuccess by remember(syncOutcome, activeSource) { mutableStateOf(false) }
 
     LaunchedEffect(syncOutcome, activeSource) {
@@ -265,16 +275,16 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?) {
                     DropdownMenuItem(
                         text = { Text("我的待办") },
                         onClick = {
-                            viewModel.switchToPersonal()
                             showSourceMenu = false
+                            requestNavigation { viewModel.switchToPersonal() }
                         }
                     )
                     collabs.forEach { collab ->
                         DropdownMenuItem(
                             text = { Text(collab.name) },
                             onClick = {
-                                viewModel.switchToCollaboration(collab)
                                 showSourceMenu = false
+                                requestNavigation { viewModel.switchToCollaboration(collab) }
                             }
                         )
                     }
@@ -283,6 +293,7 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?) {
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
+            com.todo.app.ui.view.LearningStartButton(viewModel)
             // Show Search toggle button ONLY on List screen
             if (currentRoute == "list") {
                 IconButton(onClick = {
@@ -299,7 +310,7 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?) {
                 style = MaterialTheme.typography.bodySmall)
             IconButton(
                 onClick = {
-                    if (showSuccess) return@IconButton
+                    if (showSuccess && !syncFailed && !planningPending) return@IconButton
                     val source = activeSource
                     if (source is TodoViewModel.ActiveSource.Collaboration) {
                         viewModel.loadCollabData(source.collab)
@@ -309,17 +320,17 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?) {
                 },
                 enabled = !isLoading
             ) {
-                if (isLoading) {
+                if (showProgress) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                } else if (syncFailed) {
+                    Icon(Icons.Filled.Warning, contentDescription = "${syncOutcome.error?.message ?: "同步失败"}，点击重试",
+                        tint = MaterialTheme.colorScheme.error)
                 } else if (showSuccess) {
                     Icon(
                         imageVector = Icons.Filled.Check,
                         contentDescription = "同步成功",
                         tint = androidx.compose.ui.graphics.Color(0xFF10B981)
                     )
-                } else if (syncFailed) {
-                    Icon(Icons.Filled.Warning, contentDescription = "${syncOutcome.error?.message}，点击重试",
-                        tint = MaterialTheme.colorScheme.error)
                 } else {
                     Icon(
                         imageVector = Icons.Filled.Refresh,

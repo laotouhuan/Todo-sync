@@ -11,6 +11,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -108,6 +110,20 @@ fun LearningTimer(todo: Todo, viewModel: TodoViewModel) {
 }
 
 @Composable
+fun LearningStartButton(viewModel: TodoViewModel) {
+    val learning = currentLearningData(viewModel)
+    val source by viewModel.activeSource.collectAsState()
+    val enabled by viewModel.timeTrackingEnabled.collectAsState()
+    if (!enabled || learning.readOnly || learning.data.timeEntries.any { !it.deleted && it.ended_at == null }) return
+    var chooseTask by remember(source) { mutableStateOf(false) }
+
+    IconButton(onClick = { chooseTask = true }) {
+        Icon(Icons.Filled.PlayArrow, contentDescription = "开始计时", tint = MaterialTheme.colorScheme.primary)
+    }
+    if (chooseTask) LearningTaskPicker(viewModel, onDismiss = { chooseTask = false })
+}
+
+@Composable
 fun LearningBanner(viewModel: TodoViewModel) {
     val learning = currentLearningData(viewModel)
     val source by viewModel.activeSource.collectAsState()
@@ -117,40 +133,34 @@ fun LearningBanner(viewModel: TodoViewModel) {
     val data = learning.data
     val active = data.timeEntries.filter { !it.deleted && it.ended_at == null }
     var show by remember(source) { mutableStateOf(false) }
-    var chooseTask by remember(source) { mutableStateOf(false) }
     var busy by remember(source) { mutableStateOf(false) }
     val scope = rememberCoroutineScope(); val context = LocalContext.current
     LaunchedEffect(active.map { it.id }.sorted()) { if (!learning.readOnly && active.size > 1) show = true }
-    if (active.isNotEmpty() || !learning.readOnly) {
+    if (active.isNotEmpty()) {
         Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (active.isEmpty()) {
-                    TextButton(onClick = { chooseTask = true }) { Text("开始计时") }
-                } else {
-                    Text(if (active.size > 1) "${active.size} 条计时待处理" else learning.display(active.first()),
-                        Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
-                    if (active.size == 1) {
-                        if (learning.pending(active.first()) == null) LearningClock(active.first()) else Text(learning.pending(active.first()).orEmpty(), fontSize = 11.sp)
-                        if (!learning.readOnly && learning.pending(active.first()) == null) TextButton(enabled = !busy, onClick = click@ {
-                            if (viewModel.activeSource.value != source) return@click
-                            val id = active.first().id
-                            busy = true
-                            scope.launch {
-                                try {
-                                    viewModel.stopLearning(id, source).exceptionOrNull()?.let {
-                                        Toast.makeText(context, it.message, Toast.LENGTH_LONG).show()
-                                    }
-                                } finally { busy = false }
-                            }
-                        }) { Text("结束") }
-                    }
-                    TextButton(onClick = { show = true }) { Text(if (learning.readOnly) "查看记录" else if (active.size > 1) "处理" else "记录") }
+                Text(if (active.size > 1) "${active.size} 条计时待处理" else learning.display(active.first()),
+                    Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
+                if (active.size == 1) {
+                    if (learning.pending(active.first()) == null) LearningClock(active.first()) else Text(learning.pending(active.first()).orEmpty(), fontSize = 11.sp)
+                    if (!learning.readOnly && learning.pending(active.first()) == null) TextButton(enabled = !busy, onClick = click@ {
+                        if (viewModel.activeSource.value != source) return@click
+                        val id = active.first().id
+                        busy = true
+                        scope.launch {
+                            try {
+                                viewModel.stopLearning(id, source).exceptionOrNull()?.let {
+                                    Toast.makeText(context, it.message, Toast.LENGTH_LONG).show()
+                                }
+                            } finally { busy = false }
+                        }
+                    }) { Text("结束") }
                 }
+                TextButton(onClick = { show = true }) { Text(if (learning.readOnly) "查看记录" else if (active.size > 1) "处理" else "记录") }
             }
         }
     }
     if (show) LearningRecordsDialog(viewModel, active.map { it.id }, onDismiss = { show = false })
-    if (chooseTask) LearningTaskPicker(viewModel, onDismiss = { chooseTask = false })
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -202,7 +212,7 @@ private fun LearningTaskPicker(viewModel: TodoViewModel, onDismiss: () -> Unit) 
                         Column(Modifier.fillMaxWidth()) {
                             Text(todo.content)
                             if (!other) recent.find { it.todo.id == todo.id }?.let {
-                                Text(Learning.lastTimedText(it.startedAt), style = MaterialTheme.typography.bodySmall)
+                                Text(Learning.lastTimedText(it.endedAt), style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -349,7 +359,10 @@ internal fun TimeEntryEditor(entry: TimeEntry, viewModel: TodoViewModel, onDismi
 }
 
 @Composable
-fun LearningInsights(viewModel: TodoViewModel, period: String, targetDate: LocalDate) {
+internal fun LearningInsights(
+    viewModel: TodoViewModel, period: String, targetDate: LocalDate,
+    planning: PersonalPlanningState?, navigation: InsightsNavigation, openWeek: (LocalDate) -> Unit
+) {
     val learning = currentLearningData(viewModel)
     val personalTimingEnabled by viewModel.timeTrackingEnabled.collectAsState()
     val timingEnabled = personalTimingEnabled || learning.readOnly
@@ -387,8 +400,15 @@ fun LearningInsights(viewModel: TodoViewModel, period: String, targetDate: Local
     }
     Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         Column(Modifier.padding(14.dp)) {
-            Text(if (learning.readOnly) "每日复盘" else "我的复盘", style = MaterialTheme.typography.titleMedium)
+            val daily = period == "day" && planning != null && !learning.readOnly
+            Text(if (daily) "每日回顾" else if (learning.readOnly) "每日复盘" else "我的复盘", style = MaterialTheme.typography.titleMedium)
             TextButton(onClick = { showExport = true }) { Text("导出 Markdown") }
+            if (period == "day" && planning != null && !learning.readOnly) {
+                DailyPlanReference(planning, targetDate) { openWeek(targetDate) }
+                DailyRating(planning, targetDate)
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Text("复盘", style = MaterialTheme.typography.labelLarge)
+            }
             val reviews = data.dailyReviews.filter { !it.deleted && it.date >= start.toString() && it.date < end.toString() }.sortedByDescending { it.date }
             if (period == "day") {
                 reviews.firstOrNull()?.let { review -> Learning.fields(review).forEach { (name, value) ->
@@ -405,14 +425,20 @@ fun LearningInsights(viewModel: TodoViewModel, period: String, targetDate: Local
         }
     }
     recordIds?.let { LearningRecordsDialog(viewModel, it) { recordIds = null } }
-    reviewDate?.let { date -> DailyReviewDialog(viewModel, date) { reviewDate = null } }
-    if (showExport) ReviewExportDialog(viewModel, data, period, targetDate) { showExport = false }
+    reviewDate?.let { date -> DailyReviewDialog(viewModel, date, planning, navigation) { reviewDate = null } }
+    if (showExport) ReviewExportDialog(viewModel, data, period, targetDate, planning) { showExport = false }
 }
 
 @Composable
-private fun DailyReviewDialog(viewModel: TodoViewModel, date: String, onDismiss: () -> Unit) {
+private fun DailyReviewDialog(
+    viewModel: TodoViewModel, date: String, planning: PersonalPlanningState?, navigation: InsightsNavigation,
+    onDismiss: () -> Unit
+) {
     val source = remember { viewModel.activeSource.value }
     val currentSource by viewModel.activeSource.collectAsState()
+    val target = remember { planning?.target }
+    var targetChanged by remember { mutableStateOf(false) }
+    LaunchedEffect(planning?.target) { if (planning?.target != target) targetChanged = true }
     LaunchedEffect(currentSource) { if (currentSource != source) onDismiss() }
     val learning = currentLearningData(viewModel)
     val data = learning.data
@@ -426,49 +452,64 @@ private fun DailyReviewDialog(viewModel: TodoViewModel, date: String, onDismiss:
     var leave by remember { mutableStateOf(false) }; var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }; var exporting by remember { mutableStateOf(false) }
     var exportChoice by remember { mutableStateOf(false) }
+    var nextNavigation by remember { mutableStateOf<(() -> Unit)?>(null) }
     val dirty = editing && listOf(fact, obstacle, action, next) != baseline
     val scope = rememberCoroutineScope()
     fun reset() { fact = saved?.fact ?: ""; obstacle = saved?.obstacle ?: ""; action = saved?.effective_action ?: ""; next = saved?.next_step ?: ""; baseline = listOf(fact, obstacle, action, next) }
+    fun dismiss() {
+        onDismiss()
+        nextNavigation?.invoke()
+        nextNavigation = null
+    }
+    fun requestLeave(next: (() -> Unit)? = null) {
+        if (busy || leave) return
+        nextNavigation = next
+        if (dirty) leave = true else dismiss()
+    }
+    RegisterInsightsGuard(navigation, true) { requestLeave(it) }
     fun save(close: Boolean, exportAfter: Boolean = false) {
         if (viewModel.activeSource.value != source) { error = "清单已切换，请重新打开"; return }
+        if (targetChanged || planning?.target != target) { error = "个人清单已切换，请重新打开复盘"; return }
         busy = true
         scope.launch {
             try {
                 val now = nowIso()
                 val result = viewModel.saveDailyReview(DailyReview(saved?.id ?: UUID.randomUUID().toString(), date, saved?.created_at ?: now, now, fact, obstacle, action, next), source)
-                if (result.isSuccess) { baseline = listOf(fact, obstacle, action, next); editing = false; leave = false; exportChoice = false; if (exportAfter) exporting = true; if (close) onDismiss() }
+                if (result.isSuccess) { baseline = listOf(fact, obstacle, action, next); editing = false; leave = false; exportChoice = false; if (exportAfter) exporting = true; if (close) dismiss() }
                 else error = result.exceptionOrNull()?.message ?: "保存失败"
             } finally { busy = false }
         }
     }
-    Dialog(onDismissRequest = { if (!busy) { if (dirty) leave = true else onDismiss() } }) {
+    Dialog(onDismissRequest = { requestLeave() }) {
         Surface(shape = MaterialTheme.shapes.large) {
             Column(Modifier.padding(16.dp).heightIn(max = 620.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("$date · 每日复盘", style = MaterialTheme.typography.titleMedium)
+                if (targetChanged) Text("个人清单已切换，请重新打开复盘", color = MaterialTheme.colorScheme.error)
+                else if (!learning.readOnly && planning != null) DailyPlanReference(planning, LocalDate.parse(date))
                 if (editing) {
                     OutlinedTextField(fact, { fact = it }, label = { Text("事实") }, placeholder = { Text("今天推进了什么？理解、推导、例子、明确卡点都算。") }, enabled = !busy, minLines = 2)
                     OutlinedTextField(obstacle, { obstacle = it }, label = { Text("卡点") }, placeholder = { Text("拖延或中断发生在哪里？当时发生了什么？") }, enabled = !busy, minLines = 2)
                     OutlinedTextField(action, { action = it }, label = { Text("有效动作") }, placeholder = { Text("什么帮助你开始或回到任务？") }, enabled = !busy, minLines = 2)
                     OutlinedTextField(next, { next = it }, label = { Text("下一步") }, placeholder = { Text("明天想保留什么，或只调整什么？") }, enabled = !busy, minLines = 2)
                     if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
-                    Row { TextButton(enabled = !busy, onClick = { save(false) }) { Text("保存") }
-                        TextButton(enabled = !busy, onClick = { reset(); if (saved == null) onDismiss() else editing = false }) { Text("取消") }
+                    Row { TextButton(enabled = !busy && !targetChanged, onClick = { save(false) }) { Text("保存") }
+                        TextButton(enabled = !busy, onClick = { requestLeave() }) { Text("取消") }
                         TextButton(enabled = !busy, onClick = { if (dirty) exportChoice = true else exporting = true }) { Text("导出") } }
                 } else {
                     saved?.let { Learning.fields(it).forEach { (title, value) -> Text(title, style = MaterialTheme.typography.labelLarge); Text(value.ifBlank { "未填写" }) } }
                     Row { if (!learning.readOnly) TextButton(onClick = { reset(); editing = true }) { Text("编辑") }; TextButton(onClick = { exporting = true }) { Text("导出") } }
                 }
-                TextButton(enabled = !busy, onClick = { if (dirty) leave = true else onDismiss() }) { Text("关闭") }
+                TextButton(enabled = !busy, onClick = { requestLeave() }) { Text("关闭") }
             }
         }
     }
-    if (leave) AlertDialog(onDismissRequest = { if (!busy) leave = false }, title = { Text("复盘有未保存的修改") }, text = {
+    if (leave) AlertDialog(onDismissRequest = { if (!busy) { leave = false; nextNavigation = null } }, title = { Text("复盘有未保存的修改") }, text = {
         Column {
-            TextButton(enabled = !busy, onClick = { save(true) }) { Text("保存并离开") }
-            TextButton(enabled = !busy, onClick = { onDismiss() }) { Text("放弃修改") }
+            TextButton(enabled = !busy && !targetChanged, onClick = { save(true) }) { Text("保存并离开") }
+            TextButton(enabled = !busy, onClick = { dismiss() }) { Text("放弃修改") }
             if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
         }
-    }, confirmButton = { TextButton(enabled = !busy, onClick = { leave = false }) { Text("继续编辑") } })
+    }, confirmButton = { TextButton(enabled = !busy, onClick = { leave = false; nextNavigation = null }) { Text("继续编辑") } })
     if (exportChoice) AlertDialog(onDismissRequest = { if (!busy) exportChoice = false }, title = { Text("有未保存的复盘修改") }, text = {
         Column {
             TextButton(enabled = !busy, onClick = { save(false, exportAfter = true) }) { Text("保存后导出") }
@@ -476,20 +517,30 @@ private fun DailyReviewDialog(viewModel: TodoViewModel, date: String, onDismiss:
             if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
         }
     }, confirmButton = { TextButton(enabled = !busy, onClick = { exportChoice = false }) { Text("取消") } })
-    if (exporting) ReviewExportDialog(viewModel, data, "day", LocalDate.parse(date)) { exporting = false }
+    if (exporting && !targetChanged) ReviewExportDialog(viewModel, data, "day", LocalDate.parse(date), planning) { exporting = false }
 }
 
 @Composable
-private fun ReviewExportDialog(viewModel: TodoViewModel, data: TodoData, period: String, date: LocalDate, onDismiss: () -> Unit) {
+private fun ReviewExportDialog(
+    viewModel: TodoViewModel, data: TodoData, period: String, date: LocalDate,
+    planning: PersonalPlanningState?, onDismiss: () -> Unit
+) {
     dismissOnSourceChange(viewModel, onDismiss)
     val learning = currentLearningData(viewModel)
     val personalTimingEnabled by viewModel.timeTrackingEnabled.collectAsState()
     val timingEnabled = personalTimingEnabled || learning.readOnly
     val tasks = learning.tasks
+    val target = remember { planning?.target }
+    LaunchedEffect(planning?.target) { if (planning?.target != target) onDismiss() }
+    var range by rememberSaveable(period) { mutableStateOf(period) }
+    var plans by rememberSaveable { mutableStateOf(false) }
+    var ratings by rememberSaveable { mutableStateOf(false) }
+    var history by rememberSaveable { mutableStateOf(false) }
     var include by remember { mutableStateOf(true) }; var content by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf("") }; var savedUri by rememberSaveable { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }; val context = LocalContext.current; val scope = rememberCoroutineScope()
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri ->
+        if (uri == null) busy = false
         if (uri != null) scope.launch {
             busy = true
             try {
@@ -499,9 +550,21 @@ private fun ReviewExportDialog(viewModel: TodoViewModel, data: TodoData, period:
         }
     }
     AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("导出复盘 Markdown") }, text = {
-        Column {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            if (planning != null && !learning.readOnly) {
+                Row {
+                    for ((value, label) in listOf("day" to "当天", "week" to "本周", "month" to "本月")) {
+                        FilterChip(selected = range == value, onClick = { range = value }, label = { Text(label) },
+                            modifier = Modifier.padding(end = 4.dp), enabled = !busy)
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(plans, { plans = it }); Text("计划") }
+                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(ratings, { ratings = it }); Text("评分") }
+                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(history, { history = it }); Text("计划历史及调整原因") }
+                if ((plans || ratings || history) && planning.loadError) TextButton(onClick = planning.reload) { Text("重试读取计划与评分") }
+            }
             if (timingEnabled) {
-                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(include, { include = it }); Text("附带当日学习时长统计" + if (period == "day") "" else "（逐日）") }
+                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(include, { include = it }); Text("附带当日学习时长统计" + if (range == "day") "" else "（逐日）") }
                 Text("进行中和待核对记录不计入统计。", fontSize = 12.sp)
             }
             if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
@@ -511,7 +574,19 @@ private fun ReviewExportDialog(viewModel: TodoViewModel, data: TodoData, period:
             }) { Text("分享已导出文件") } }
         }
     }, confirmButton = { TextButton(enabled = !busy, onClick = {
-        try { val result = Learning.export(data, period, date, timingEnabled && include, tasks = tasks, conflicts = learning.conflicts, sourceId = learning.sourceId); content = result.second; launcher.launch(result.first) }
-        catch (e: Exception) { error = e.message ?: "导出失败" }
+        try {
+            if (planning?.target != target) { onDismiss(); return@TextButton }
+            val extras = if (plans || ratings || history) {
+                val snapshot = requireNotNull(planning?.data) { "计划与评分暂不可用，请重试或取消相关选项" }
+                val (start, end) = Learning.range(range, date)
+                WeeklyPlanning.export(snapshot, start, end, WeeklyPlanning.ExportOptions(plans, ratings, history))
+            } else null
+            val result = Learning.export(data, range, date, timingEnabled && include, tasks = tasks,
+                conflicts = learning.conflicts, sourceId = learning.sourceId, planning = extras)
+            content = result.second
+            error = ""
+            busy = true
+            launcher.launch(result.first)
+        } catch (e: Exception) { busy = false; error = e.message ?: "导出失败" }
     }) { Text("保存文件") } }, dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("关闭") } })
 }

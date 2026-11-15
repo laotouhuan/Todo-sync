@@ -2,25 +2,29 @@ package com.todo.app.data.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
+import kotlinx.serialization.json.JsonObject
 import java.util.UUID
 import java.time.LocalDate
 
-@Serializable
+@Serializable(with = SubtaskJsonSerializer::class)
 data class Subtask(
     val id: String,
     var content: String,
-    var completed: Boolean,
-    @SerialName("completed_at") var completedAt: String? = null
+    var completed: Boolean = false,
+    @SerialName("completed_at") var completedAt: String? = null,
+    @Transient val extraFields: JsonObject = JsonObject(emptyMap())
 )
 
-@Serializable
+@Serializable(with = ReminderJsonSerializer::class)
 data class Reminder(
     @SerialName("reminder_date") val reminderDate: String? = null,
     @SerialName("reminder_time") val reminderTime: String,
-    @SerialName("repeat_daily") val repeatDaily: Boolean = false
+    @SerialName("repeat_daily") val repeatDaily: Boolean = false,
+    @Transient val extraFields: JsonObject = JsonObject(emptyMap())
 )
 
-@Serializable
+@Serializable(with = TodoJsonSerializer::class)
 data class Todo(
     val id: String,
     var content: String,
@@ -38,7 +42,9 @@ data class Todo(
     @SerialName("target_count") var targetCount: Int? = null,
     var reminder: Reminder? = null,
     var subtasks: List<Subtask> = emptyList(),
-    var label: String? = null
+    var label: String? = null,
+    // 扩展字段保存在原 JSON 位置，内存载体本身不进入共享数据契约。
+    @Transient val extraFields: JsonObject = JsonObject(emptyMap())
 ) {
     companion object {
         /**

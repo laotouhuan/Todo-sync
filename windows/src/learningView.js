@@ -1,7 +1,7 @@
 import { seriesFor, timingPendingReason, displayTaskName, duplicateTimingSeries, periodDescription } from './taskSeries.js';
 import { editorProgressSections } from './editorSections.js';
 import { learningSnapshot, requirePersonalTarget } from './collaborationView.js';
-import { normalizeLabel, taskReference, sameTask, learningRange, summarizeLearning, formatDuration, validateTimeEntry, localDay, availableLabels, resolveLearningEntries, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE, canTimeTodo, recentTimingTasks, createRunningTimeEntry, timingTodos, splitTimeEntry } from './timeTracking.js';
+import { normalizeLabel, taskReference, sameTask, learningRange, summarizeLearning, formatDuration, validateTimeEntry, localDay, availableLabels, resolveLearningEntries, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE, canTimeTodo, lastTimedText, recentTimingTasks, createRunningTimeEntry, timingTodos, splitTimeEntry } from './timeTracking.js';
 import { sortFunc } from './dateUtils.js';
 import { reviewFields, reviewPreview, exportReviews } from './reviewUtils.js';
 
@@ -29,7 +29,7 @@ function localInput(iso) {
     return localDay(date) + 'T' + [date.getHours(), date.getMinutes(), date.getSeconds()].map(n => String(n).padStart(2, '0')).join(':');
 }
 
-export function createLearningView({ state, commit: commitPersonal, redraw, sync, toast, exportFile, periods }) {
+export function createLearningView({ state, commit: commitPersonal, redraw, sync, toast, exportFile, periods, planning, openWeek }) {
     const readOnly = () => state.activeSource.type === 'collaboration';
     const enabled = () => readOnly() || state.appConfig.time_tracking_enabled !== false;
     const commit = change => { requirePersonalTarget(state.activeSource); return commitPersonal(change); };
@@ -42,7 +42,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
     const pendingReason = entry => resolvedEntries().find(e => e.id === entry.id)?.pending_reason || '';
     const entryLabel = entry => resolvedEntries().find(e => e.id === entry.id)?.label_snapshot || '未分类';
     const running = () => entries().filter(e => !e.deleted && e.ended_at == null);
-    let labelFilter, banner, lastConflict = '', reviewLeave, refreshLabelPicker, refreshTimerPicker, timer;
+    let labelFilter, banner, lastConflict = '', reviewLeave, refreshLabelPicker, refreshTimerPicker, timer, stopReviewUpdates;
     let lastSource = JSON.stringify(state.activeSource);
     const run = async action => { try { await action(); } catch (e) { toast(e.message || String(e)); } };
     function clock(entry) {
@@ -139,14 +139,11 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             } else candidates = recentTimingTasks(state.todoData.todos, state.todoData.time_entries || [], state.todoData);
             duplicateTimingSeries(state.todoData).forEach(s => list.append(el('p', s.content + '：本期存在重复任务，请到周期关联中核对')));
             if (!candidates.length) list.append(el('p', other ? '暂无匹配的可计时任务' : '暂无可继续计时的最近任务，请选择其他任务'));
-            for (const { todo, startedAt } of candidates) {
+            for (const { todo, endedAt } of candidates) {
                 const item = button('', () => select(todo.id)); item.classList.add('learning-timer-candidate'); item.disabled = busy;
                 item.append(el('span', todo.content));
                 if (!seriesFor(state.todoData, todo.id) && ['weekly_checkin', 'monthly_checkin'].includes(todo.task_type)) item.append(el('small', periodDescription(todo.date)));
-                if (startedAt) {
-                    const value = localInput(startedAt).replace('T', ' ').slice(0, 16);
-                    item.append(el('small', '上次计时：' + (value.startsWith(today) ? value.replace(today, '今天') : value)));
-                }
+                if (endedAt) item.append(el('small', lastTimedText(endedAt)));
                 list.append(item);
             }
         }
@@ -252,6 +249,25 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         const body = parent.querySelector('.modal-body');
         if (body) body.append(host); else parent.insertBefore(host, parent.querySelector('.modal-footer'));
     }
+    function updateEditorSummary(id) {
+        const section = document.getElementById(id); if (!section) return;
+        const field = name => document.getElementById(name);
+        let text;
+        switch (id) {
+            case 'edit-type-section': text = '任务类型：' + field('edit-task-type').selectedOptions[0].textContent; break;
+            case 'edit-date-section': text = '截止日期：' + (field('edit-has-date-switch').checked ? field('edit-date').value || '待设置' : '未设置'); break;
+            case 'edit-reminder-section': text = '提醒：' + (field('edit-reminder-switch').checked ? [field('edit-reminder-date').value, field('edit-reminder-time').value].filter(Boolean).join(' ') : '未设置'); break;
+            case 'edit-target-section': text = '打卡目标：' + (field('edit-target-count').value || '未设置'); break;
+            case 'edit-checkin-section': text = '打卡记录：' + (state.currentEditingCompletedDates || []).length + ' 次' + (field('edit-target-count').value ? ' · 目标 ' + field('edit-target-count').value + ' 次' : ''); break;
+            case 'edit-completed-section': text = '完成时间：' + field('edit-completed-date').value + ' ' + field('edit-completed-time').value; break;
+            case 'edit-subtasks-section': {
+                const items = state.currentEditingSubtasks || [];
+                text = items.length ? '子步骤／备注：' + items.filter(t => t.completed).length + '/' + items.length : '添加子步骤／备注'; break;
+            }
+            default: return;
+        }
+        if (section.firstChild.textContent !== text) section.firstChild.textContent = text;
+    }
     function compactEditor(reset = false) {
         const parent = document.querySelector('#edit-modal .modal-body'); if (!parent) return;
         const byId = id => document.getElementById(id);
@@ -283,10 +299,12 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         subtasks.firstChild.textContent = items.length ? '子步骤／备注：' + items.filter(t => t.completed).length + '/' + items.length : '添加子步骤／备注';
         const todo = state.currentEditingTodo;
         if (enabled() && todo && byId('edit-records-summary')) {
-            const list = entries().filter(e => !e.deleted && sameTask(e.task_ref, taskReference(todo, state.activeSource)));
-            const conflictIds = conflicts();
+            const snapshot = learningSnapshot(state);
+            const resolved = resolveLearningEntries(snapshot.data.time_entries || [], snapshot.tasks, { data: snapshot.data, source: state.activeSource });
+            const list = resolved.filter(e => !e.deleted && sameTask(e.task_ref, taskReference(todo, state.activeSource)));
+            const conflictIds = snapshot.conflicts;
             const parts = list.filter(e => !conflictIds.has(e.id)).flatMap(splitTimeEntry);
-            byId('edit-records-summary').textContent = '关联计时：' + formatDuration(parts.reduce((sum, p) => sum + p.duration, 0)) + ' · ' + parts.length + ' 次' + (list.some(e => !e.ended_at && !pendingReason(e)) ? ' · 进行中' : '') + (list.some(e => conflictIds.has(e.id) || pendingReason(e)) ? ' · 待核对' : '');
+            byId('edit-records-summary').textContent = '关联计时：' + formatDuration(parts.reduce((sum, p) => sum + p.duration, 0)) + ' · ' + parts.length + ' 次' + (list.some(e => !e.ended_at && !e.pending_reason) ? ' · 进行中' : '') + (list.some(e => conflictIds.has(e.id) || e.pending_reason) ? ' · 待核对' : '');
         }
         if (reset) {
             let progress = byId('edit-progress'), more = byId('edit-more');
@@ -317,8 +335,19 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         } else { progressHeading?.querySelector('button')?.remove(); }
         if (!parent.dataset.compactListening) {
             parent.dataset.compactListening = 'true';
-            parent.addEventListener('input', () => compactEditor()); parent.addEventListener('change', () => compactEditor());
-            parent.addEventListener('click', event => { if (!event.target.closest('summary')) queueMicrotask(() => compactEditor()); });
+            const update = event => {
+                const id = event.target.closest('.edit-section')?.id;
+                // 文字正文不影响数量摘要，也不需要计时快照。
+                if (id === 'edit-subtasks-section' || !id) return;
+                updateEditorSummary(id);
+                if (id === 'edit-target-section') updateEditorSummary('edit-checkin-section');
+                if (id === 'edit-type-section') {
+                    byId('edit-date-section').hidden = type.value !== 'normal';
+                    for (const name of ['target', 'checkin']) byId('edit-' + name + '-section').hidden = type.value === 'normal';
+                    byId('edit-completed-section').hidden = byId('edit-completed-at-row').style.display === 'none';
+                }
+            };
+            parent.addEventListener('input', update); parent.addEventListener('change', update);
         }
     }
     async function choices(title, items) {
@@ -327,37 +356,94 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             d.addEventListener('cancel', e => { e.preventDefault(); resolve('cancel'); d.close(); });
         });
     }
+    function renderPlan(host, date, daily = false) {
+        const controller = planning?.();
+        if (!controller || readOnly()) return;
+        const { plan, text, score, busy, loadError, syncFailed, saving, saveError } = controller.day(date);
+        const messages = { empty: '本周尚未制定计划', current: text || '当天未安排',
+            conflict: '周计划存在分歧，请到周视图处理', restart: '周计划需重新制定' };
+        host.replaceChildren(el('h4', '当日计划 · 当前周计划'),
+            el('p', loadError || messages[plan] || '正在读取计划与评分…', 'learning-text'));
+        if (syncFailed && !loadError) host.append(el('p', '计划与评分同步未完成'));
+        if (loadError) host.append(button('重试读取', controller.reload));
+        if (!daily) return;
+        host.append(button(plan === 'empty' ? '去制定周计划' : '查看本周计划', () => openWeek?.(date)));
+        host.append(el('h4', `当日评分 · ${score == null ? '未评分' : score + ' 分'}`));
+        const scores = el('div', null, 'planning-score-choices');
+        for (const value of [1, 2, 3, 4, 5]) {
+            const choice = button(`${value} 分`, () => controller.rate(date, value));
+            choice.disabled = !plan || busy || Boolean(saveError);
+            choice.setAttribute('aria-pressed', String(score === value));
+            scores.append(choice);
+        }
+        host.append(scores);
+        if (score != null) {
+            const clear = button('清除评分', () => controller.rate(date, null));
+            clear.disabled = busy || Boolean(saveError);
+            host.append(clear);
+        }
+        if (saving) host.append(el('p', '正在保存评分…'));
+        if (saveError) host.append(el('p', saveError, 'learning-error'), button('重试保存评分', controller.retryRating));
+    }
+    function showPlanInDialog(dialog, date) {
+        const controller = planning?.();
+        if (!controller || readOnly()) return;
+        const host = el('section');
+        dialog.append(host);
+        const target = state.personalTarget;
+        const update = () => {
+            if (target !== state.personalTarget || readOnly()) {
+                host.replaceChildren(el('p', '个人清单已切换，请重新打开复盘', 'learning-error'));
+            } else renderPlan(host, date);
+        };
+        update();
+        const unsubscribe = controller.subscribe(update);
+        dialog.addEventListener('close', unsubscribe, { once: true });
+    }
     function editReview(date) {
         if (readOnly()) return;
+        const target = state.personalTarget;
         const base = data().daily_reviews?.find(r => r.date === date && !r.deleted);
         const dialog = modal(`${date} · ${base ? '编辑复盘' : '写复盘'}`); const inputs = {};
         let savedFields = Object.fromEntries(reviewFields.map(([key]) => [key, base?.[key] || '']));
+        showPlanInDialog(dialog, date);
         for (const [key, title, hint] of reviewFields) {
             const label = el('label', title); const text = el('textarea'); text.rows = 3; text.placeholder = hint; text.value = base?.[key] || '';
             inputs[key] = text; label.append(text); dialog.append(label);
         }
         const error = el('p', '', 'learning-error'); dialog.append(error);
         const dirty = () => reviewFields.some(([key]) => inputs[key].value !== savedFields[key]);
+        let saving = false, leaving = false;
         const save = async () => {
+            if (saving) return false;
+            saving = true;
+            error.textContent = '正在保存复盘…';
             try {
+                if (target !== state.personalTarget || readOnly()) throw new Error('个人清单已切换，请重新打开复盘');
                 const fields = Object.fromEntries(reviewFields.map(([key]) => [key, inputs[key].value]));
                 if (!Object.values(fields).some(v => v.trim())) throw new Error('请至少填写一项复盘内容');
                 await commit(d => {
                     const existing = d.daily_reviews.find(r => r.date === date); const now = new Date().toISOString();
                     d.daily_reviews = [...d.daily_reviews.filter(r => r.date !== date), { id: existing?.id || crypto.randomUUID(), date,
                         created_at: existing?.created_at || now, updated_at: now, deleted: false, ...fields }];
-                }); savedFields = fields; return true;
+                }); savedFields = fields; error.textContent = ''; return true;
             } catch (e) { error.textContent = e.message || String(e); return false; }
+            finally { saving = false; }
         };
         const close = () => { reviewLeave = null; dialog.close(); };
         const leave = async () => {
+            if (saving || leaving) return false;
             if (!dirty()) { close(); return true; }
-            const answer = await choices('复盘有未保存的修改', [['保存并离开', 'save'], ['放弃修改', 'discard'], ['继续编辑', 'cancel']]);
-            if (answer === 'discard' || (answer === 'save' && await save())) { close(); return true; } return false;
+            leaving = true;
+            try {
+                const answer = await chooseLeave('复盘');
+                if (answer === 'discard' || (answer === 'save' && await save())) { close(); return true; }
+                return false;
+            } finally { leaving = false; }
         };
         reviewLeave = leave;
         dialog.addEventListener('cancel', e => { e.preventDefault(); void leave(); });
-        dialog.append(button('保存', async () => { if (await save()) close(); }), button('取消', close), button('导出', async () => {
+        dialog.append(button('保存', async () => { if (await save()) close(); }), button('取消', leave), button('导出', async () => {
             if (dirty()) {
                 const answer = await choices('有未保存的复盘修改', [['保存后导出', 'save'], ['仅导出已保存内容', 'saved'], ['取消', 'cancel']]);
                 if (answer === 'cancel' || (answer === 'save' && !await save())) return;
@@ -367,22 +453,60 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
     }
     function showReview(review) {
         const d = modal(`${review.date} · 每日复盘`);
+        showPlanInDialog(d, review.date);
         for (const [key, title] of reviewFields) { d.append(el('h4', title), el('p', review[key] || '未填写', 'learning-text')); }
         if (!readOnly()) d.append(button('编辑', () => { d.close(); editReview(review.date); }));
         d.append(button('关闭', () => d.close()));
     }
     function exportDialog(period = state.statsPeriod, target = state.statsTargetDate) {
+        const source = JSON.stringify(state.activeSource);
+        const personalTarget = state.personalTarget;
+        const controller = !readOnly() && planning?.();
         const d = modal('导出复盘 Markdown');
-        const include = input('checkbox', '', period === 'day' ? '附带当日学习时长统计' : '附带当日学习时长统计（逐日附带）', d); include.checked = enabled();
+        if (controller) {
+            const unsubscribe = controller.subscribe(() => {
+                if (personalTarget !== state.personalTarget || source !== JSON.stringify(state.activeSource)) d.close();
+            });
+            d.addEventListener('close', unsubscribe, { once: true });
+        }
+        const range = el('select');
+        range.setAttribute('aria-label', '导出范围');
+        for (const [value, text] of [['day', '当天'], ['week', '本周'], ['month', '本月']]) {
+            const option = el('option', text); option.value = value; range.append(option);
+        }
+        range.value = period;
+        if (controller) d.append(range);
+        const include = input('checkbox', '', '附带学习时长统计（逐日）', d); include.checked = enabled();
         include.parentElement.dataset.timingSection = 'true'; include.parentElement.hidden = !enabled();
+        const options = controller ? Object.fromEntries([
+            ['includePlans', '计划'], ['includeRatings', '评分'], ['includePlanHistory', '计划历史及调整原因']
+        ].map(([key, label]) => [key, input('checkbox', '', label, d)])) : {};
         const error = el('p', '', 'learning-error'); d.append(error);
+        const retry = button('重试读取计划与评分', () => controller?.reload());
+        retry.hidden = true;
+        d.append(retry);
         d.append(button('导出文件', async () => {
-            try { const result = exportReviews(data(), period, target, enabled() && include.checked, knownTasks(), conflicts(), state.activeSource); const saved = await exportFile(result); if (saved) { toast('文件已保存'); d.close(); } }
+            try {
+                error.textContent = '';
+                retry.hidden = true;
+                if (source !== JSON.stringify(state.activeSource) || personalTarget !== state.personalTarget) { d.close(); return; }
+                const flags = Object.fromEntries(Object.entries(options).map(([key, box]) => [key, box.checked]));
+                const withPlanning = Object.values(flags).some(Boolean);
+                const view = controller && controller.snapshot();
+                if (withPlanning && !view) { retry.hidden = false; throw new Error('计划与评分暂不可用，请重试或取消相关选项'); }
+                const exportData = withPlanning ? { ...data(), weekly_plan_versions: view.weekly_plan_versions,
+                    weekly_plan_selections: view.weekly_plan_selections, daily_ratings: view.daily_ratings } : data();
+                const result = exportReviews(exportData, range.value, target, enabled() && include.checked, knownTasks(), conflicts(), state.activeSource, flags);
+                const saved = await exportFile(result);
+                if (saved && d.open) { toast('文件已保存'); d.close(); }
+            }
             catch (e) { error.textContent = e.message || String(e); }
         }), button('取消', () => d.close()));
     }
     function renderStats() {
         const host = document.getElementById('learning-insights'); if (!host) return;
+        stopReviewUpdates?.();
+        stopReviewUpdates = undefined;
         host.replaceChildren(); const { start, end } = learningRange(state.statsPeriod, state.statsTargetDate);
         const learning = el('section', null, 'learning-card'); learning.append(el('h3', readOnly() ? '学习投入' : '我的学习投入'));
         const filter = el('select');
@@ -399,7 +523,17 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         if (summary.pending) learning.append(button(`${summary.pending} 条待核对记录未计入 · 查看`, () => showRecords(entries().filter(e => !e.deleted && (conflicts().has(e.id) || pendingReason(e)) &&
             Date.parse(e.started_at) < Date.parse(end + 'T00:00:00') && (e.ended_at == null || Date.parse(e.ended_at) > Date.parse(start + 'T00:00:00'))), '核对计时记录')));
         if (enabled()) host.append(learning);
-        const review = el('section', null, 'learning-card'); review.append(el('h3', readOnly() ? '每日复盘' : '我的复盘'), button('导出 Markdown', () => exportDialog()));
+        const localDaily = state.statsPeriod === 'day' && !readOnly();
+        const review = el('section', null, 'learning-card');
+        review.id = 'daily-review-card';
+        review.append(el('h3', localDaily ? '每日回顾' : readOnly() ? '每日复盘' : '我的复盘'), button('导出 Markdown', () => exportDialog()));
+        if (localDaily && planning?.()) {
+            const plan = el('section', null, 'daily-review-plan');
+            review.append(plan, el('h4', '复盘'));
+            const update = () => renderPlan(plan, start, true);
+            update();
+            stopReviewUpdates = planning().subscribe(update);
+        }
         const list = (data().daily_reviews || []).filter(r => !r.deleted && r.date >= start && r.date < end).sort((a, b) => b.date.localeCompare(a.date));
         if (state.statsPeriod === 'day') {
             if (list[0]) { for (const [key, title] of reviewFields) review.append(el('h4', title), el('p', list[0][key] || '未填写', 'learning-text')); }
@@ -423,6 +557,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         if (!enabled()) document.querySelectorAll('dialog[data-timing]').forEach(d => d.close());
         refreshLabelPicker?.();
         refreshTimerPicker?.();
+        if (state.currentEditingTodo && document.getElementById('edit-modal')?.classList.contains('active')) compactEditor();
         if (!banner) { banner = el('div', null, 'learning-banner'); document.querySelector('main')?.before(banner); }
         banner.replaceChildren(); const active = enabled() ? running() : []; banner.hidden = !active.length;
         const startButton = document.getElementById('start-timer-btn');
@@ -482,5 +617,8 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         if (!current) { toast('该计时记录已删除'); return; }
         editEntry(current);
     }
-    return { beforeSourceChange: async () => !reviewLeave || await reviewLeave(), enabled, conflicts, install, refresh, attachTimer, editTask, renderStats, compactEditor, resolvedEntries, showRecords, editRecord, prepareDisable };
+    function chooseLeave(label) {
+        return choices(`${label}有未保存的修改`, [['保存并离开', 'save'], ['放弃修改', 'discard'], ['继续编辑', 'cancel']]);
+    }
+    return { beforeSourceChange: async () => !reviewLeave || await reviewLeave(), chooseLeave, enabled, conflicts, install, refresh, attachTimer, editTask, renderStats, compactEditor, updateEditorSummary, resolvedEntries, showRecords, editRecord, prepareDisable };
 }

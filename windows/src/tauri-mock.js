@@ -13,11 +13,24 @@ if (!window.__TAURI__) {
         if (cmd === 'get_app_config') {
           return { time_tracking_enabled: true, ...JSON.parse(localStorage.getItem('todo_app_config') || '{"sync_mode":"local","local_sync_path":""}') };
         }
+        if (cmd === 'read_personal_target' || cmd === 'activate_personal_target') {
+          const config = args.config;
+          const target = config.sync_mode === 'webdav'
+            ? JSON.stringify(['webdav', config.webdav_url, config.webdav_username, config.webdav_filepath])
+            : JSON.stringify(['local', config.sync_path || '']);
+          const key = 'todo_target_' + target;
+          if (cmd === 'activate_personal_target') {
+            if (config.sync_mode === 'webdav') localStorage.setItem(key, args.data);
+            localStorage.setItem('todo_app_config', JSON.stringify(config)); return;
+          }
+          const stored = localStorage.getItem(key) || (target === '["local",""]' ? localStorage.getItem('todo_data') : null);
+          return {target, missing: stored === null, data: stored || (config.sync_mode === 'webdav' ? null : '{"version":1,"todos":[]}')};
+        }
         if (cmd === 'read_todo_data') {
           return localStorage.getItem('todo_data') || '{"version":1,"todos":[]}';
         }
         if (cmd === 'write_todo_data') {
-          localStorage.setItem('todo_data', args.data);
+          localStorage.setItem('todo_target_' + args.target, args.data);
           return;
         }
         if (cmd === 'save_app_config') {

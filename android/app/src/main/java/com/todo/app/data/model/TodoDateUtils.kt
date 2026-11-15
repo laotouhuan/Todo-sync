@@ -245,8 +245,9 @@ fun monthStringOf(date: LocalDate): String =
 
 fun Todo.getWeeklyCompletedCount(): Int {
     val dateStr = this.date?.takeIf { isWeekDate(it) } ?: return 0
-    return this.completedDates.count { dStr ->
-        runCatching { weekStringOf(LocalDate.parse(dStr)) == dateStr }.getOrDefault(false)
+    // 打卡日沿用记录自己的日期前缀，与同步按日分组一致，不换算到设备时区。
+    return this.completedDates.map { it.substringBefore('T') }.count { day ->
+        runCatching { weekStringOf(LocalDate.parse(day)) == dateStr }.getOrDefault(false)
     }
 }
 

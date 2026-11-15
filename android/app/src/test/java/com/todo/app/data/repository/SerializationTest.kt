@@ -3,10 +3,16 @@ package com.todo.app.data.repository
 import com.todo.app.data.model.Todo
 import com.todo.app.data.model.TodoData
 import com.todo.app.data.model.ReminderSettings
+import com.todo.app.data.model.GlobalReminderRule
 import com.todo.app.data.model.CollaborationData
 import com.todo.app.data.model.MergeUtils
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.double
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -15,6 +21,88 @@ import org.junit.Test
 import java.time.OffsetDateTime
 
 class SerializationTest {
+
+    @Test
+    fun reminderSettingsRoundTripKeepsUnknownFieldsAndRuleOrderAtOriginalLocations() {
+        val raw = """{"updated_at":"invalid","__proto__":{"keep":true},"extension":{"integer":"保留","number":1e-7},"global_rules":[{"id":"second","time":"legacy time","custom":{"keep":[1,true]},"__proto__":"规则扩展"},{"id":"first","time":"08:30"}]}"""
+        val settings = jsonFormat.decodeFromString<ReminderSettings>(raw)
+        assertEquals("invalid", settings.updatedAt)
+        assertTrue(settings.enabled)
+        assertFalse(settings.privacyMode)
+        assertEquals(listOf("second", "first"), settings.globalRules.map { it.id })
+        assertEquals("unconditional", settings.globalRules.first().condition)
+        assertEquals("all", settings.globalRules.first().taskScope)
+        assertEquals("", settings.globalRules.first().title)
+        assertEquals("", settings.globalRules.first().body)
+        val encoded = jsonFormat.parseToJsonElement(jsonFormat.encodeToString(settings)).jsonObject
+        val original = jsonFormat.parseToJsonElement(raw).jsonObject
+        assertEquals(original["__proto__"], encoded["__proto__"])
+        assertEquals(original.getValue("extension").jsonObject["integer"], encoded.getValue("extension").jsonObject["integer"])
+        assertEquals(1e-7, encoded.getValue("extension").jsonObject.getValue("number").jsonPrimitive.double, 0.0)
+        val restoredSettings = jsonFormat.decodeFromString<ReminderSettings>(jsonFormat.encodeToString(settings))
+        assertEquals(encoded, jsonFormat.parseToJsonElement(jsonFormat.encodeToString(restoredSettings)))
+        val edited = settings.copy(enabled = false, globalRules = settings.globalRules.map { it.copy(title = "编辑后") })
+        val restoredEdit = jsonFormat.decodeFromString<ReminderSettings>(jsonFormat.encodeToString(edited))
+        assertFalse(restoredEdit.enabled)
+        assertEquals("编辑后", restoredEdit.globalRules.first().title)
+        assertEquals(settings.extraFields["__proto__"], restoredEdit.extraFields["__proto__"])
+        assertEquals(settings.globalRules.first().extraFields, restoredEdit.globalRules.first().extraFields)
+        assertFalse(encoded.containsKey("extraFields"))
+        assertFalse(jsonFormat.encodeToString(settings).contains("\"extra_fields\""))
+        val compact = Json { encodeDefaults = false }
+        val guarded = ReminderSettings(extraFields = JsonObject(mapOf("enabled" to JsonPrimitive(false))),
+            globalRules = listOf(GlobalReminderRule("rule", time = "08:00", extraFields = JsonObject(mapOf("enabled" to JsonPrimitive(false))))))
+        val restored = compact.decodeFromString<ReminderSettings>(compact.encodeToString(guarded))
+        assertTrue(restored.enabled)
+        assertTrue(restored.globalRules.single().enabled)
+    }
+
+    @Test
+    fun reminderKnownTypesAreStrictButLegacyStringTimesRemainReadable() {
+        for (raw in listOf("""{"updated_at":3}""", """{"enabled":"true"}""", """{"privacy_mode":null}""",
+            """{"global_rules":null}""", """{"global_rules":[{"id":1,"time":"08:00"}]}""",
+            """{"global_rules":[{"id":"rule","time":1}]}""", """{"global_rules":[{"id":"rule","time":"08:00","enabled":"false"}]}""")) {
+            assertTrue(raw, runCatching { jsonFormat.decodeFromString<ReminderSettings>(raw) }.isFailure)
+        }
+        assertEquals("", jsonFormat.decodeFromString<ReminderSettings>("""{"updated_at":""}""").updatedAt)
+        assertEquals("legacy time", jsonFormat.decodeFromString<ReminderSettings>("""{"global_rules":[{"id":"legacy","time":"legacy time","condition":"legacy","task_scope":"legacy"}]}""").globalRules.single().time)
+    }
+
+    @Test
+    fun todoRoundTripKeepsUnknownFieldsAtTheirOriginalLocations() {
+        val raw = """{"id":"legacy-id","content":"任务","created_at":"2026-11-05T00:00:00Z","updated_at":null,"future":{"nested":[1,true]},"subtasks":[{"id":"child","content":"子任务","extension":"保留"}],"reminder":{"reminder_time":"08:30","extension":["保留"]}}"""
+        val todo = jsonFormat.decodeFromString<Todo>(raw)
+        val encoded = jsonFormat.parseToJsonElement(jsonFormat.encodeToString(todo)).jsonObject
+        assertEquals(jsonFormat.parseToJsonElement(raw).jsonObject["future"], encoded["future"])
+        assertEquals("2026-11-05T00:00:00Z", todo.updatedAt)
+        assertFalse(todo.subtasks.single().completed)
+        assertEquals(JsonPrimitive("保留"), todo.subtasks.single().extraFields["extension"])
+        assertTrue(todo.reminder!!.extraFields.containsKey("extension"))
+        assertEquals(todo, jsonFormat.decodeFromString<Todo>(jsonFormat.encodeToString(todo.copy(content = "编辑后"))).copy(content = "任务"))
+        assertFalse(encoded.containsKey("extraFields"))
+        assertFalse(encoded.containsKey("extra_fields"))
+    }
+
+    @Test
+    fun unknownFieldsCannotOverrideKnownDefaultsWithCompactEncoding() {
+        val compact = Json { encodeDefaults = false }
+        val todo = Todo("legacy-id", "任务", createdAt = "2026-11-05T00:00:00Z",
+            extraFields = JsonObject(mapOf("deleted" to JsonPrimitive(true), "content" to JsonPrimitive("伪装"), "future" to JsonPrimitive(3))))
+        val restored = compact.decodeFromString<Todo>(compact.encodeToString(todo))
+        assertFalse(restored.deleted)
+        assertEquals("任务", restored.content)
+        assertEquals(JsonPrimitive(3), restored.extraFields["future"])
+    }
+
+    @Test
+    fun normalCompatibilityDoesNotNormalizePeriodicTargetCounts() {
+        val prefix = """"id":"legacy-id","content":"周期","created_at":"2026-11-05T00:00:00Z","target_count":0"""
+        for (fields in listOf("\"task_type\":\"weekly_checkin\"", "\"task_type\":\"monthly_checkin\"",
+            "\"recurring\":\"weekly\"", "\"date\":\"2026-W45\"", "\"date\":\"2026-11\"")) {
+            assertEquals(0, jsonFormat.decodeFromString<Todo>("{$prefix,$fields}").targetCount)
+        }
+        assertEquals(null, jsonFormat.decodeFromString<Todo>("{$prefix}").targetCount)
+    }
 
     private val jsonFormat = Json {
         ignoreUnknownKeys = true

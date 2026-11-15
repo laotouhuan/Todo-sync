@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "系列工作流与明确手动结束计时实验操作",
+  "description": "operation_set 为 lab-personal-series-workflows/2。明确手动结束独占一条记录，可压过同一计时的并发整体删除自动结束。",
+  "oneOf": [
+    { "$ref": "./series-workflow-profile.schema.json" },
+    {
+      "type": "object",
+      "required": ["type", "timer_id", "ended_at"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "time.entry.stop.manual" },
+        "timer_id": { "type": "string", "minLength": 1 },
+        "ended_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  ]
+}

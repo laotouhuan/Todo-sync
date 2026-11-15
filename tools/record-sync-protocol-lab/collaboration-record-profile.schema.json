@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "协作新增待办实验操作",
+  "description": "operation_set 为 lab-collaboration/1。官方协作入口仅提交单项新增，个人所有者继续使用既有操作。",
+  "oneOf": [
+    { "$ref": "./series-workflow-v2-profile.schema.json" },
+    {
+      "type": "object",
+      "required": ["type", "todo"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "collaboration.todo.create" },
+        "todo": {
+          "type": "object",
+          "required": ["id", "content", "date", "task_type", "target_count", "subtasks", "created_at", "order"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "#/definitions/id" },
+            "content": { "type": "string", "minLength": 1 },
+            "date": { "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/date" },
+            "task_type": { "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/task_type" },
+            "target_count": { "type": ["integer", "null"], "minimum": 1, "maximum": 2147483647 },
+            "created_at": { "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/created_at" },
+            "order": { "type": "number" },
+            "subtasks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "content"],
+                "additionalProperties": false,
+                "properties": {
+                  "id": { "$ref": "#/definitions/id" },
+                  "content": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          },
+          "if": { "properties": { "task_type": { "const": "normal" } } },
+          "then": { "properties": { "target_count": { "const": null }, "date": { "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" } } },
+          "else": { "properties": { "date": { "type": "string", "pattern": "^[0-9]{4}-(W[0-9]{2}|[0-9]{2})$" } } }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" }
+  }
+}

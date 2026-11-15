@@ -22,6 +22,33 @@ use rand::Rng;
 mod collaboration_credentials;
 #[path = "collaboration_access.rs"]
 mod collaboration_access;
+#[path = "personal_targets.rs"]
+mod personal_targets;
+
+#[tauri::command]
+pub fn read_personal_target(app: AppHandle, config: AppConfig) -> Result<personal_targets::PersonalTargetRead, String> {
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    personal_targets::read_at(&root, &config)
+}
+
+#[tauri::command]
+pub fn activate_personal_target(app: AppHandle, config: AppConfig, data: String) -> Result<(), String> {
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    personal_targets::activate_at(&root, &config, &data, || save_app_config(app.clone(), config.clone()))?;
+    let _ = app.emit("sync_path_changed", ());
+    Ok(())
+}
+
+fn verify_personal_target(app: &AppHandle, config: &AppConfig, expected: &str) -> Result<(), String> {
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if personal_targets::identity(&root, config)? != expected { return Err("同步目标已切换，请重新加载后保存".into()); }
+    Ok(())
+}
+
+pub(crate) fn personal_planning_target(app: &AppHandle) -> Result<String, String> {
+    let root = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    personal_targets::identity(&root, &load_config(app))
+}
 
 // 常量定义
 const MAX_BACKUP_COUNT: usize = 5;
@@ -835,8 +862,9 @@ fn build_webdav_conn(config: &AppConfig) -> Result<WebDavConn, String> {
 }
 
 #[tauri::command]
-pub async fn sync_to_cloud(app: AppHandle, data: String) -> Result<(), String> {
+pub async fn sync_to_cloud(app: AppHandle, data: String, target: String) -> Result<(), String> {
     let config = load_config(&app);
+    verify_personal_target(&app, &config, &target)?;
     let conn = build_webdav_conn(&config)?;
     let client = app.state::<WebdavHttpClient>().inner().0.clone();
 
@@ -873,8 +901,8 @@ async fn check_parent_folder_exists(client: &reqwest::Client, parent_url: &str, 
 }
 
 #[tauri::command]
-pub async fn fetch_from_cloud(app: AppHandle) -> Result<String, String> {
-    let config = load_config(&app);
+pub async fn fetch_from_cloud(app: AppHandle, config: Option<AppConfig>) -> Result<String, String> {
+    let config = config.unwrap_or_else(|| load_config(&app));
     let conn = build_webdav_conn(&config)?;
     let client = app.state::<WebdavHttpClient>().inner().0.clone();
 
@@ -1030,20 +1058,14 @@ pub fn set_sync_path(app: AppHandle, new_path: String) -> Result<(), String> {
 
 pub fn get_data_path(app: &AppHandle) -> Result<PathBuf, String> {
     let config = load_config(app);
-    if let Some(p) = config.sync_path {
-        let pb = PathBuf::from(p);
-        fs::create_dir_all(&pb).map_err(|e| format!("Failed to create sync dir: {e}"))?;
-        Ok(pb.join("todo_data.json"))
-    } else {
-        let path = app.path().app_data_dir()
-            .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
-        fs::create_dir_all(&path).map_err(|e| format!("Failed to create data dir: {e}"))?;
-        Ok(path.join("todo_data.json"))
-    }
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = personal_targets::path(&root, &config)?;
+    fs::create_dir_all(path.parent().ok_or("无效数据路径")?).map_err(|e| e.to_string())?;
+    Ok(path)
 }
 
 /// 获取文件锁，exclusive=true 为排他锁，false 为共享锁
-fn acquire_lock(path: &Path, exclusive: bool) -> Result<File, String> {
+pub(crate) fn acquire_lock(path: &Path, exclusive: bool) -> Result<File, String> {
     let lock_path = path.with_extension("lock");
     for i in 0..LOCK_RETRY_COUNT {
         if let Ok(file) = OpenOptions::new().read(true).write(true).create(true).open(&lock_path) {
@@ -1092,7 +1114,7 @@ fn scan_backups(backup_dir: &Path) -> Vec<PathBuf> {
 }
 
 /// 原子写入：写入临时文件，确保 sync_all 刷入物理磁盘后 rename 到目标路径
-fn atomic_write(path: &Path, data: &str) -> Result<(), String> {
+pub(crate) fn atomic_write(path: &Path, data: &str) -> Result<(), String> {
     use std::io::Write;
     let temp_path = path.with_extension("tmp");
     {
@@ -1183,8 +1205,14 @@ pub fn restore_backup(app: AppHandle, filename: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn write_todo_data(app: AppHandle, data: String) -> Result<(), String> {
-    let path = get_data_path(&app)?;
+pub fn write_todo_data(app: AppHandle, data: String, target: String) -> Result<(), String> {
+    let config = load_config(&app);
+    verify_personal_target(&app, &config, &target)?;
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    // 校验已激活缓存的身份，损坏时不能通过一次普通保存重新认领。
+    if config.sync_mode.as_deref() == Some("webdav") { personal_targets::read_at(&root, &config)?.data.ok_or("缓存尚未初始化")?; }
+    let path = personal_targets::path(&root, &config)?;
+    fs::create_dir_all(path.parent().ok_or("无效数据路径")?).map_err(|e| e.to_string())?;
 
     let _guard = acquire_lock(&path, true)?;
     create_backup(&app, &path);

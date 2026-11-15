@@ -13,6 +13,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.todo.app.data.model.*
@@ -42,8 +44,12 @@ fun StatsTimelineLayer(viewModel: TodoViewModel, todos: List<Todo>, period: Stri
     } }
     var selectedSteps by remember { mutableStateOf<List<SubtaskEvent>>(emptyList()) }
     var selectedArcs by remember { mutableStateOf<List<TimerArc>>(emptyList()) }
-    LaunchedEffect(showTiming, period, target, data, tasks) { selectedArcs = emptyList(); selectedSteps = emptyList() }
-    fun hit(offset: Offset): Boolean = with(density) {
+    var tooltipArcs by remember { mutableStateOf<List<TimerArc>>(emptyList()) }
+    var tooltipAnchor by remember { mutableStateOf(Offset.Zero) }
+    var canvasOrigin by remember { mutableStateOf(Offset.Zero) }
+    LaunchedEffect(showTiming, period, target, source, data, tasks) { selectedArcs = emptyList(); selectedSteps = emptyList(); tooltipArcs = emptyList() }
+    fun hit(offset: Offset, longPress: Boolean = false): Boolean = with(density) {
+        tooltipArcs = emptyList()
         val matching = points.filter { (_, p) -> (p - offset).getDistance() <= 12.dp.toPx() }.map { it.first }
         if (matching.isNotEmpty()) { selectedSteps = matching; true }
         else {
@@ -51,12 +57,22 @@ fun StatsTimelineLayer(viewModel: TodoViewModel, todos: List<Todo>, period: Stri
             if (showTiming && abs(hypot(dx, dy) - 95.dp.toPx()) <= 12.dp.toPx()) {
                 val minute = ((atan2(dx, -dy) * 1440 / (2 * PI) + 1440) % 1440).toFloat()
                 val hits = StatsTimeline.hitArcs(arcs, minute, 8f)
-                if (hits.isNotEmpty()) { selectedArcs = hits.distinctBy { it.part.entry.id to it.part.date }; true } else false
+                if (hits.isNotEmpty()) {
+                    if (longPress) {
+                        tooltipArcs = hits
+                        tooltipAnchor = canvasOrigin + offset
+                    } else selectedArcs = hits.distinctBy { it.part.entry.id to it.part.date }
+                    true
+                } else false
             } else false
         }
     }
-    Canvas(Modifier.size(290.dp, 260.dp).pointerInput(points, arcs, showTiming, fallbackTap, fallbackLongPress) {
-        detectTapGestures(onTap = { if (!hit(it)) fallbackTap(it) }, onLongPress = { if (!hit(it)) fallbackLongPress(it) })
+    Canvas(Modifier.size(290.dp, 260.dp).onGloballyPositioned {
+        val origin = it.positionInWindow()
+        if (origin != canvasOrigin) tooltipArcs = emptyList()
+        canvasOrigin = origin
+    }.pointerInput(points, arcs, showTiming, fallbackTap, fallbackLongPress) {
+        detectTapGestures(onTap = { if (!hit(it)) fallbackTap(it) }, onLongPress = { if (!hit(it, longPress = true)) fallbackLongPress(it) })
     }) {
         if (showTiming) arcs.forEach { a ->
             val r = 95.dp.toPx()
@@ -72,6 +88,7 @@ fun StatsTimelineLayer(viewModel: TodoViewModel, todos: List<Todo>, period: Stri
     }
     if (selectedSteps.isNotEmpty()) TimelineSubtaskPicker(viewModel, selectedSteps.map { it.todo to it.subtask }) { selectedSteps = emptyList() }
     if (selectedArcs.isNotEmpty()) TimelineRecordEditor(viewModel, selectedArcs.map { it.part.entry.id }.distinct()) { selectedArcs = emptyList() }
+    if (tooltipArcs.isNotEmpty()) TimelineTimerTooltip(tooltipArcs, tooltipAnchor) { tooltipArcs = emptyList() }
 
 }
 

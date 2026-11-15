@@ -1,0 +1,1731 @@
+{
+  "version": 1,
+  "scope": "approved-normal-todo-whole-record-policy",
+  "validCases": [
+    {
+      "id": "todo-later-whole",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "甲的新内容",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:01:00Z",
+          "date": null,
+          "time": null,
+          "completed": true,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:02:00Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": "课程"
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:02:00Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": "课程"
+        }
+      ],
+      "note": "只选较新整条，不能拼甲内容／完成与乙标签"
+    },
+    {
+      "id": "todo-tie-business-key",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "z",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "同时间业务内容固定排序，UTF16长度编码使aa胜"
+    },
+    {
+      "id": "todo-offset-same-instant",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "z",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T08:00:00+08:00",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "时间字符串词序不能压过业务内容，实际时间相同"
+    },
+    {
+      "id": "todo-offset-later-instant",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "aaaaaaaa",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T09:00:00+08:00",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "b",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T01:30:00Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "b",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T01:30:00Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "UTC实际01:30晚于01:00，不能按09和01的字符串排序"
+    },
+    {
+      "id": "todo-millisecond-tie",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "z",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.0009Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.0001Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.0001Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "小数毫秒截去后形成平局，不改成纳秒优先"
+    },
+    {
+      "id": "todo-epoch-zero",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "旧删除",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "1969-12-31T23:59:59.9999Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": true,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "后续未删",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "1970-01-01T00:00:00Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "后续未删",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "1970-01-01T00:00:00Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "epoch0是有效时间，不得用falsy判定为无时间"
+    },
+    {
+      "id": "todo-delete-not-monotonic",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "删除旧版",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": true,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "较新未删版",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:01Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "较新未删版",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:01Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "保留原整条时间优先，删除不永久获胜"
+    },
+    {
+      "id": "todo-delete-not-tie-priority",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "z",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": true,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "同时间也不额外加deleted rank，内容排序可让未删版胜"
+    },
+    {
+      "id": "todo-missing-defaults",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z"
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "缺字段补默认值，缺更新时间回退created_at"
+    },
+    {
+      "id": "todo-null-updated",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": null
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "显式null更新时间兼容回退创建时间"
+    },
+    {
+      "id": "todo-empty-updated",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": ""
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "空更新时间兼容回退创建时间"
+    },
+    {
+      "id": "todo-label-nfc-trim",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": " ﻿é　"
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": "é"
+        }
+      ],
+      "note": "固定JS空白集合与NFC，不改正文"
+    },
+    {
+      "id": "todo-label-unclassified",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": " 未分类 "
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "未分类与空标签统一null"
+    },
+    {
+      "id": "todo-legacy-label-target",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": 0,
+          "reminder": null,
+          "subtasks": [],
+          "label": 3
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "沿现有归一化，非字符串label及非正安全整数目标归null"
+    },
+    {
+      "id": "todo-nested-defaults-extensions",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": {
+            "reminder_time": "08:30",
+            "custom": [
+              "原扩展"
+            ]
+          },
+          "subtasks": [
+            {
+              "id": "子任务可保留旧ID",
+              "content": "原样",
+              "custom": {
+                "keep": true
+              }
+            }
+          ],
+          "label": null,
+          "extension": {
+            "future": "完整保留"
+          }
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": {
+            "reminder_time": "08:30",
+            "custom": [
+              "原扩展"
+            ],
+            "reminder_date": null,
+            "repeat_daily": false
+          },
+          "subtasks": [
+            {
+              "id": "子任务可保留旧ID",
+              "content": "原样",
+              "custom": {
+                "keep": true
+              },
+              "completed": false,
+              "completed_at": null
+            }
+          ],
+          "label": null,
+          "extension": {
+            "future": "完整保留"
+          }
+        }
+      ],
+      "note": "补嵌套默认值但不丢未知字段"
+    },
+    {
+      "id": "todo-extension-tie",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null,
+          "extension": {
+            "key": "z"
+          }
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null,
+          "extension": {
+            "key": "aa"
+          }
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null,
+          "extension": {
+            "key": "aa"
+          }
+        }
+      ],
+      "note": "扩展业务内容也参与固定排序，获胜整条保留扩展"
+    },
+    {
+      "id": "todo-array-order",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [
+            "2026-11-04",
+            "2026-11-03"
+          ],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [
+            {
+              "id": "2",
+              "content": "第二",
+              "completed": false,
+              "completed_at": null
+            },
+            {
+              "id": "1",
+              "content": "第一",
+              "completed": true,
+              "completed_at": "2026-11-05T00:00:00.000Z"
+            }
+          ],
+          "label": null
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [
+            "2026-11-04",
+            "2026-11-03"
+          ],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [
+            {
+              "id": "2",
+              "content": "第二",
+              "completed": false,
+              "completed_at": null
+            },
+            {
+              "id": "1",
+              "content": "第一",
+              "completed": true,
+              "completed_at": "2026-11-05T00:00:00.000Z"
+            }
+          ],
+          "label": null
+        }
+      ],
+      "note": "子任务与历史数组保持原顺序，不为排序改变业务列表"
+    },
+    {
+      "id": "todo-equivalent-business-metadata",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T08:00:00.000+08:00",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "业务完全相等后按完整规范字节摘要兜底，两个方向选同一表示，不比较时间字符串词序"
+    },
+    {
+      "id": "todo-uppercase-identity",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winners": [
+        {
+          "id": "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "兼容大小写UUID但不改身份字符串或原匹配规则"
+    },
+    {
+      "id": "todo-id-order",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000002",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000002",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "note": "按身份序输出，不依赖系统区域排序"
+    },
+    {
+      "id": "todo-numeric-extension-metadata",
+      "domain": "todo",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null,
+          "extension": {
+            "2": 1e-7,
+            "10": 0,
+            "😀": "字",
+            "__proto__": {
+              "n": 1e+21
+            }
+          }
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T08:00:00.000+08:00",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null,
+          "extension": {
+            "2": 1e-7,
+            "10": 0,
+            "😀": "字",
+            "__proto__": {
+              "n": 1e+21
+            }
+          }
+        }
+      ],
+      "winners": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T08:00:00.000+08:00",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null,
+          "extension": {
+            "2": 1e-7,
+            "10": 0,
+            "😀": "字",
+            "__proto__": {
+              "n": 1e+21
+            }
+          }
+        }
+      ],
+      "note": "整数形键、原型形键和binary64数字经过实际加载/编码后仍比较相同；同业务元数据按独立SHA256期望选择"
+    }
+  ],
+  "profileNegativeCases": [
+    {
+      "id": "invalid-todo-0",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-1",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "monthly_checkin",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-2",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-3",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-02-30T00:00:00Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-4",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T24:00:00Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-5",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": null,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-6",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": 1,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-7",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": "1",
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-8",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": null,
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-9",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [
+            {
+              "id": "x",
+              "content": "y",
+              "completed": null
+            }
+          ],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-10",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [
+            {
+              "id": "x",
+              "content": "y",
+              "completed_at": ""
+            }
+          ],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-11",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": {
+            "reminder_time": "08:00",
+            "repeat_daily": null
+          },
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-12",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": {
+            "reminder_time": "08:00",
+            "reminder_date": 1
+          },
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-13",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": "",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-14",
+      "records": [
+        {
+          "id": "invalid-id",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-15",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": null,
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    },
+    {
+      "id": "invalid-todo-16",
+      "records": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "created_at": "2026-11-05T00:00:00.000Z",
+          "updated_at": "2026-11-05T00:00:00.000Z",
+          "date": null,
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "normal",
+          "completed_dates": [
+            false
+          ],
+          "target_count": null,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ]
+    }
+  ]
+}

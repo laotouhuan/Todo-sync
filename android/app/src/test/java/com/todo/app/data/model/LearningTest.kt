@@ -58,8 +58,22 @@ class LearningTest {
         assertEquals(listOf("c", "a", "b"), Learning.recentTimingTasks(todos, updated + manual.copy(deleted = true), zone).map { it.todo.id })
         val edited = updated.map { if (it.task_ref.todo_id == "c") it.copy(started_at = "2026-09-10T00:00:00Z") else it }
         assertEquals(listOf("a", "b", "c"), Learning.recentTimingTasks(todos, edited, zone).map { it.todo.id })
-        assertEquals("上次计时：今天 10:00", Learning.lastTimedText(Learning.instant(records[0].started_at)!!, LocalDate.parse("2026-09-10"), zone))
-        assertEquals("上次计时：2026-09-10 10:00", Learning.lastTimedText(Learning.instant(records[0].started_at)!!, LocalDate.parse("2026-09-11"), zone))
+    }
+
+    @Test fun recentTasksShowEndTimeWithLocalDayRelativeText() {
+        val records = listOf(history("a", "2026-09-09T23:00:00Z").copy(ended_at = "2026-09-10T02:00:00Z"),
+            history("a", "2026-09-10T03:00:00Z").copy(ended_at = "2026-09-10T04:00:00Z"))
+        val recent = Learning.recentTimingTasks(listOf(timingTodo("a")), records, zone).single()
+        assertEquals(Instant.parse("2026-09-10T04:00:00Z"), recent.endedAt)
+        val now = Instant.parse("2026-09-10T06:15:00Z")
+        fun text(end: String) = Learning.lastTimedText(Instant.parse(end), now, zone)
+        assertEquals("上次结束：2小时15分钟前", Learning.lastTimedText(recent.endedAt, now, zone))
+        assertEquals("上次结束：刚刚", text("2026-09-10T06:14:30Z"))
+        assertEquals("上次结束：1分钟前", text("2026-09-10T06:14:00Z"))
+        assertEquals("上次结束：1小时前", text("2026-09-10T05:15:00Z"))
+        assertEquals("上次结束：7小时15分钟前", text("2026-09-09T23:00:00Z"))
+        assertEquals("上次结束：2026-09-09 23:59", Learning.lastTimedText(Instant.parse("2026-09-09T15:59:00Z"), Instant.parse("2026-09-09T16:01:00Z"), zone))
+        assertEquals("上次结束：2026-09-10 15:00", text("2026-09-10T07:00:00Z"))
     }
 
     @Test fun timingEligibilityCountsLocalPeriodsAndDoesNotTrustOrRewriteCompleted() {

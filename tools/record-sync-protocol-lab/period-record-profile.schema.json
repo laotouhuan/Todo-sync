@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "周期任务基础版本独立记录实验操作",
+  "description": "operation_set 为 lab-personal-period/1。已有任务保留周期类型和日期；打卡列表只能通过明确的打卡动作改变。",
+  "oneOf": [
+    { "$ref": "./checkin-record-profile.schema.json" },
+    { "$ref": "#/definitions/baseOperation" }
+  ],
+  "definitions": {
+    "baseOperation": {
+      "type": "object",
+      "required": ["type", "todo"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["todo.period.create", "todo.period.put", "todo.period.delete"] },
+        "todo": {
+          "type": "object",
+          "required": ["id", "content", "date", "time", "completed_at", "order", "completed", "created_at", "updated_at", "deleted", "recurring", "task_type", "completed_dates", "target_count", "reminder", "subtasks", "label"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "content": { "$ref": "./normal-record-profile.schema.json#/properties/todo/properties/content" },
+            "date": { "type": "string" },
+            "time": { "$ref": "./normal-record-profile.schema.json#/properties/todo/properties/time" },
+            "completed_at": { "$ref": "./normal-record-profile.schema.json#/properties/todo/properties/completed_at" },
+            "order": { "$ref": "./normal-record-profile.schema.json#/properties/todo/properties/order" },
+            "completed": { "$ref": "./normal-record-profile.schema.json#/properties/todo/properties/completed" },
+            "created_at": { "$ref": "./normal-record-profile.schema.json#/properties/todo/properties/created_at" },
+            "updated_at": { "$ref": "./normal-record-profile.schema.json#/properties/todo/properties/updated_at" },
+            "deleted": { "$ref": "./normal-record-profile.schema.json#/properties/todo/properties/deleted" },
+            "recurring": { "$ref": "./normal-record-profile.schema.json#/properties/todo/properties/recurring" },
+            "task_type": { "enum": ["weekly_checkin", "monthly_checkin"] },
+            "completed_dates": { "const": [] },
+            "target_count": { "type": ["integer", "null"], "minimum": 1, "maximum": 2147483647 },
+            "reminder": { "$ref": "./normal-record-profile.schema.json#/properties/todo/properties/reminder" },
+            "subtasks": { "$ref": "./normal-record-profile.schema.json#/properties/todo/properties/subtasks" },
+            "label": { "$ref": "./normal-record-profile.schema.json#/properties/todo/properties/label" }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "task_type": { "const": "weekly_checkin" } } },
+              "then": { "properties": { "date": { "pattern": "^[0-9]{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$" } } },
+              "else": { "properties": { "date": { "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" } } }
+            },
+            {
+              "if": { "properties": { "target_count": { "type": "integer" } } },
+              "then": { "properties": { "completed": { "const": false }, "completed_at": { "const": null } } }
+            }
+          ]
+        }
+      },
+      "if": { "properties": { "type": { "const": "todo.period.delete" } } },
+      "then": { "properties": { "todo": { "properties": { "deleted": { "const": true } } } } },
+      "else": { "properties": { "todo": { "properties": { "deleted": { "const": false } } } } }
+    }
+  }
+}

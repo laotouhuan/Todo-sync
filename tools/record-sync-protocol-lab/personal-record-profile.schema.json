@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "普通待办与全局提醒独立记录实验操作；不是生产协议",
+  "description": "operation_set 为 lab-personal-core/1。与 lab-normal-todo/1 显式隔离；提醒新操作必须携带有效独立时钟及完整归一设置。",
+  "oneOf": [
+    { "$ref": "./normal-record-profile.schema.json" },
+    {
+      "type": "object",
+      "required": ["type", "settings"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "reminder.settings.put" },
+        "settings": {
+          "type": "object",
+          "required": ["updated_at", "enabled", "privacy_mode", "global_rules"],
+          "properties": {
+            "updated_at": {
+              "allOf": [
+                { "$ref": "../../todo_data.schema.json#/properties/reminder_settings/properties/updated_at" },
+                { "type": "string" }
+              ],
+              "description": "新操作必须是有效完整带时区时间；null/坏值仅允许作为旧基线兼容。"
+            },
+            "enabled": { "$ref": "../../todo_data.schema.json#/properties/reminder_settings/properties/enabled" },
+            "privacy_mode": { "$ref": "../../todo_data.schema.json#/properties/reminder_settings/properties/privacy_mode" },
+            "global_rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "enabled", "time", "condition", "task_scope", "title", "body"],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "仅提醒基线/已知提醒历史中的旧ID可保留，新规则由上下文校验UUIDv4；Todo或Subtask旧ID不授予例外。"
+                  },
+                  "enabled": { "$ref": "../../todo_data.schema.json#/properties/reminder_settings/properties/global_rules/items/properties/enabled" },
+                  "time": { "$ref": "../../todo_data.schema.json#/properties/reminder_settings/properties/global_rules/items/properties/time" },
+                  "condition": { "$ref": "../../todo_data.schema.json#/properties/reminder_settings/properties/global_rules/items/properties/condition" },
+                  "task_scope": { "$ref": "../../todo_data.schema.json#/properties/reminder_settings/properties/global_rules/items/properties/task_scope" },
+                  "title": { "$ref": "../../todo_data.schema.json#/properties/reminder_settings/properties/global_rules/items/properties/title" },
+                  "body": { "$ref": "../../todo_data.schema.json#/properties/reminder_settings/properties/global_rules/items/properties/body" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

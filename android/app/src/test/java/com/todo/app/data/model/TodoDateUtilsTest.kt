@@ -9,6 +9,35 @@ import java.time.LocalDate
 class TodoDateUtilsTest {
 
     @Test
+    fun weeklyCompletedCountUsesRecordDatePrefixesAcrossTimeZones() {
+        val todo = Todo("weekly", "周打卡", date = "2026-W45", taskType = TaskType.WEEKLY_CHECKIN,
+            createdAt = "2026-11-01T00:00:00Z", completedDates = listOf(
+                "2026-11-02", "2026-11-03T23:00:00Z", "2026-11-04T00:00:00+14:00",
+                "2026-11-08T23:00:00-12:00", "2026-11-03T10:00:00+08:00",
+                "2026-11-01T23:00:00-12:00", "2026-11-09T00:00:00+14:00", "bad-date"))
+        val previous = java.util.TimeZone.getDefault()
+        try {
+            for (zone in listOf("UTC", "Asia/Shanghai", "Pacific/Honolulu")) {
+                java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone(zone))
+                assertEquals(zone, 5, todo.getWeeklyCompletedCount())
+            }
+        } finally {
+            java.util.TimeZone.setDefault(previous)
+        }
+    }
+
+    @Test
+    fun weeklyCompletedCountKeepsIsoWeekYearBoundary() {
+        val todo = Todo("weekly", "跨年周", date = "2025-W01", taskType = TaskType.WEEKLY_CHECKIN,
+            createdAt = "2024-12-30T00:00:00Z", completedDates = listOf(
+                "2024-12-30T00:00:00+14:00", "2025-01-05T23:59:59.999999999999-12:00",
+                "2024-12-29T23:59:59-12:00", "2025-01-06T00:00:00+14:00"))
+        assertEquals(2, todo.getWeeklyCompletedCount())
+        assertEquals(0, todo.copy(date = "2025-01").getWeeklyCompletedCount())
+        assertEquals(0, todo.copy(date = null).getWeeklyCompletedCount())
+    }
+
+    @Test
     fun testValidateAndNormalizeTime() {
         assertEquals(Pair(true, "14:30"), validateAndNormalizeTime("14:30", "12:00"))
         assertEquals(Pair(true, "09:05"), validateAndNormalizeTime("9:5", "12:00"))

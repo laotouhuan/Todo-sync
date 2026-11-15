@@ -159,6 +159,17 @@
           </div>
         </div>
 
+        <section id="stats-planning" class="learning-card stats-planning" aria-labelledby="stats-planning-title" hidden>
+          <input type="hidden" data-date>
+          <div class="planning-header">
+            <h3 id="stats-planning-title">周计划与评分</h3>
+          </div>
+          <fieldset data-content hidden>
+            <div data-planning></div>
+          </fieldset>
+          <p data-status class="planning-status" role="status" hidden></p>
+          <button type="button" data-retry class="learning-button" hidden>重试上次保存</button>
+        </section>
         <div class="stats-summary-bar">
           <div class="stats-summary-text" id="stats-summary-text">共 0 项任务，已完成 0 项，进度 0%</div>
           <div class="stats-progress-track">
@@ -611,6 +622,37 @@
               <label>数据恢复</label>
               <p class="setting-hint">系统会自动保留最近几次写入的数据备份，您可以随时恢复到历史版本。</p>
               <button type="button" id="backup-btn" class="modal-btn secondary" style="width: 100%;">从历史备份恢复</button>
+            </div>
+            <div class="input-group">
+              <label>旧版缓存</label>
+              <p class="setting-hint">查看升级前保留的数据。选择过不再提醒的旧缓存仍可在这里查看与导入。</p>
+              <button type="button" id="legacy-cache-btn" class="modal-btn secondary" style="width: 100%;">查看旧版缓存</button>
+            </div>
+            <div class="input-group">
+              <label for="record-recovery-file">独立记录恢复预览</label>
+              <p class="setting-hint">选择数据集恢复材料，核对任务、待上传记录和缺失依赖。</p>
+              <input type="file" id="record-recovery-file" accept=".json,application/json" />
+              <p id="record-recovery-status" class="setting-hint" role="status"></p>
+              <button type="button" id="record-recovery-export" class="modal-btn secondary" hidden>导出本机故障证据</button>
+              <button type="button" id="record-recovery-recheck" class="modal-btn secondary" hidden>用已保存的 WebDAV 设置复核</button>
+              <details id="record-sandbox">
+                <summary>独立记录试用（本机隔离）</summary>
+                <label>试用目标
+                  <select data-target><option value="1">清单一</option><option value="2">清单二</option></select>
+                </label>
+                <button type="button" data-start>打开试用清单</button>
+                <button type="button" data-stop hidden>关闭试用清单</button>
+                <p data-status role="status"></p>
+                <fieldset data-content hidden>
+                  <legend>试用待办、周计划和评分</legend>
+                  <label>任务名称 <input data-task></label>
+                  <button type="button" data-add>新增任务</button>
+                  <ul data-tasks></ul>
+                  <label>日期 <input data-date type="date"></label>
+                  <div data-planning></div>
+                  <button type="button" data-retry>重试上次保存</button>
+                </fieldset>
+              </details>
             </div>
           </div>
         </div>

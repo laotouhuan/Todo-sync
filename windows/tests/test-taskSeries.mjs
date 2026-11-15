@@ -1,6 +1,7 @@
 import { it } from 'node:test';
 import { exportReviews } from '../src/reviewUtils.js';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createTodo } from '../src/dateUtils.js';
 import { normalizeSeriesData, mergeSeriesData, importPeriods, importCandidates, currentPeriod, seriesFor, displayTaskName, associationPreview, associationSummary, associatePeriods, unlinkPeriod, unlinkPreview, unlinkPeriods, timingPendingReason, deletePreview, deletePeriods, savePeriodEdit, periodRange } from '../src/taskSeries.js';
 import { mergeTodoData, hasTodoDataContentChanges } from '../src/dataMerge.js';
@@ -12,6 +13,31 @@ const todo = (date = '2026-W41') => ({ ...createTodo('抽象代数', date), task
 function initial() { return normalizeSeriesData({ version: 1, last_updated: now, todos: [todo()], time_entries: [], daily_reviews: [{ id: 'r', fact: '保留复盘' }], reminder_settings: { enabled: true } }); }
 function continued() { const d = initial(); return importPeriods(d, d.todos, '2026-W42', now); }
 const timer = (t, id = crypto.randomUUID(), start = '2026-10-14T09:00:00+08:00', end = '2026-10-14T10:00:00+08:00') => ({ id, task_ref: taskReference(t), task_content_snapshot: '旧名称', started_at: start, ended_at: end, updated_at: now, created_at: now, deleted: false });
+
+const linkFixtures = JSON.parse(readFileSync(new URL('../../tests/fixtures/series-links/conflicts.json', import.meta.url), 'utf8'));
+for (const sample of linkFixtures.cases) {
+    it(`系列关联：${sample.id}`, () => {
+        const a = { ...linkFixtures.base, ...sample.a };
+        const b = { ...linkFixtures.base, ...sample.b };
+        const data = link => ({ version: 1, last_updated: now, todos: [], task_series_links: [link] });
+        const expected = [sample.winner === 'a' ? a : b];
+        assert.deepEqual(mergeTodoData(data(a), data(b)).data.task_series_links, expected);
+        assert.deepEqual(mergeTodoData(data(b), data(a)).data.task_series_links, expected);
+    });
+}
+
+const nameFixtures = JSON.parse(readFileSync(new URL('../../tests/fixtures/series-names/conflicts.json', import.meta.url), 'utf8'));
+for (const sample of nameFixtures.cases) {
+    it(`系列名称：${sample.id}`, () => {
+        const a = { ...nameFixtures.base, ...sample.a };
+        const b = { ...nameFixtures.base, ...sample.b };
+        const data = series => ({ version: 1, last_updated: now, todos: [], task_series: [series] });
+        const winner = sample.winner === 'a' ? a : b;
+        const expected = [{ ...winner, deleted: sample.deleted_at !== null, deleted_at: sample.deleted_at }];
+        assert.deepEqual(mergeTodoData(data(a), data(b)).data.task_series, expected);
+        assert.deepEqual(mergeTodoData(data(b), data(a)).data.task_series, expected);
+    });
+}
 
 it('关联摘要按不同周期计数，保留已清理历史，只提示同类型未关联同名任务', () => {
     const d = continued(), current = d.todos[1];
@@ -143,7 +169,12 @@ it('编辑只提交实际字段，改名不改历史 Todo 时钟，数组冲突�
     const result = savePeriodEdit(latest, t, { ...t, target_count: 8 }, baseline.task_series[0], now);
     assert.equal(displayTaskName(result, t.id), '同步新名'); assert.equal(result.todos[1].target_count, 8);
     const renamed = savePeriodEdit(baseline, t, { ...t, content: '改名' }, baseline.task_series[0], now);
-    assert.equal(renamed.todos[1].updated_at, t.updated_at); assert.equal(renamed.task_series[0].content_renamed, true);
+    assert.deepEqual(renamed.todos, baseline.todos);
+    assert.equal(renamed.task_series[0].content_renamed, true);
+    for (const member of baseline.todos) assert.equal(displayTaskName(renamed, member.id), '改名');
+    const independent = todo();
+    renamed.todos.push(independent);
+    assert.equal(displayTaskName(renamed, independent.id), independent.content);
     latest.todos[1].completed_dates = ['2026-10-13'];
     assert.throws(() => savePeriodEdit(latest, t, { ...t, completed_dates: ['2026-10-14'] }, baseline.task_series[0], now), /变化/);
     assert.deepEqual(latest.todos[1].completed_dates, ['2026-10-13']);

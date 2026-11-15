@@ -2,11 +2,62 @@ package com.todo.app.data.model
 
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.*
 import org.junit.Test
 import java.time.*
+import java.io.File
 
 class TaskSeriesTest {
+    private fun seriesConflictFixture(domain: String): JsonObject {
+        val relative = "tests/fixtures/$domain/conflicts.json"
+        val file = generateSequence(File("").absoluteFile) { it.parentFile }
+            .map { File(it, relative) }.first { it.isFile }
+        return Json.parseToJsonElement(file.readText()).jsonObject
+    }
+
+    @Test fun linkConflictsMatchWindowsAtMillisecondPrecision() {
+        val fixture = seriesConflictFixture("series-links")
+        val base = fixture.getValue("base").jsonObject
+        for (row in fixture.getValue("cases").jsonArray) {
+            val sample = row.jsonObject
+            fun link(key: String): TaskSeriesLink =
+                Json.decodeFromJsonElement(JsonObject(base + sample.getValue(key).jsonObject))
+            val a = link("a")
+            val b = link("b")
+            val expected = link(sample.getValue("winner").jsonPrimitive.content)
+            val name = sample.getValue("id").jsonPrimitive.content
+            fun data(link: TaskSeriesLink) = TodoData(1, now, emptyList(), taskSeriesLinks = listOf(link))
+            assertEquals(name, listOf(expected), MergeUtils.mergeTodoData(data(a), data(b)).taskSeriesLinks)
+            assertEquals(name, listOf(expected), MergeUtils.mergeTodoData(data(b), data(a)).taskSeriesLinks)
+        }
+    }
+
+    @Test fun nameConflictsMatchWindowsAtMillisecondPrecision() {
+        val fixture = seriesConflictFixture("series-names")
+        val base = fixture.getValue("base").jsonObject
+        for (row in fixture.getValue("cases").jsonArray) {
+            val sample = row.jsonObject
+            fun series(key: String): TaskSeries =
+                Json.decodeFromJsonElement(JsonObject(base + sample.getValue(key).jsonObject))
+            val a = series("a")
+            val b = series("b")
+            val deletion = sample.getValue("deleted_at")
+            val deletedAt = if (deletion == JsonNull) null else deletion.jsonPrimitive.content
+            val expected = series(sample.getValue("winner").jsonPrimitive.content)
+                .copy(deleted = deletedAt != null, deleted_at = deletedAt)
+            val name = sample.getValue("id").jsonPrimitive.content
+            fun data(series: TaskSeries) = TodoData(1, now, emptyList(), taskSeries = listOf(series))
+            assertEquals(name, listOf(expected), MergeUtils.mergeTodoData(data(a), data(b)).taskSeries)
+            assertEquals(name, listOf(expected), MergeUtils.mergeTodoData(data(b), data(a)).taskSeries)
+        }
+    }
+
     @Test fun summaryCountsPeriodsAndOnlyUnlinkedSameTypeNames() {
         val base = continued(); val current = base.todos.last()
         assertTrue(TaskSeriesLogic.associationSummary(base, current.id).unlinkedSameName.isEmpty())
@@ -162,7 +213,12 @@ class TaskSeriesTest {
         val result = TaskSeriesLogic.edit(renamed, base, task.copy(targetCount = 8), now)
         assertEquals("同步新名", TaskSeriesLogic.display(result, task.id)); assertEquals(8, result.todos.last().targetCount)
         val newName = TaskSeriesLogic.edit(base, base, task.copy(content = "改名"), now)
-        assertEquals(task.updatedAt, newName.todos.last().updatedAt); assertTrue(newName.taskSeries.single().content_renamed)
+        assertEquals(base.todos, newName.todos)
+        assertTrue(newName.taskSeries.single().content_renamed)
+        assertTrue(TaskSeriesLogic.visible(newName).all { it.content == "改名" })
+        val independent = todo()
+        val unrelated = newName.copy(todos = newName.todos + independent)
+        assertEquals(independent.content, TaskSeriesLogic.display(unrelated, independent.id))
         val changed = base.copy(todos = base.todos.map { if (it.id == task.id) it.copy(completedDates = listOf("2026-10-13")) else it })
         assertTrue(runCatching { TaskSeriesLogic.edit(changed, base, task.copy(completedDates = listOf("2026-10-14")), now) }.isFailure)
         assertEquals(listOf("2026-10-13"), changed.todos.last().completedDates)

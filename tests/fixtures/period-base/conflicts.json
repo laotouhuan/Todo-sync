@@ -1,0 +1,1122 @@
+{
+  "version": 1,
+  "scope": "approved-period-whole-base-ms-fixed-content",
+  "cases": [
+    {
+      "id": "same-time-business",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "z",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "aa",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:00:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "newer-whole",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "保留旧正文",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": "旧"
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "较新整条",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:01:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "较新整条",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:01:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "actual-time-over-string",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "aaaaaaaa",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T09:00:00+08:00",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "b",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:30:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "b",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:30:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "offset-same-instant",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "z",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T09:00:00+08:00",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "aa",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:00:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "sub-ms-business-tie",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "z",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00.0009Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00.0001Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "aa",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:00:00.0001Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "no-delete-priority",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "z",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": true,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "aa",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:00:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "unknown-business-extension",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null,
+          "extension": {
+            "future": "z"
+          }
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null,
+          "extension": {
+            "future": "aa"
+          }
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "任务",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:00:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": null,
+        "extension": {
+          "future": "aa"
+        }
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "fixed-label-normalization",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": " ﻿é　"
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": "é"
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "任务",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:00:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": "é"
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "nested-defaults-and-extensions",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": {
+            "reminder_time": "08:30",
+            "extension": [
+              "原值"
+            ]
+          },
+          "subtasks": [
+            {
+              "id": "child",
+              "content": "子任务",
+              "extension": {
+                "keep": true
+              }
+            }
+          ],
+          "label": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": {
+            "reminder_time": "08:30",
+            "extension": [
+              "原值"
+            ],
+            "reminder_date": null,
+            "repeat_daily": false
+          },
+          "subtasks": [
+            {
+              "id": "child",
+              "content": "子任务",
+              "extension": {
+                "keep": true
+              },
+              "completed": false,
+              "completed_at": null
+            }
+          ],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "任务",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:00:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": 3,
+        "reminder": {
+          "reminder_time": "08:30",
+          "extension": [
+            "原值"
+          ],
+          "reminder_date": null,
+          "repeat_daily": false
+        },
+        "subtasks": [
+          {
+            "id": "child",
+            "content": "子任务",
+            "extension": {
+              "keep": true
+            },
+            "completed": false,
+            "completed_at": null
+          }
+        ],
+        "label": null
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "metadata-canonical-digest",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T09:00:00+08:00",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "任务",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:00:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "weekly-monthly-base-tie",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "周版",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "月版",
+          "date": "2026-11",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "monthly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "月版",
+        "date": "2026-11",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:00:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "monthly_checkin",
+        "completed_dates": [],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "legacy-base-defaults",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "旧周任务",
+          "task_type": "weekly_checkin",
+          "date": "2026-W45",
+          "created_at": "2026-11-01T00:00:00Z"
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "旧周任务",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-01T00:00:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": null,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "base-choice-then-extra-dates",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "z",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [
+            "2026-11-05"
+          ],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [
+            "2026-11-06"
+          ],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "aa",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:00:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [
+          "2026-11-06"
+        ],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": [
+        "2026-11-05",
+        "2026-11-06"
+      ]
+    },
+    {
+      "id": "complete-after-independent-date-merge",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [
+            "2026-11-03",
+            "2026-11-04"
+          ],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [
+            "2026-11-05"
+          ],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "任务",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:00:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [
+          "2026-11-05"
+        ],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": [
+        "2026-11-03",
+        "2026-11-04",
+        "2026-11-05"
+      ]
+    },
+    {
+      "id": "invalid-base-clocks-fixed-content",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "z",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "bad-clock",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "aa",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "aa",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "valid-base-clock-over-invalid",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "aaaaaaaa",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "bad-clock",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "b",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "b",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:00:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": 3,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": []
+    },
+    {
+      "id": "target-count-whole-base-tie",
+      "records": [
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 3,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        },
+        {
+          "id": "30000000-0000-4000-8000-000000000001",
+          "content": "任务",
+          "date": "2026-W45",
+          "time": null,
+          "completed": false,
+          "completed_at": null,
+          "created_at": "2026-11-01T00:00:00Z",
+          "updated_at": "2026-11-05T01:00:00Z",
+          "order": 0,
+          "deleted": false,
+          "recurring": "none",
+          "task_type": "weekly_checkin",
+          "completed_dates": [],
+          "target_count": 5,
+          "reminder": null,
+          "subtasks": [],
+          "label": null
+        }
+      ],
+      "winner": {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "content": "任务",
+        "date": "2026-W45",
+        "time": null,
+        "completed": false,
+        "completed_at": null,
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-05T01:00:00Z",
+        "order": 0,
+        "deleted": false,
+        "recurring": "none",
+        "task_type": "weekly_checkin",
+        "completed_dates": [],
+        "target_count": 5,
+        "reminder": null,
+        "subtasks": [],
+        "label": null
+      },
+      "expected_dates": []
+    }
+  ]
+}

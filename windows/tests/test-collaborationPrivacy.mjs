@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { parse } from 'acorn';
 import { mergeCollaborations } from '../src/dataMerge.js';
+import { mainStoreHarness } from './mainStoreHarness.mjs';
 
 const local = {
     id: 'a', name: '本机清单', webdav_url: 'https://example.invalid/dav/',
@@ -45,17 +46,20 @@ describe('实际页面的旧凭据清理与失败保护', () => {
         const commands = [];
         const statuses = [];
         const messages = [];
-        const load = runInNewContext(source.slice(node.start, node.end) + ';loadData', {
+        const state = {};
+        const store = mainStoreHarness(state, async () => {});
+        const load = runInNewContext('let personalLoadRequest = 0, _lastRenderedHash = "";' + source.slice(node.start, node.end) + ';loadData', {
             invoke: async command => {
                 commands.push(command);
                 if (command === failingCommand) throw new Error('模拟失败');
                 if (command === 'get_app_config') return { sync_mode: 'webdav' };
+                if (command === 'read_personal_target') return {target:'test',data:'{"todos":[]}'};
                 if (command === 'read_todo_data' || command === 'fetch_from_cloud') return '{"todos":[]}';
                 if (command === 'read_collaborations_data') return JSON.stringify({ collaborations: [local] });
                 if (command === 'fetch_collaborations_from_cloud') return JSON.stringify({ collaborations: [{ ...local, webdav_password: '' }] });
                 if (command === 'get_collaborations') return [];
             },
-            appState: {}, setSyncStatus: state => statuses.push(state),
+            appState: state, dataStore: store, parsePersonalData: JSON.parse, learningUI: {refresh() {}}, setSyncStatus: state => statuses.push(state),
             SyncState: { SYNCING: 'syncing', ERROR: 'error' },
             normalizeLearningData: data => data, migrateAndNormalize() {}, render() {},
             mergeTodoData: localData => ({ data: localData, changed: false, cloudChanged: false }),

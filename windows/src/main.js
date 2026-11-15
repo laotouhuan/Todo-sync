@@ -1,3 +1,6 @@
+import { createDataCoordinator } from './dataCoordinator.js';
+import { bindRecordRecoverySettings } from './recordRecoverySettings.js';
+import { bindRecordSandbox } from './recordSandboxSettings.js';
 import { createPeriodTaskView } from './periodTaskView.js';
 import { seriesFor, savePeriodEdit, displayTaskName, periodType, isSeriesDeleted, periodMembers, visibleSeriesTodos } from './taskSeries.js';
 import { learningSnapshot, requirePersonalTarget, createCollaborationSubmissions } from './collaborationView.js';
@@ -21,6 +24,7 @@ import { evaluateReminderRule } from './reminderRuleUtils.js';
 import { applyLabelChange } from './labelUtils.js';
 import { createLabelManager } from './labelManager.js';
 import { editTimelineSubtask } from './timelineEditor.js';
+import { applyReminderSettingsEdit, normalizeReminderSettings } from './reminderSettingsConflict.js';
 import {
     getMonthlyCompletedCount, getWeeklyCompletedCount,
     mergeCollaborations, mergeTodoData, migrateAndNormalize
@@ -29,12 +33,10 @@ import {
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
-let pendingAnimations = 0;
-
 // ====== State ======
 const appState = {
     todoData: { version: 1, last_updated: new Date().toISOString(), todos: [], time_entries: [], daily_reviews: [] },
-    saveVersion: 0, // 递增版本号，防止自身写入触发的文件变更重载
+    dataRevision: 0,
     currentView: 'list', // 'list' | 'stats'
     appConfig: {},
     isPinned: false,
@@ -75,25 +77,71 @@ const appState = {
     collabError: null                     // 协作异常信息
 };
 
+const dataStore = createDataCoordinator({ getData: () => appState.todoData, persist: _doSaveData,
+    install: data => { appState.todoData = data; appState.dataRevision++; } });
+
 const learningUI = createLearningView({ state: appState, commit: commitLearning,
-    redraw: () => render(), sync: async () => { await _saveQueue; await loadData(); }, toast: message => showToast(message),
-    periods: () => periodUI,
+    redraw: () => render(), sync: async () => { await dataStore.idle; await loadData(); }, toast: message => showToast(message),
+    periods: () => periodUI, planning: () => statsPlanningController,
+    openWeek: day => navigateStats('week', new Date(day + 'T12:00:00')),
     exportFile: ({ filename, content }) => invoke('export_review_markdown', { filename, content }) });
 
 const periodUI = createPeriodTaskView({ state: appState, commit: commitPeriodData, toast: showToast, relationSaved: refreshEditRelations });
+let statsPlanningController;
+let navigatingStats = false;
+
+async function beforeStatsLeave() {
+    if (navigatingStats) return false;
+    navigatingStats = true;
+    try {
+        if (!await learningUI.beforeSourceChange()) return false;
+        return !statsPlanningController || await statsPlanningController.beforeLeave(() => learningUI.chooseLeave('周计划'));
+    } finally { navigatingStats = false; }
+}
+
+async function navigateStats(period, date, scrollToReview = false) {
+    if (!await beforeStatsLeave()) return;
+    appState.statsPeriod = period;
+    appState.statsTargetDate = date;
+    document.querySelectorAll('.stats-period-tabs .tab-btn[data-period]').forEach(button =>
+        button.classList.toggle('active', button.dataset.period === period));
+    render();
+    if (scrollToReview) document.getElementById('daily-review-card')?.scrollIntoView({ block: 'start' });
+    if (period === 'week') document.getElementById('stats-planning')?.scrollIntoView({ block: 'nearest' });
+}
 
 function commitPeriodData(change) {
     requirePersonalTarget(appState.activeSource);
-    const operation = _saveQueue.then(async () => {
-        requirePersonalTarget(appState.activeSource);
-        const previous = appState.todoData;
-        const next = change(structuredClone(previous));
-        normalizeLearningData(next);
-        appState.todoData = next;
-        if (!await _doSaveData()) { appState.todoData = previous; throw new Error('保存失败，请重试'); }
-        _lastRenderedHash = ''; render();
-    });
-    _saveQueue = operation.catch(() => {}); return operation;
+    return commitPersonal(change);
+}
+
+async function commitPersonal(change, options = {}) {
+    const source = options.target || { ...appState.activeSource };
+    requirePersonalTarget(source);
+    const result = await dataStore.commit(change, options);
+    _lastRenderedHash = ''; render(); learningUI.refresh();
+    return result;
+}
+
+// 无表单的直接操作失败时保留可重试的操作和目标代次。
+async function commitAction(change) {
+    const ticket = dataStore.ticket();
+    try { await commitPersonal(change, { ticket }); return true; }
+    catch (error) {
+        showToast('保存失败：' + (error.message || error));
+        const banner = document.createElement('div'); banner.className = 'learning-banner';
+        banner.append(document.createTextNode('此操作未保存。'));
+        const retry = document.createElement('button'); retry.textContent = '重试';
+        retry.onclick = async () => {
+            retry.disabled = true;
+            try { await commitPersonal(change, { ticket }); banner.remove(); }
+            catch (failure) { showToast(failure.message || String(failure)); }
+            finally { retry.disabled = false; }
+        };
+        const discard = document.createElement('button'); discard.textContent = '放弃'; discard.onclick = () => banner.remove();
+        banner.append(retry, discard); document.querySelector('main')?.before(banner);
+        render(); return false;
+    }
 }
 
 function refreshEditRelations() {
@@ -108,16 +156,25 @@ function refreshEditRelations() {
     learningUI.compactEditor();
 }
 
-function acceptPeriodMove(before, todoId) {
+function acceptPeriodMove(before, next, todoId) {
     const series = seriesFor(before, todoId); if (!series) return true;
-    const original = before.todos.find(t => t.id === todoId), draft = appState.todoData.todos.find(t => t.id === todoId);
+    const original = before.todos.find(t => t.id === todoId), draft = next.todos.find(t => t.id === todoId);
     if (draft.date === original.date && draft.task_type === original.task_type) return true;
-    try {
-        if (periodType(draft) !== series.period_type && !window.confirm('更改类型将解除这一期的周期关联，历史记录保留。继续？')) { appState.todoData = before; render(); return false; }
-        const updated = savePeriodEdit(before, original, draft, series);
-        appState.todoData.task_series_links = updated.task_series_links;
-        return true;
-    } catch (error) { appState.todoData = before; showToast(error.message); render(); return false; }
+    if (periodType(draft) !== series.period_type && !window.confirm('更改类型将解除这一期的周期关联，历史记录保留。继续？')) { render(); return false; }
+    return true;
+}
+
+function commitDrag(before, next) {
+    return commitAction(data => {
+        let result = data;
+        for (const original of before.todos) {
+            const draft = next.todos.find(t => t.id === original.id);
+            if (draft && JSON.stringify(original) !== JSON.stringify(draft)) {
+                result = savePeriodEdit(result, original, draft, seriesFor(before, original.id), new Date().toISOString(), before.task_series_links);
+            }
+        }
+        return result;
+    });
 }
 
 const labelManager = createLabelManager({ getTodos: () => visibleSeriesTodos(appState.todoData), commit: commitPersonalLabels });
@@ -182,35 +239,16 @@ function showReadOnlyTask(todo) {
 }
 
 function commitPersonalLabels(plan, target) {
-    const operation = _saveQueue.then(async () => {
-        const result = applyLabelChange(appState.todoData.todos, plan, target, new Date().toISOString());
-        if (!result.count) return 0;
-        const previous = appState.todoData;
-        appState.todoData = { ...previous, todos: result.todos };
-        if (!await _doSaveData({ preserveRecords: true })) { appState.todoData = previous; throw new Error('保存失败，请重试'); }
-        _lastRenderedHash = ''; render(); learningUI.refresh();
-        return result.count;
-    });
-    _saveQueue = operation.catch(() => {}); return operation;
+    let count = 0;
+    return commitPersonal(data => {
+        const result = applyLabelChange(data.todos, plan, target, new Date().toISOString());
+        data.todos = result.todos; count = result.count;
+    }, { preserveRecords: true, target: { type: 'personal' } }).then(() => count);
 }
 
 function commitLearning(change, target = { ...appState.activeSource }) {
     requirePersonalTarget(target);
-    const operation = _saveQueue.then(async () => {
-        normalizeLearningData(appState.todoData);
-        const previous = { time_entries: appState.todoData.time_entries, daily_reviews: appState.todoData.daily_reviews };
-        const next = structuredClone(appState.todoData);
-        change(next);
-        appState.todoData.time_entries = next.time_entries;
-        appState.todoData.daily_reviews = next.daily_reviews;
-        if (!await _doSaveData()) {
-            Object.assign(appState.todoData, previous);
-            throw new Error('保存失败，请重试');
-        }
-        _lastRenderedHash = ''; render(); learningUI.refresh();
-    });
-    _saveQueue = operation.catch(() => {});
-    return operation;
+    return commitPersonal(data => { normalizeLearningData(data); change(data); }, { target });
 }
 
 // 模块级拖拽状态（替代 window 全局属性）
@@ -220,8 +258,6 @@ let _currentlyHoveredHeaderType = null;
 // 渲染差异检测
 let _lastRenderedHash = '';
 
-// 保存队列（串行化并发写入）
-let _saveQueue = Promise.resolve();
 let _pendingMidnightRefresh = false;
 
 // ====== 共享常量 ======
@@ -264,12 +300,25 @@ function deepClone(obj) {
 }
 
 const SyncState = { IDLE: 'idle', SYNCING: 'syncing', ERROR: 'error' };
+let todoSyncState = SyncState.IDLE;
+let planningSyncState = SyncState.IDLE;
 
 function setSyncStatus(state) {
+    todoSyncState = state;
+    renderSyncStatus();
+}
+
+function setPlanningSyncStatus(state) {
+    planningSyncState = state;
+    renderSyncStatus();
+}
+
+function renderSyncStatus() {
     if (statusEl) {
-        statusEl.classList.remove('syncing', 'error');
-        if (state === SyncState.SYNCING) statusEl.classList.add('syncing');
-        else if (state === SyncState.ERROR) statusEl.classList.add('error');
+        const states = [todoSyncState];
+        if (appState.activeSource.type === 'personal') states.push(planningSyncState);
+        statusEl.classList.toggle('error', states.includes(SyncState.ERROR));
+        statusEl.classList.toggle('syncing', !states.includes(SyncState.ERROR) && states.includes(SyncState.SYNCING));
     }
 }
 
@@ -393,40 +442,165 @@ function applyTaskType(todo, taskType, targetCount) {
 }
 
 // ====== Data I/O ======
+let personalLoadRequest = 0;
+
+function parsePersonalData(value) {
+    const data = typeof value === 'string' ? JSON.parse(value) : structuredClone(value);
+    if (!data || !Array.isArray(data.todos)) throw new Error('任务数据格式无效，已保留当前清单');
+    return mergeTodoData(data, null).data;
+}
+
+async function showLegacyCache(legacy, { openDialog = false } = {}) {
+    if (!legacy) return;
+    const ticket = dataStore.ticket();
+    // 仅记住目标和旧文件的摘要；旧缓存变化后重新提示，不存储任务正文。
+    const bytes = new TextEncoder().encode(typeof legacy === 'string' ? legacy : JSON.stringify(legacy));
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    const fingerprint = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+    if (!dataStore.current(ticket)) return;
+    const storageKey = `todo-legacy-cache-notice:${ticket.target}`;
+    try {
+        if (!openDialog && localStorage.getItem(storageKey) === fingerprint) return;
+    } catch { /* 本机存储不可用时仍允许查看旧缓存。 */ }
+    const existing = document.getElementById('legacy-cache-notice');
+    if (existing) {
+        if (openDialog) existing.querySelector('button').click();
+        return;
+    }
+    const data = parsePersonalData(legacy);
+    const banner = document.createElement('div'); banner.id = 'legacy-cache-notice'; banner.className = 'learning-banner';
+    const message = document.createElement('span'); message.textContent = '旧版本地缓存已保留，可查看与导入。';
+    message.title = message.textContent;
+    banner.append(message);
+    function dismiss() {
+        if (!dataStore.current(ticket)) return;
+        try { localStorage.setItem(storageKey, fingerprint); }
+        catch { showToast('本次已关闭提示，但无法保存“不再提醒”的设置'); }
+        banner.remove();
+    }
+    const review = document.createElement('button'); review.textContent = '查看与导入';
+    review.onclick = () => {
+        const dialog = document.createElement('dialog'); dialog.className = 'learning-dialog legacy-cache-dialog';
+        const description = document.createElement('p');
+        description.textContent = `旧缓存含 ${data.todos.length} 项任务、${data.time_entries.length} 条计时、${data.daily_reviews.length} 篇复盘。导入会按现有同步规则合并到当前连接：${appState.appConfig.webdav_filepath || '默认远端文件'}。选择不再提醒会保留旧缓存，以后仍可从设置中查看。`;
+        const preview = document.createElement('pre'); preview.textContent = data.todos.slice(0, 20).map(t => t.content).join('\n');
+        const error = document.createElement('p'), confirm = document.createElement('button'), cancel = document.createElement('button');
+        confirm.textContent = '确认合并到当前清单'; cancel.textContent = '保留旧缓存，不再提醒';
+        confirm.className = 'modal-btn primary'; cancel.className = 'modal-btn secondary';
+        error.className = 'learning-error';
+        confirm.onclick = async () => {
+            confirm.disabled = true;
+            try { await commitPersonal(current => mergeTodoData(current, structuredClone(data)).data, { ticket }); dismiss(); dialog.close(); }
+            catch (failure) { error.textContent = failure.message || String(failure); }
+            finally { confirm.disabled = false; }
+        };
+        cancel.onclick = () => { dismiss(); dialog.close(); };
+        const actions = document.createElement('div'); actions.className = 'legacy-cache-actions';
+        actions.append(confirm, cancel); dialog.append(description, preview, error, actions);
+        dialog.addEventListener('close', () => dialog.remove()); document.body.append(dialog); dialog.showModal();
+    };
+    const ignore = document.createElement('button'); ignore.textContent = '不再提醒';
+    ignore.title = '保留旧缓存，不再提醒'; ignore.onclick = dismiss;
+    banner.append(review, ignore);
+    if (openDialog) review.click();
+    else document.querySelector('main')?.before(banner);
+}
+
+async function reviewLegacyCache() {
+    const ticket = dataStore.ticket();
+    if (!ticket.target) { showToast('请等待当前清单加载完成'); return; }
+    try {
+        const local = await invoke('read_personal_target', { config: appState.appConfig });
+        if (!dataStore.current(ticket)) return;
+        if (!local.legacy_data) { showToast('当前没有需要导入的旧版缓存'); return; }
+        await showLegacyCache(local.legacy_data, { openDialog: true });
+    } catch (error) { showToast('读取旧版缓存失败：' + (error.message || error)); }
+}
+
+async function saveSettings(config, reminder, ticket) {
+    return dataStore.enqueue(async () => {
+        if (!dataStore.current(ticket)) throw new Error('设置所属清单已变化，请重新打开设置');
+        personalLoadRequest++;
+        // 提醒属于打开设置时的旧目标，先完成其持久化。
+        if (appState.personalTarget) {
+            await dataStore.commitNow(data => {
+                const previous = normalizeReminderSettings(data.reminder_settings);
+                const edited = applyReminderSettingsEdit(previous, reminder);
+                if (previous.enabled !== edited.enabled || previous.privacy_mode !== edited.privacy_mode || JSON.stringify(previous.global_rules) !== JSON.stringify(edited.global_rules)) {
+                    data.reminder_settings = { ...edited, updated_at: new Date().toISOString() };
+                }
+            }, { preserveRecords: true });
+        }
+        const next = await invoke('read_personal_target', { config });
+        if (next.target !== appState.personalTarget && document.querySelector('#edit-modal.active, dialog[open]')) {
+            throw new Error('请先保存或关闭当前编辑窗口，再切换同步目标；草稿仍保留');
+        }
+        let data;
+        if (next.target === appState.personalTarget) {
+            data = appState.todoData;
+        } else if (config.sync_mode === 'webdav') {
+            try {
+                const cloud = parsePersonalData(await invoke('fetch_from_cloud', { config }));
+                data = next.data === null ? cloud : mergeTodoData(parsePersonalData(next.data), cloud).data;
+            } catch (error) {
+                if (error !== 'FILE_NOT_FOUND') throw error;
+                if (!window.confirm('新同步目标还没有数据文件。是否创建空白清单？当前清单仍保留在原目标。')) throw new Error('已取消连接');
+                data = parsePersonalData({ version: 1, todos: [] });
+            }
+        } else {
+            if (next.missing && !window.confirm('新文件夹还没有数据文件。是否使用空白清单？当前清单仍保留在原文件夹。')) throw new Error('已取消连接');
+            data = parsePersonalData(next.data);
+        }
+        await invoke('activate_personal_target', { config, data: JSON.stringify(data) });
+        appState.appConfig = config; appState.personalTarget = next.target;
+        dataStore.activate(next.target, data);
+        document.getElementById('legacy-cache-notice')?.remove();
+        closeEditModal(); _lastRenderedHash = ''; render(); learningUI.refresh();
+    });
+}
+
 async function loadData() {
+    const request = ++personalLoadRequest;
+    let stamp = dataStore.ticket();
+    const isCurrent = () => request === personalLoadRequest && dataStore.current(stamp);
     try {
         setSyncStatus(SyncState.SYNCING);
-        appState.appConfig = await invoke("get_app_config");
-
-        let localJsonStr = await invoke("read_todo_data").catch(() => "{}");
-        let localData = null;
-        try { localData = JSON.parse(localJsonStr); } catch (e) {}
-        // 乐观渲染：无论何种同步模式，先用本地缓存立即呈现界面，避免等待网络时白屏
-        if (localData && localData.todos) {
-            appState.todoData = normalizeLearningData(localData);
-            appState.todoData.todos.forEach(migrateAndNormalize);
-        } else if (!appState.todoData || !appState.todoData.todos) {
-            appState.todoData = { version: 1, last_updated: new Date().toISOString(), todos: [] };
-        }
-        render(); // ★ 立即渲染，保证用户打开即可看到内容并交互
-
-        if (appState.appConfig.sync_mode === 'webdav') {
+        const config = appState.personalTarget ? appState.appConfig : await invoke('get_app_config');
+        const local = await invoke('read_personal_target', { config });
+        if (!isCurrent()) return;
+        await dataStore.enqueue(async () => {
+            if (!isCurrent()) return;
+            if (!appState.personalTarget && local.data !== null) {
+                const data = parsePersonalData(local.data);
+                appState.appConfig = config; appState.personalTarget = local.target;
+                dataStore.activate(local.target, data); stamp = dataStore.ticket();
+            } else if (local.data !== null) {
+                const merged = mergeTodoData(structuredClone(appState.todoData), parsePersonalData(local.data));
+                if (merged.changed) await dataStore.commitNow(() => merged.data, {});
+            }
+            render();
+        });
+        if (!isCurrent()) return;
+        if (config.sync_mode === 'webdav') {
             try {
-                let cloudJsonStr = await invoke("fetch_from_cloud");
-                let cloudData = JSON.parse(cloudJsonStr);
-
-                let { data: mergedData, changed, cloudChanged } = mergeTodoData(localData, cloudData);
-                appState.todoData = mergedData;
-                render();
-
-                if (changed || cloudChanged) {
-                    await saveData();
-                    showToast('检测到云端更新，已自动同步完成');
-                }
+                const cloudData = parsePersonalData(await invoke('fetch_from_cloud', { config }));
+                await dataStore.enqueue(async () => {
+                    if (!isCurrent()) return;
+                    if (!appState.personalTarget) {
+                        // 无可信缓存时先读取远端，绝不使用旧版本共用缓存作为回退。
+                        await invoke('activate_personal_target', { config, data: JSON.stringify(cloudData) });
+                        appState.appConfig = config; appState.personalTarget = local.target;
+                        dataStore.activate(local.target, cloudData); stamp = dataStore.ticket();
+                    } else {
+                        const merged = mergeTodoData(structuredClone(appState.todoData), cloudData);
+                        if (merged.changed || merged.cloudChanged) await dataStore.commitNow(() => merged.data, { force: true });
+                    }
+                    _lastRenderedHash = ''; render(); learningUI.refresh();
+                });
             } catch (e) {
-                if (e === "FILE_NOT_FOUND") {
-                    console.log("Cloud file not found, but parent folder exists. Initializing cloud database with local data...");
-                    await saveData();
+                if (!isCurrent()) return;
+                if (e === 'FILE_NOT_FOUND' && appState.personalTarget) {
+                    await dataStore.commit(data => data, { ticket: stamp, force: true });
                 } else {
                     console.error("WebDAV pull failed, using local cache:", e);
                     setSyncStatus(SyncState.ERROR);
@@ -439,46 +613,55 @@ async function loadData() {
             }
         }
 
+        if (!isCurrent()) return;
+
+        if (appState.personalTarget && local.legacy_data) await showLegacyCache(local.legacy_data);
+        if (!isCurrent()) return;
+
         // 同步协作源数据
-        let localCollabsStr = await invoke("read_collaborations_data");
-        let localCollabs = null;
-        try { localCollabs = JSON.parse(localCollabsStr); } catch (e) {}
-        if (!localCollabs || !localCollabs.collaborations) {
-            localCollabs = { version: 1, last_updated: "", collaborations: [] };
-        }
+        await dataStore.enqueue(async () => {
+            if (!isCurrent()) return;
+            let localCollabsStr = await invoke("read_collaborations_data");
+            let localCollabs = null;
+            try { localCollabs = JSON.parse(localCollabsStr); } catch (e) {}
+            if (!localCollabs || !localCollabs.collaborations) {
+                localCollabs = { version: 1, last_updated: "", collaborations: [] };
+            }
 
-        if (appState.appConfig.sync_mode === 'webdav') {
-            try {
-                let cloudCollabsStr = await invoke("fetch_collaborations_from_cloud");
-                let cloudCollabs = JSON.parse(cloudCollabsStr);
+            if (appState.appConfig.sync_mode === 'webdav') {
+                try {
+                    let cloudCollabsStr = await invoke("fetch_collaborations_from_cloud");
+                    let cloudCollabs = JSON.parse(cloudCollabsStr);
 
-                let { data: mergedCollabs, changed: collabsChanged } = mergeCollaborations(localCollabs, cloudCollabs);
-                if (collabsChanged) {
-                    await invoke("write_collaborations_data", { data: JSON.stringify(mergedCollabs) });
-                }
-                // 即使元数据未变化，也由后端覆盖云端旧密码字段。
-                await invoke("sync_collaborations_to_cloud", { data: JSON.stringify(mergedCollabs) });
-            } catch (e) {
-                if (e === "FILE_NOT_FOUND") {
-                    await invoke("sync_collaborations_to_cloud", { data: JSON.stringify(localCollabs) });
-                } else {
-                    console.error("Fetch collaborations from cloud failed:", e);
-                    setSyncStatus(SyncState.ERROR);
-                    showToast("协作配置同步失败，云端旧凭据可能尚未清理，请重试");
+                    let { data: mergedCollabs, changed: collabsChanged } = mergeCollaborations(localCollabs, cloudCollabs);
+                    if (collabsChanged) {
+                        await invoke("write_collaborations_data", { data: JSON.stringify(mergedCollabs) });
+                    }
+                    // 即使元数据未变化，也由后端覆盖云端旧密码字段。
+                    await invoke("sync_collaborations_to_cloud", { data: JSON.stringify(mergedCollabs) });
+                } catch (e) {
+                    if (e === "FILE_NOT_FOUND") {
+                        await invoke("sync_collaborations_to_cloud", { data: JSON.stringify(localCollabs) });
+                    } else {
+                        console.error("Fetch collaborations from cloud failed:", e);
+                        setSyncStatus(SyncState.ERROR);
+                        showToast("协作配置同步失败，云端旧凭据可能尚未清理，请重试");
+                    }
                 }
             }
-        }
 
-        // 重新获取活跃的协作列表
-        appState.collaborations = await invoke("get_collaborations").catch(() => []);
+            // 重新获取活跃的协作列表
+            appState.collaborations = await invoke("get_collaborations").catch(() => []);
 
-        updateSourceSelector();
+            updateSourceSelector();
+        });
 
         if (statusEl && !statusEl.classList.contains('error')) {
             setTimeout(() => setSyncStatus(SyncState.IDLE), 500);
-        return true;
         }
+        return true;
     } catch (e) {
+        if (!isCurrent()) return;
         console.error("Failed to load data:", e);
         setSyncStatus(SyncState.ERROR);
         showToast("数据加载失败，请检查本机数据或凭据存储后重试");
@@ -671,13 +854,13 @@ function updateSourceSelector() {
 
 
 
-function purgeOldDeletedTodos() {
-    if (!appState.todoData || !appState.todoData.todos) return;
+function purgeOldDeletedTodos(data = appState.todoData) {
+    if (!data || !data.todos) return;
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - PURGE_DELETED_AFTER_DAYS);
     
-    const originalCount = appState.todoData.todos.length;
-    appState.todoData.todos = appState.todoData.todos.filter(t => {
+    const originalCount = data.todos.length;
+    data.todos = data.todos.filter(t => {
         if (t.deleted) {
             const updateTime = t.updated_at ? new Date(t.updated_at) : new Date(t.created_at);
             if (isNaN(updateTime.getTime()) || updateTime < sevenDaysAgo) {
@@ -688,7 +871,7 @@ function purgeOldDeletedTodos() {
         return true;
     });
     
-    const purgedCount = originalCount - appState.todoData.todos.length;
+    const purgedCount = originalCount - data.todos.length;
     if (purgedCount > 0) {
         console.log(`[Purge] 自动物理清理了 ${purgedCount} 个已删除超过 7 天的旧任务记录。`);
     }
@@ -987,28 +1170,23 @@ function collectGlobalRulesFromUI() {
     return rules.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
 }
 
-function saveData(options) {
-    _saveQueue = _saveQueue.then(() => _doSaveData(options)).catch(e => console.error('Save failed:', e));
-    return _saveQueue;
-}
-
-async function _doSaveData({ preserveRecords = false } = {}) {
+async function _doSaveData(data, { preserveRecords = false } = {}) {
     try {
         setSyncStatus(SyncState.SYNCING);
         // 执行物理清理，将删除超 7 天的旧任务彻底抹除，维持 JSON 大小
         if (!preserveRecords) {
-            normalizeLearningData(appState.todoData);
-            purgeOldDeletedTodos();
+            normalizeLearningData(data);
+            purgeOldDeletedTodos(data);
         }
         
-        appState.todoData.last_updated = new Date().toISOString();
-        const jsonStr = JSON.stringify(appState.todoData, null, 2);
-        appState.saveVersion++;
-        await invoke("write_todo_data", { data: jsonStr });
+        data.last_updated = new Date().toISOString();
+        const jsonStr = JSON.stringify(data, null, 2);
+        const target = appState.personalTarget;
+        await invoke("write_todo_data", { data: jsonStr, target });
 
         if (appState.appConfig.sync_mode === 'webdav') {
             try {
-                await invoke("sync_to_cloud", { data: jsonStr });
+                await invoke("sync_to_cloud", { data: jsonStr, target });
             } catch (e) {
                 console.error("WebDAV push failed:", e);
                 showToast("推送至云端失败: " + e);
@@ -1022,7 +1200,7 @@ async function _doSaveData({ preserveRecords = false } = {}) {
     } catch (e) {
         console.error("Failed to save data:", e);
         setSyncStatus(SyncState.ERROR);
-        return false;
+        throw new Error('保存失败：' + (e.message || e));
     }
 }
 
@@ -1205,18 +1383,18 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
             subLi.querySelector('.subtask-checkbox').addEventListener('click', async (e) => {
                 e.stopPropagation();
                 if (source.type !== 'personal' || appState.activeSource.type !== 'personal') return;
-                sub.completed = !sub.completed;
-                sub.completed_at = sub.completed ? new Date().toISOString() : null;
-                todo.updated_at = new Date().toISOString();
-                
-                const allCompleted = todo.subtasks.length > 0 && todo.subtasks.every(s => s.completed);
-                if (appState.appConfig.complete_parent_with_subtasks === true && allCompleted && !todo.completed) {
-                    todo.completed = true;
-                    todo.completed_at = new Date().toISOString();
-                }
-
-                render();
-                saveData(); // 不再 await，避免与防抖的 autoSave 产生双重保存
+                const completed = !sub.completed;
+                await commitAction(data => {
+                    const current = data.todos.find(t => t.id === todo.id && !t.deleted);
+                    const child = current?.subtasks.find(s => s.id === sub.id);
+                    if (!child) throw new Error('子步骤已删除');
+                    child.completed = completed;
+                    child.completed_at = completed ? new Date().toISOString() : null;
+                    current.updated_at = new Date().toISOString();
+                    if (appState.appConfig.complete_parent_with_subtasks === true && current.subtasks.every(s => s.completed) && !current.completed) {
+                        current.completed = true; current.completed_at = new Date().toISOString();
+                    }
+                });
             });
             subtasksList.appendChild(subLi);
         });
@@ -1227,109 +1405,74 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
         if (source.type !== 'personal' || appState.activeSource.type !== 'personal') return;
         if (li.classList.contains('completing')) return;
 
-        const index = appState.todoData.todos.findIndex(t => t.id === todo.id);
-        if (index === -1) return;
-        const t = appState.todoData.todos[index];
-
-        const todayISO = getTodayString();
-        const isCheckinCompletedTodayBefore = (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin')
-            && t.completed_dates && t.completed_dates.some(dStr => dStr.startsWith(todayStr));
-        const isVisualCompletedBefore = checkinDate !== null ? true : (t.completed || isCheckinCompletedTodayBefore);
-
-        if (checkinDate !== null) {
-            const dateIdx = t.completed_dates.findIndex(d => d.startsWith(checkinDate));
-            if (dateIdx > -1) {
-                t.completed_dates.splice(dateIdx, 1);
-            }
-            if (t.target_count) {
-                t.completed = t.completed_dates.length >= t.target_count;
-                t.completed_at = t.completed ? (t.completed_at || new Date().toISOString()) : null;
-            } else {
-                t.completed = false;
-                t.completed_at = null;
-            }
-            t.updated_at = new Date().toISOString();
-        }
-        else if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
-            t.completed_dates = t.completed_dates || [];
-
-            if (t.completed) {
-                showToast('已达到目标次数！如需消卡，请点击文本进入编辑弹窗。');
-                return;
-            }
-
-            if (t.completed_dates.some(d => d.startsWith(todayISO))) {
-                showToast('今天已打卡！如需消卡，请点击文本进入编辑弹窗。');
-                return;
-            }
-
-            t.completed_dates.push(new Date().toISOString());
-            t.completed_dates.sort();
-
-            const currentPeriodCount = t.task_type === 'weekly_checkin' 
-                ? getWeeklyCompletedCount(t) 
-                : getMonthlyCompletedCount(t);
-            if (t.target_count && currentPeriodCount >= t.target_count) {
-                t.completed = true;
-                t.completed_at = new Date().toISOString();
-            }
-
-            t.updated_at = new Date().toISOString();
-        }
-        else {
-            t.completed = !t.completed;
-            if (t.completed) {
-                t.completed_at = new Date().toISOString();
-                if (appState.appConfig.complete_subtasks_with_parent === true && t.subtasks && t.subtasks.length > 0) {
-                    t.subtasks.forEach(s => {
-                        if (!s.completed) {
-                            s.completed = true;
-                            s.completed_at = new Date().toISOString();
-                        }
-                    });
-                }
-            } else {
-                t.completed_at = null;
-                // 不联动取消子代办
-            }
-            t.updated_at = new Date().toISOString();
-        }
-
-        const isCheckinCompletedTodayAfter = (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin')
-            && t.completed_dates && t.completed_dates.some(dStr => dStr.startsWith(todayStr));
-        const isVisualCompletedAfter = checkinDate !== null ? true : (t.completed || isCheckinCompletedTodayAfter);
-
-        const checkbox = li.querySelector('.checkbox');
-        const checkboxSvg = checkbox.querySelector('svg');
-        if (isVisualCompletedAfter) {
-            li.classList.add('completed');
-            if (checkboxSvg) checkboxSvg.style.opacity = '1';
-        } else {
-            li.classList.remove('completed');
-            if (checkboxSvg) checkboxSvg.style.opacity = '0';
-        }
-
-        if (isVisualCompletedBefore === isVisualCompletedAfter) {
-            await saveData();
-            render();
-            return;
-        }
-
-        li.style.maxHeight = li.scrollHeight + 'px';
-        li.offsetHeight;
         li.classList.add('completing');
-        li.style.maxHeight = '0px';
+        await commitAction(data => {
+            const t = data.todos.find(t => t.id === todo.id && !t.deleted);
+            if (!t) throw new Error('任务已删除');
 
-        pendingAnimations++;
-        setTimeout(async () => {
-            pendingAnimations--;
-            if (pendingAnimations === 0) {
-                await saveData();
-                render();
-            } else {
-                await saveData();
+            const todayISO = getTodayString();
+
+            if (checkinDate !== null) {
+                const dateIdx = t.completed_dates.findIndex(d => d.startsWith(checkinDate));
+                if (dateIdx > -1) {
+                    t.completed_dates.splice(dateIdx, 1);
+                }
+                if (t.target_count) {
+                    t.completed = t.completed_dates.length >= t.target_count;
+                    t.completed_at = t.completed ? (t.completed_at || new Date().toISOString()) : null;
+                } else {
+                    t.completed = false;
+                    t.completed_at = null;
+                }
+                t.updated_at = new Date().toISOString();
             }
-        }, 350);
+            else if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
+                t.completed_dates = t.completed_dates || [];
+
+                if (t.completed) {
+                    showToast('已达到目标次数！如需消卡，请点击文本进入编辑弹窗。');
+                    return;
+                }
+
+                if (t.completed_dates.some(d => d.startsWith(todayISO))) {
+                    showToast('今天已打卡！如需消卡，请点击文本进入编辑弹窗。');
+                    return;
+                }
+
+                t.completed_dates.push(new Date().toISOString());
+                t.completed_dates.sort();
+
+                const currentPeriodCount = t.task_type === 'weekly_checkin'
+                    ? getWeeklyCompletedCount(t)
+                    : getMonthlyCompletedCount(t);
+                if (t.target_count && currentPeriodCount >= t.target_count) {
+                    t.completed = true;
+                    t.completed_at = new Date().toISOString();
+                }
+
+                t.updated_at = new Date().toISOString();
+            }
+            else {
+                t.completed = !t.completed;
+                if (t.completed) {
+                    t.completed_at = new Date().toISOString();
+                    if (appState.appConfig.complete_subtasks_with_parent === true && t.subtasks && t.subtasks.length > 0) {
+                        t.subtasks.forEach(s => {
+                            if (!s.completed) {
+                                s.completed = true;
+                                s.completed_at = new Date().toISOString();
+                            }
+                        });
+                    }
+                } else {
+                    t.completed_at = null;
+                    // 不联动取消子代办
+                }
+                t.updated_at = new Date().toISOString();
+            }
+
+        });
+        li.classList.remove('completing');
     });
 
     li.querySelector('.todo-info').addEventListener('click', (e) => {
@@ -1391,6 +1534,8 @@ let activeCheckinDropdown = null;
 
 function showCheckinDropdown(cellEl, todo, dateStr, onCustomUpdate = null) {
     if (appState.activeSource.type !== 'personal') return;
+    const baseline = structuredClone(todo);
+    todo = structuredClone(todo);
     // 1. Remove existing dropdown
     if (activeCheckinDropdown) {
         const isSame = activeCheckinDropdown.dataset.cellId === dateStr;
@@ -1471,7 +1616,7 @@ function showCheckinDropdown(cellEl, todo, dateStr, onCustomUpdate = null) {
         if (onCustomUpdate) {
             await onCustomUpdate(todo);
         } else {
-            await onDropdownCheckinUpdate(todo);
+            await onDropdownCheckinUpdate(todo, baseline);
         }
         dropdown.remove();
         activeCheckinDropdown = null;
@@ -1527,7 +1672,7 @@ function showCheckinDropdown(cellEl, todo, dateStr, onCustomUpdate = null) {
     }, 50);
 }
 
-async function onDropdownCheckinUpdate(todo) {
+async function onDropdownCheckinUpdate(todo, baseline) {
     if (appState.activeSource.type !== 'personal') return;
     // Recompute completed status if target_count is set
     if (todo.target_count) {
@@ -1543,15 +1688,14 @@ async function onDropdownCheckinUpdate(todo) {
     
     todo.updated_at = new Date().toISOString();
     
-    // Save to global state and trigger sync
-    const index = appState.todoData.todos.findIndex(t => t.id === todo.id);
-    if (index > -1) {
-        appState.todoData.todos[index] = todo;
-    }
-    
-    render();
-    renderEditCheckinGrid(todo);
-    await saveData();
+    await commitAction(data => {
+        const current = data.todos.find(t => t.id === todo.id && !t.deleted);
+        if (!current) throw new Error('任务已删除');
+        if (JSON.stringify(current.completed_dates) !== JSON.stringify(baseline.completed_dates)) throw new Error('打卡记录已变化，请重新打开并核对');
+        current.completed_dates = todo.completed_dates;
+        current.completed = todo.completed; current.completed_at = todo.completed_at;
+        current.updated_at = new Date().toISOString();
+    });
 }
 
 function renderMonthCalendar(container, todo, isInteractive, todayStr, onCustomUpdate = null) {
@@ -1655,6 +1799,7 @@ function renderEditCheckinGrid(todo) {
     const handleDraftUpdate = async (updatedDraft) => {
         appState.currentEditingCompletedDates = [...updatedDraft.completed_dates];
         renderEditCheckinGrid(draftTodo);
+        learningUI.updateEditorSummary('edit-checkin-section');
     };
 
     if (todo.task_type === 'weekly_checkin') {
@@ -1700,6 +1845,7 @@ function renderEditCheckinGrid(todo) {
 
 // ====== Edit Subtasks ======
 function renderEditSubtasks() {
+    learningUI.updateEditorSummary('edit-subtasks-section');
     const listEl = document.getElementById('edit-subtasks-list');
     if (!listEl) return;
     listEl.innerHTML = '';
@@ -1742,6 +1888,7 @@ function renderEditSubtasks() {
         checkbox.addEventListener('click', () => {
             sub.completed = !sub.completed;
             sub.completed_at = sub.completed ? new Date().toISOString() : null;
+            learningUI.updateEditorSummary('edit-subtasks-section');
             if (sub.completed) {
                 li.classList.add('completed');
                 checkbox.style.background = 'var(--accent-color)';
@@ -1789,6 +1936,7 @@ function renderEditSubtasks() {
 
         textarea.addEventListener('blur', saveSubtaskEdit);
         textarea.addEventListener('keydown', (e) => {
+            if (e.isComposing || e.keyCode === 229) return;
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 textarea.blur();
@@ -1915,20 +2063,6 @@ async function saveEditModal() {
             draft.target_count = (isNaN(val) || val <= 0) ? null : val;
         }
 
-        const completedAtRow = document.getElementById('edit-completed-at-row');
-        const compDateInput = document.getElementById('edit-completed-date');
-        const compTimeInput = document.getElementById('edit-completed-time');
-        if (completedAtRow && completedAtRow.style.display !== 'none' && draft.completed && compDateInput && compTimeInput) {
-            const compDateVal = compDateInput.value;
-            const compTimeVal = compTimeInput.value;
-            if (compDateVal) {
-                const completedAt = combineLocalDateAndTimeToISO(compDateVal, compTimeVal);
-                if (completedAt) {
-                    draft.completed_at = completedAt;
-                }
-            }
-        }
-
         const reminderSwitch = document.getElementById('edit-reminder-switch');
         if (reminderSwitch && reminderSwitch.checked) {
             const rDateEl = document.getElementById('edit-reminder-date');
@@ -1973,7 +2107,18 @@ async function saveEditModal() {
         if (draft.task_type === baseline.task_type && JSON.stringify(draft.completed_dates) === JSON.stringify(baseline.completed_dates) && draft.target_count === baseline.target_count && JSON.stringify(draft.subtasks) === JSON.stringify(baseline.subtasks)) {
             draft.completed = baseline.completed; draft.completed_at = baseline.completed_at;
         }
-        await commitPeriodData(latest => savePeriodEdit(latest, baseline, draft, appState.currentEditingSeries, new Date().toISOString(), appState.currentEditingLinks));
+        // 显式时间编辑最后应用；未编辑时保留原始秒、毫秒、时区及 null。
+        if (draft.task_type === 'normal' && draft.completed && baseline.completed) {
+            const date = document.getElementById('edit-completed-date');
+            const time = document.getElementById('edit-completed-time');
+            if (JSON.stringify([date.value, time.value]) !== appState.currentEditingCompletedForm) {
+                const value = combineLocalDateAndTimeToISO(date.value, time.value);
+                if (!value || !date.validity.valid || !time.validity.valid) throw new Error('请输入有效的完成日期和时间');
+                draft.completed_at = value;
+            }
+        }
+        const series = structuredClone(appState.currentEditingSeries), links = structuredClone(appState.currentEditingLinks);
+        await commitPersonal(latest => savePeriodEdit(latest, baseline, draft, series, new Date().toISOString(), links), { ticket: appState.currentEditingTicket });
         closeEditModal(); _lastRenderedHash = ''; render();
     } catch (e) {
         console.error("Save edit modal failed:", e);
@@ -2009,20 +2154,20 @@ function updateEditModalFields(taskTypeVal) {
 function openTimelineSubtask(todo, subtask) {
     if (appState.activeSource.type === 'collaboration') { editTimelineSubtask(todo, subtask, null); return; }
     const source = { ...appState.activeSource };
+    const ticket = dataStore.ticket();
     editTimelineSubtask(todo, subtask, async patch => {
         if (source.type !== appState.activeSource.type || source.id !== appState.activeSource.id) throw new Error('清单已切换，请重新打开');
         requirePersonalTarget(source);
-        const operation = _saveQueue.then(async () => {
-            const data = appState.todoData;
+        await commitPersonal(data => {
             const current = data?.todos.find(t => t.id === todo.id && !t.deleted);
-            if (!current?.subtasks.some(s => s.id === subtask.id)) throw new Error('该子步骤已删除');
+            const child = current?.subtasks.find(s => s.id === subtask.id);
+            if (!child) throw new Error('该子步骤已删除');
+            if (Object.entries(patch).every(([key, value]) => child[key] === value)) return;
+            if (Object.entries(patch).some(([key, value]) => child[key] !== subtask[key] && child[key] !== value)) throw new Error('子步骤已变化，请保留输入并核对最新记录');
             const draft = { ...current, updated_at: new Date().toISOString(),
                 subtasks: current.subtasks.map(s => s.id === subtask.id ? { ...s, ...patch } : s) };
-            const previous = data.todos;
-            data.todos = previous.map(t => t.id === draft.id ? draft : t);
-            if (!await _doSaveData()) { data.todos = previous; throw new Error('保存失败，请重试'); }
-        });
-        _saveQueue = operation.catch(() => {}); await operation;
+            data.todos = data.todos.map(t => t.id === draft.id ? draft : t);
+        }, { ticket });
         _lastRenderedHash = ''; render();
     });
 }
@@ -2032,6 +2177,7 @@ function openEditModal(todo) {
     if (appState.activeSource.type === 'collaboration') { showReadOnlyTask(todo); return; }
     todo = { ...(appState.todoData.todos.find(t => t.id === todo.id) || todo), content: displayTaskName(appState.todoData, todo.id) };
     appState.currentEditingTodo = structuredClone(todo);
+    appState.currentEditingTicket = dataStore.ticket();
     appState.currentEditingBaseline = structuredClone(todo);
     appState.currentEditingSeries = structuredClone(seriesFor(appState.todoData, todo.id));
     appState.currentEditingLinks = structuredClone(appState.todoData.task_series_links || []);
@@ -2130,6 +2276,7 @@ function openEditModal(todo) {
     }
 
     appState.currentEditingReminderForm = JSON.stringify(['edit-reminder-switch', 'edit-reminder-date', 'edit-reminder-time', 'edit-reminder-repeat-daily'].map(id => { const field = document.getElementById(id); return (id === 'edit-reminder-switch' || id === 'edit-reminder-repeat-daily') ? field?.checked : field?.value; }));
+    appState.currentEditingCompletedForm = JSON.stringify(['edit-completed-date', 'edit-completed-time'].map(id => document.getElementById(id).value));
     learningUI.compactEditor(true);
     modal.classList.add('active');
     const input = document.getElementById('edit-content');
@@ -2183,7 +2330,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     const activeTodos = getActiveTodos().filter(t => !t.deleted).map(t => ({ ...t, content: displayTaskName(appState.activeSource.type === "personal" ? appState.todoData : appState.collabData, t.id, t.content) }));
     let periodTodos = [];
     if (appState.statsPeriod === 'day') {
-        labelEl.textContent = targetDayStr;
+        labelEl.textContent = `${targetDayStr} · 周${'日一二三四五六'[appState.statsTargetDate.getDay()]}`;
         periodTodos = activeTodos.filter(t => {
             if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
                 return (t.completed_dates || []).some(dStr => dStr.startsWith(targetDayStr));
@@ -3195,7 +3342,12 @@ function render() {
         appState.appConfig.time_tracking_enabled !== false
     ].join('|');
     const snapshot = learningSnapshot(appState);
-    const _hash = JSON.stringify([appState.todoData.task_series, appState.todoData.task_series_links]) + getActiveTodos().map(t => `${t.id}:${t.updated_at}:${t.completed}`).join('|') + '|' + uiStateHash + '|' + JSON.stringify([snapshot.data.time_entries, snapshot.data.daily_reviews, [...snapshot.conflicts]]);
+    const activeData = appState.activeSource.type === 'collaboration' ? appState.collabData : appState.todoData;
+    statsPlanningController?.setContext(appState.activeSource.type === 'personal' ? appState.personalTarget : null,
+        appState.statsPeriod, formatDate(appState.statsTargetDate), appState.appConfig,
+        appState.currentView === 'stats' && appState.statsSubTab === 'insights');
+    renderSyncStatus();
+    const _hash = JSON.stringify([activeData.task_series, activeData.task_series_links]) + getActiveTodos().map(t => `${t.id}:${t.updated_at}:${t.completed}`).join('|') + '|' + uiStateHash + '|' + JSON.stringify([snapshot.data.time_entries, snapshot.data.daily_reviews, [...snapshot.conflicts]]);
     if (_hash === _lastRenderedHash) return;
     _lastRenderedHash = _hash;
 
@@ -3376,7 +3528,8 @@ function render() {
                         document.querySelectorAll('.collapsible-header').forEach(el => el.classList.remove('drag-hover-header'));
 
                         const draggedId = evt.item.dataset.id;
-                        const todoMap = new Map(appState.todoData.todos.map(t => [t.id, t]));
+                        const moveDraft = structuredClone(appState.todoData);
+                        const todoMap = new Map(moveDraft.todos.map(t => [t.id, t]));
                         const t = todoMap.get(draggedId);
                         const moveBaseline = structuredClone(appState.todoData);
                         const originalTaskType = t?.task_type;
@@ -3412,9 +3565,8 @@ function render() {
                             }
                             t.order = -Date.now();
                             t.updated_at = new Date().toISOString();
-                            if (!acceptPeriodMove(moveBaseline, draggedId)) return;
-                            render();
-                            await saveData();
+                            if (!acceptPeriodMove(moveBaseline, moveDraft, draggedId)) return;
+                            await commitDrag(moveBaseline, moveDraft);
                             return;
                         }
 
@@ -3491,9 +3643,8 @@ function render() {
                         }
                         
                         if (stateChanged) {
-                            if (t && !acceptPeriodMove(moveBaseline, draggedId)) return;
-                            render();
-                            await saveData();
+                            if (t && !acceptPeriodMove(moveBaseline, moveDraft, draggedId)) return;
+                            await commitDrag(moveBaseline, moveDraft);
                         }
                     }
                 };
@@ -3535,7 +3686,9 @@ function render() {
                     onEnd: async function(evt) {
                         if (appState.activeSource.type !== 'personal') return;
                         _currentlyDraggedTodoId = null;
-                        const todoMap = new Map(appState.todoData.todos.map(t => [t.id, t]));
+                        const moveBaseline = structuredClone(appState.todoData);
+                        const moveDraft = structuredClone(moveBaseline);
+                        const todoMap = new Map(moveDraft.todos.map(t => [t.id, t]));
                         let stateChanged = false;
                         
                         const items = Array.from(container.querySelectorAll('.todo-item'));
@@ -3551,8 +3704,7 @@ function render() {
                         });
                         
                         if (stateChanged) {
-                            render();
-                            await saveData();
+                            await commitDrag(moveBaseline, moveDraft);
                         }
                     }
                 };
@@ -3644,6 +3796,15 @@ function initApp() {
 
     // 设置同步目录/WebDAV
     const settingsBtn = document.getElementById('settings-btn');
+    bindRecordRecoverySettings(document, invoke, () => appState.appConfig);
+    bindRecordSandbox(document, invoke);
+    const statsPlanning = document.getElementById('stats-planning');
+    if (statsPlanning?.querySelector) {
+        statsPlanningController = bindRecordSandbox(document, invoke, statsPlanning, setPlanningSyncStatus);
+        statsPlanning.addEventListener('planning-day', event => {
+            void navigateStats('day', new Date(event.detail + 'T12:00:00'), true);
+        });
+    }
     const settingsModal = document.getElementById('settings-modal');
     const settingsCancelBtn = document.getElementById('settings-cancel-btn');
     const settingsSaveBtn = document.getElementById('settings-save-btn');
@@ -3710,20 +3871,12 @@ function initApp() {
 
     if (settingsBtn) {
         settingsBtn.addEventListener('click', async () => {
+            appState.settingsTicket = dataStore.ticket();
             if (settingsModal) {
                 settingsModal.classList.add('active');
             }
 
-            try {
-                const fetchedConfig = await invoke("get_app_config");
-                if (fetchedConfig) {
-                    appState.appConfig = fetchedConfig;
-                }
-            } catch (e) {
-                console.error("Failed to fetch app config:", e);
-            }
-
-            const config = appState.appConfig || {};
+            const config = appState.personalTarget ? appState.appConfig : await invoke('get_app_config');
 
             if (settingSyncMode) settingSyncMode.value = config.sync_mode || 'local';
             if (settingSyncPath) settingSyncPath.value = config.sync_path || '';
@@ -3862,29 +4015,18 @@ function initApp() {
 
             if (!newConfig.time_tracking_enabled && !await learningUI.prepareDisable()) return;
 
-            if (newConfig.sync_mode === 'local' && newConfig.sync_path) {
-                try {
-                    await invoke("set_sync_path", { newPath: newConfig.sync_path });
-                } catch (e) {
-                    console.error("Failed to set sync path on save:", e);
-                }
-            }
-
-            await invoke("save_app_config", { config: newConfig });
-            clearShareOutput();
-            appState.appConfig = newConfig;
-            _lastRenderedHash = ''; learningUI.refresh(); render();
-
-            // 保存提醒配置到 todoData
             const privacySelect = document.getElementById('setting-privacy-mode');
-            appState.todoData.reminder_settings = {
-                updated_at: new Date().toISOString(),
+            const reminder = {
                 enabled: reminderHiddenInput ? (reminderHiddenInput.value === 'true') : true,
                 privacy_mode: privacySelect ? (privacySelect.value === 'true') : false,
                 global_rules: collectGlobalRulesFromUI()
             };
-            
-            if (!await saveData({ preserveRecords: true })) throw new Error('偏好已保存，但提醒设置保存失败，请重试');
+            await saveSettings(newConfig, reminder, appState.settingsTicket);
+            clearShareOutput();
+            const rs = appState.todoData.reminder_settings;
+            applyReminderToggleVisual(rs.enabled !== false);
+            if (privacySelect) privacySelect.value = String(rs.privacy_mode || false);
+            renderGlobalRules(rs.global_rules || []);
             if (settingsModal) settingsModal.classList.remove('active');
             await loadData();
             } catch (e) { showToast('设置保存失败：' + (e.message || String(e))); }
@@ -4011,7 +4153,7 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
     if (sourceSelector) {
         sourceSelector.addEventListener('change', async (e) => {
             const val = e.target.value;
-            if (!await learningUI.beforeSourceChange()) { updateSourceSelector(); return; }
+            if (!await beforeStatsLeave()) { updateSourceSelector(); return; }
             closeEditModal();
             if (val === 'personal') {
                 appState.activeSource = { type: 'personal' };
@@ -4265,6 +4407,9 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
         });
     }
 
+    const legacyCacheBtn = document.getElementById('legacy-cache-btn');
+    if (legacyCacheBtn) legacyCacheBtn.addEventListener('click', reviewLegacyCache);
+
     // 备份恢复按钮
     const backupBtn = document.getElementById('backup-btn');
     const backupModal = document.getElementById('backup-modal');
@@ -4291,10 +4436,17 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
                         li.addEventListener('click', async () => {
                             if (confirm(`确定要恢复备份 ${b} 吗？当前数据会被覆盖（覆盖前会自动保存一个新快照）。`)) {
                                 try {
-                                    await invoke('restore_backup', { filename: b });
+                                    const ticket = dataStore.ticket();
+                                    await dataStore.enqueue(async () => {
+                                        if (!dataStore.current(ticket)) throw new Error('同步目标已变化');
+                                        personalLoadRequest++;
+                                        await invoke('restore_backup', { filename: b });
+                                        const restored = await invoke('read_personal_target', { config: appState.appConfig });
+                                        dataStore.activate(restored.target, parsePersonalData(restored.data));
+                                        _lastRenderedHash = ''; render(); learningUI.refresh();
+                                    });
                                     showToast('恢复成功！');
                                     backupModal.classList.remove('active');
-                                    loadData();
                                 } catch (e) {
                                     showToast('恢复失败: ' + e);
                                 }
@@ -4322,7 +4474,9 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
     const statsContainerEl = document.getElementById('stats-container');
     const statsBtn = document.getElementById('stats-btn');
 
-    const toggleStatsView = (enterStats) => {
+    const toggleStatsView = async (enterStats, selectListTab = () => {}) => {
+        if (!await beforeStatsLeave()) return false;
+        selectListTab();
         const tabToday = document.getElementById('tab-today');
         const tabAll = document.getElementById('tab-all');
         if (enterStats) {
@@ -4373,6 +4527,7 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
             }
         }
         render();
+        return true;
     };
 
     if (statsBtn) {
@@ -4383,7 +4538,8 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
 
     // 统计二级子页签切换
     document.querySelectorAll('.stats-sub-tabs .tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
+            if (!await beforeStatsLeave()) return;
             appState.statsSubTab = btn.dataset.subtab;
             document.querySelectorAll('.stats-sub-tabs .tab-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
@@ -4413,46 +4569,47 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
             if (btn.classList.contains('btn-postpone')) {
                 const tomorrow = new Date();
                 tomorrow.setDate(tomorrow.getDate() + 1);
-                todo.date = formatDate(tomorrow);
-                todo.updated_at = new Date().toISOString();
-                showToast('已延期至明天');
+                if (await commitAction(data => {
+                    const current = data.todos.find(t => t.id === id && !t.deleted);
+                    if (!current) throw new Error('任务已删除');
+                    current.date = formatDate(tomorrow); current.updated_at = new Date().toISOString();
+                })) showToast('已延期至明天');
             } else if (btn.classList.contains('btn-delete')) {
                 periodUI.remove(todo.id);
                 return;
             }
-            render();
-            await saveData();
         });
     }
 
     // 统计周期切换（统一事件绑定）
     document.querySelectorAll('.stats-period-tabs .tab-btn[data-period]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            appState.statsPeriod = btn.dataset.period;
-            document.querySelectorAll('.stats-period-tabs .tab-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            render();
-        });
+        btn.addEventListener('click', () => navigateStats(btn.dataset.period, appState.statsTargetDate));
     });
 
     const statsPrevBtn = document.getElementById('stats-prev-btn');
     if (statsPrevBtn) {
         statsPrevBtn.addEventListener('click', () => {
-            if (appState.statsPeriod === 'day') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() - 1);
-            else if (appState.statsPeriod === 'week') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() - 7);
-            else appState.statsTargetDate.setMonth(appState.statsTargetDate.getMonth() - 1);
-            render();
+            stepStatsDate(-1);
         });
     }
 
     const statsNextBtn = document.getElementById('stats-next-btn');
     if (statsNextBtn) {
         statsNextBtn.addEventListener('click', () => {
-            if (appState.statsPeriod === 'day') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() + 1);
-            else if (appState.statsPeriod === 'week') appState.statsTargetDate.setDate(appState.statsTargetDate.getDate() + 7);
-            else appState.statsTargetDate.setMonth(appState.statsTargetDate.getMonth() + 1);
-            render();
+            stepStatsDate(1);
         });
+    }
+
+    function stepStatsDate(direction) {
+        const { statsPeriod: period, statsTargetDate } = appState;
+        const date = new Date(statsTargetDate);
+        if (period === 'month') {
+            const day = date.getDate();
+            date.setDate(1);
+            date.setMonth(date.getMonth() + direction);
+            date.setDate(Math.min(day, new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()));
+        } else date.setDate(date.getDate() + direction * (period === 'week' ? 7 : 1));
+        void navigateStats(period, date);
     }
 
     // 统计筛选下拉菜单事件绑定
@@ -4502,17 +4659,16 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
     const clearSearchBtn = document.getElementById('clear-search-btn');
 
     if (tabToday) {
-        tabToday.addEventListener('click', () => {
+        tabToday.addEventListener('click', () => toggleStatsView(false, () => {
             appState.dateFilter = 'today';
             tabToday.classList.add('active');
             if (tabAll) tabAll.classList.remove('active');
             if (allSubTabs) allSubTabs.classList.add('hidden');
-            toggleStatsView(false);
-        });
+        }));
     }
 
     if (tabAll) {
-        tabAll.addEventListener('click', () => {
+        tabAll.addEventListener('click', () => toggleStatsView(false, () => {
             appState.dateFilter = 'all';
             tabAll.classList.add('active');
             if (tabToday) tabToday.classList.remove('active');
@@ -4527,8 +4683,7 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
                     if (subTabUncompleted) subTabUncompleted.classList.remove('active');
                 }
             }
-            toggleStatsView(false);
-        });
+        }));
     }
 
     // 搜索按钮切换显隐
@@ -4605,6 +4760,7 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
     const addSubtaskInput = document.getElementById('add-subtask-input');
     if (addSubtaskInput) {
         addSubtaskInput.addEventListener('keydown', (e) => {
+            if (e.isComposing || e.keyCode === 229) return;
             if (e.key === 'Enter') {
                 e.preventDefault();
                 document.getElementById('add-subtask-btn').click();
@@ -4863,32 +5019,29 @@ async function createAndAddTodo(raw) {
     }
 
     // 个人模式
-    const activeLocal = appState.todoData.todos.filter(t => !t.deleted && !t.completed && typeof t.order === 'number');
-    let orderVal = Date.now();
-    if (defaultInsertion === 'bottom') {
-        const maxOrder = activeLocal.length > 0 ? Math.max(...activeLocal.map(t => t.order)) : Date.now();
-        orderVal = maxOrder + 1;
-    } else {
-        const minOrder = activeLocal.length > 0 ? Math.min(...activeLocal.map(t => t.order)) : Date.now();
-        orderVal = minOrder - 1;
-    }
-
     const todo = createTodo(content, finalDate, subtasks);
-    todo.order = orderVal;
     applyTaskType(todo, taskType, targetCount);
+    try {
+        await commitPersonal(data => {
+            const activeLocal = data.todos.filter(t => !t.deleted && !t.completed && typeof t.order === 'number');
+            let orderVal = Date.now();
+            if (defaultInsertion === 'bottom') {
+                const maxOrder = activeLocal.length > 0 ? Math.max(...activeLocal.map(t => t.order)) : Date.now();
+                orderVal = maxOrder + 1;
+            } else {
+                const minOrder = activeLocal.length > 0 ? Math.min(...activeLocal.map(t => t.order)) : Date.now();
+                orderVal = minOrder - 1;
+            }
 
-    appState.todoData.todos.push(todo);
-    render();
-    await saveData();
-    return true;
+            todo.order = orderVal;
+            data.todos.push(structuredClone(todo));
+        });
+        return true;
+    } catch (error) { showToast('新增失败，请重试：' + (error.message || error)); return false; }
 }
 
     // Watch file changes
     listen("todo_data_changed", () => {
-        if (appState.saveVersion > 0) {
-            appState.saveVersion--; // 消耗掉自身写入产生的文件变更事件
-            return;
-        }
         if (appState.appConfig.sync_mode === 'webdav') return; // WebDAV 模式下避免死循环
         loadData();
     });
@@ -4900,7 +5053,7 @@ async function createAndAddTodo(raw) {
     bindAutocomplete(quickAddInput, quickAddAutocompleteList);
     
     listen('trigger-quick-add', async (event) => {
-        if (!await learningUI.beforeSourceChange()) return;
+        if (!await beforeStatsLeave()) return;
         closeEditModal();
         if (appState.activeSource.type !== 'personal') {
             appState.activeSource = { type: 'personal' };
@@ -4954,7 +5107,7 @@ async function createAndAddTodo(raw) {
 
     // 全局拖动支持
     document.addEventListener('mousedown', (e) => {
-        const isInteractive = e.target.closest('button, input, textarea, select, label, .checkbox, .edit-btn, .tab-btn, .todo-item, .collapsible-header, .reminder-bar, .reminder-btn, .clear-search-btn, .modal, .modal-content');
+        const isInteractive = e.target.closest('button, input, textarea, select, label, summary, .checkbox, .edit-btn, .tab-btn, .todo-item, .collapsible-header, .reminder-bar, .reminder-btn, .clear-search-btn, .modal, .modal-content');
         const anyModalActive = document.querySelector('.modal.active') !== null;
         const isScrollbar = e.offsetX > e.target.clientWidth || e.offsetY > e.target.clientHeight;
 

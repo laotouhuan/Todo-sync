@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,8 +52,11 @@ fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: S
     val progress = rememberClockSweep(period, target, ref, parts, events)
     var selectedPoints by remember { mutableStateOf<List<VerticalCompletion>>(emptyList()) }
     var selectedParts by remember { mutableStateOf<List<TimerArc>>(emptyList()) }
+    var tooltipParts by remember { mutableStateOf<List<TimerArc>>(emptyList()) }
+    var tooltipAnchor by remember { mutableStateOf(Offset.Zero) }
+    var canvasOrigin by remember { mutableStateOf(Offset.Zero) }
     var editingSteps by remember { mutableStateOf<List<Pair<Todo, Subtask>>>(emptyList()) }
-    LaunchedEffect(period, target, ref, parts, events) { selectedParts = emptyList(); selectedPoints = emptyList(); editingSteps = emptyList() }
+    LaunchedEffect(period, target, ref, parts, events) { selectedParts = emptyList(); selectedPoints = emptyList(); editingSteps = emptyList(); tooltipParts = emptyList() }
     val month = period == "month"
     val density = LocalDensity.current
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -62,7 +67,8 @@ fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: S
         fun yAt(minute: Double) = top + (minute / 1440 * height).toFloat()
         val points = events.map { e -> e to Offset((days.indexOf(e.date) + .5f) * stridePx + with(density) { (if (e.subtask == null) 6 else -6).dp.toPx() }, yAt(StatsTimeline.clockMinute(e.time))) }
         val paint = remember(density, labelColor) { Paint(Paint.ANTI_ALIAS_FLAG).apply { color = labelColor.toArgb(); textSize = with(density) { 10.sp.toPx() }; textAlign = Paint.Align.CENTER } }
-        fun select(offset: Offset) {
+        fun select(offset: Offset, longPress: Boolean = false) {
+            tooltipParts = emptyList()
             val dayIndex = floor(offset.x / stridePx).toInt()
             val date = days.getOrNull(dayIndex) ?: return
             val nearby = points.filter { it.first.date == date && (it.second - offset).getDistance() <= with(density) { 10.dp.toPx() } }.map { it.first }
@@ -73,7 +79,11 @@ fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: S
             }
             val minute = (offset.y - top) / height * 1440
             if (minute !in 0f..1440f || abs(offset.x - (dayIndex + .5f) * stridePx) > with(density) { 12.dp.toPx() }) return
-            selectedParts = StatsTimeline.hitSegments(parts, date, minute, 10f).distinctBy { it.part.entry.id to it.part.date }
+            val hits = StatsTimeline.hitSegments(parts, date, minute, 10f).distinctBy { it.part.entry.id to it.part.date }
+            if (longPress) {
+                tooltipParts = hits
+                tooltipAnchor = canvasOrigin + offset
+            } else selectedParts = hits
             selectedPoints = emptyList()
         }
         Row(Modifier.fillMaxWidth()) {
@@ -84,8 +94,12 @@ fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: S
             }
             key(period, target, ref) {
                 Box(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
-                    Canvas(Modifier.width(stride * days.size).height(356.dp).pointerInput(points, parts, days, stridePx) {
-                        detectTapGestures(onTap = { select(it) }, onLongPress = { select(it) })
+                    Canvas(Modifier.width(stride * days.size).height(356.dp).onGloballyPositioned {
+                        val origin = it.positionInWindow()
+                        if (origin != canvasOrigin) tooltipParts = emptyList()
+                        canvasOrigin = origin
+                    }.pointerInput(points, parts, days, stridePx) {
+                        detectTapGestures(onTap = { select(it) }, onLongPress = { select(it, longPress = true) })
                     }) {
                         val lineWidth = (if (month) 3 else 6).dp.toPx()
                         days.forEachIndexed { index, date ->
@@ -127,6 +141,7 @@ fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: S
         confirmButton = { TextButton(onClick = { selectedPoints = emptyList(); selectedParts = emptyList() }) { Text("关闭") } }
     )
     if (selectedParts.isNotEmpty()) TimelineRecordEditor(viewModel, selectedParts.map { it.part.entry.id }.distinct()) { selectedParts = emptyList() }
+    if (tooltipParts.isNotEmpty()) TimelineTimerTooltip(tooltipParts, tooltipAnchor) { tooltipParts = emptyList() }
     if (editingSteps.isNotEmpty()) TimelineSubtaskPicker(viewModel, editingSteps) { editingSteps = emptyList() }
 }
 

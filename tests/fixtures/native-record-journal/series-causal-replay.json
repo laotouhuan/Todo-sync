@@ -1,0 +1,1140 @@
+{
+  "baseline": {
+    "future": {
+      "keep": [
+        "原值"
+      ]
+    },
+    "last_updated": "2026-11-07T02:00:00Z",
+    "task_series": [
+      {
+        "content": "系列",
+        "content_updated_at": "2026-11-07T02:00:00Z",
+        "created_at": "2026-11-07T02:00:00Z",
+        "id": "50000000-0000-4000-8000-000000000020",
+        "period_type": "week",
+        "updated_at": "2026-11-07T02:00:00Z"
+      }
+    ],
+    "task_series_links": [
+      {
+        "created_at": "2026-11-07T02:00:00Z",
+        "period": "2026-W45",
+        "series_id": "50000000-0000-4000-8000-000000000020",
+        "todo_id": "50000000-0000-4000-8000-000000000012",
+        "updated_at": "2026-11-07T02:00:00Z"
+      }
+    ],
+    "time_entries": [
+      {
+        "created_at": "2026-11-07T02:00:00Z",
+        "ended_at": null,
+        "id": "50000000-0000-4000-8000-000000000030",
+        "started_at": "2026-11-07T02:00:00Z",
+        "task_ref": {
+          "todo_id": "50000000-0000-4000-8000-000000000012"
+        },
+        "updated_at": "2026-11-07T02:00:00Z"
+      }
+    ],
+    "todos": [
+      {
+        "completed": false,
+        "completed_at": null,
+        "completed_dates": [],
+        "content": "既有普通任务",
+        "created_at": "2026-11-07T02:00:00Z",
+        "date": null,
+        "deleted": false,
+        "id": "50000000-0000-4000-8000-000000000010",
+        "label": null,
+        "order": 0,
+        "recurring": "none",
+        "reminder": null,
+        "subtasks": [],
+        "target_count": null,
+        "task_type": "normal",
+        "time": null,
+        "updated_at": "2026-11-07T02:00:00Z"
+      },
+      {
+        "completed": true,
+        "completed_at": "2026-11-07T02:00:00Z",
+        "completed_dates": [
+          "2026-11-07"
+        ],
+        "content": "已打卡的任务",
+        "created_at": "2026-11-07T02:00:00Z",
+        "date": "2026-W45",
+        "id": "50000000-0000-4000-8000-000000000011",
+        "target_count": 1,
+        "task_type": "weekly_checkin",
+        "updated_at": "2026-11-07T02:00:00Z"
+      },
+      {
+        "completed": true,
+        "completed_at": "2026-11-07T02:00:00Z",
+        "completed_dates": [
+          "2026-11-07"
+        ],
+        "content": "系列成员",
+        "created_at": "2026-11-07T02:00:00Z",
+        "date": "2026-W45",
+        "id": "50000000-0000-4000-8000-000000000012",
+        "target_count": 1,
+        "task_type": "weekly_checkin",
+        "updated_at": "2026-11-07T02:00:00Z"
+      }
+    ],
+    "version": 1
+  },
+  "pin": {
+    "protocol": "todo-record-sync/1",
+    "dataset_id": "50000000-0000-4000-8000-000000000101",
+    "descriptor_sha256": "7b1ef7e825a59a21dff146284c1abd820642fdd9789623bee1b7a3b760efdec3",
+    "baseline_sha256": "752e5a2f4c6b2aac3e79bab8dde759520298ca7131b0f04bc940b69298a6f897",
+    "namespace": "record-sync/50000000-0000-4000-8000-000000000101/"
+  },
+  "descriptor": {
+    "name": "dataset.7b1ef7e825a59a21dff146284c1abd820642fdd9789623bee1b7a3b760efdec3.json",
+    "content": "eyJiYXNlbGluZV9zaGEyNTYiOiI3NTJlNWEyZjRjNmIyYWFjM2U3OWJhYjhkZGU3NTk1MjAyOThjYTcxMzFiMGYwNGJjOTQwYjY5Mjk4YTZmODk3IiwiY3JlYXRlZF9hdCI6IjIwMjYtMTEtMDlUMDA6MDA6MDBaIiwiZGF0YV9zY2hlbWFfdmVyc2lvbiI6MSwiZGF0YXNldF9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMSIsIm9wZXJhdGlvbl9zZXQiOiJsYWItY29sbGFib3JhdGlvbi8yIiwicHJvdG9jb2wiOiJ0b2RvLXJlY29yZC1zeW5jLzEifQ=="
+  },
+  "cases": [
+    {
+      "name": "首次导入后改名，全部成员显示同一个新名称",
+      "journal": {
+        "dataset_id": "50000000-0000-4000-8000-000000000101",
+        "descriptor_sha256": "7b1ef7e825a59a21dff146284c1abd820642fdd9789623bee1b7a3b760efdec3",
+        "records": [
+          {
+            "name": "records/50000000-0000-4000-8000-000000000103.73449469e8f79278c01bbcb0e454d2a341982380e2f594d870b4bb796c3d510c.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMyIsImxhbXBvcnQiOjIsIm9wZXJhdGlvbnMiOlt7ImNvbnRlbnQiOiLmr4/lkajpmIXor7siLCJzZXJpZXNfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTEiLCJ0eXBlIjoic2VyaWVzLnJlbmFtZSIsInVwZGF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiJ9XSwicGFyZW50cyI6W3siaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDIiLCJzaGEyNTYiOiJjYzA3OGJmMDgyMGNmOGIyM2U4MzM2YWEwNjRhNzY2ODIyNjcwNmMxYjc2YTg3OTU4MTM2NTdjN2M3ZjJjYzg3In1dLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000102.cc078bf0820cf8b23e8336aa064a7668226706c1b76a8795813657c7c7f2cc87.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAxOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMiIsImxhbXBvcnQiOjEsIm9wZXJhdGlvbnMiOlt7ImdlbmVyYXRlZF9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTEwIl0sIm9mZnNldF9taW51dGVzIjo0ODAsInNvdXJjZV9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDExIl0sInRhcmdldCI6IjIwMjYtVzQ2IiwidHlwZSI6InNlcmllcy53b3JrZmxvdy5pbXBvcnQiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wOVQwMTowMDowMFoifV0sInBhcmVudHMiOltdLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          }
+        ],
+        "pending": []
+      },
+      "expected": {
+        "future": {
+          "keep": [
+            "原值"
+          ]
+        },
+        "last_updated": "2026-11-09T02:00:00Z",
+        "task_series": [
+          {
+            "id": "50000000-0000-4000-8000-000000000011",
+            "content": "每周阅读",
+            "content_renamed": true,
+            "content_updated_at": "2026-11-09T02:00:00Z",
+            "period_type": "week",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T02:00:00Z",
+            "deleted": false,
+            "deleted_at": null
+          },
+          {
+            "content": "系列",
+            "content_updated_at": "2026-11-07T02:00:00Z",
+            "created_at": "2026-11-07T02:00:00Z",
+            "id": "50000000-0000-4000-8000-000000000020",
+            "period_type": "week",
+            "updated_at": "2026-11-07T02:00:00Z",
+            "deleted": false,
+            "deleted_at": null,
+            "content_renamed": false
+          }
+        ],
+        "task_series_links": [
+          {
+            "todo_id": "50000000-0000-4000-8000-000000000011",
+            "series_id": "50000000-0000-4000-8000-000000000011",
+            "period": "2026-W45",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          },
+          {
+            "created_at": "2026-11-07T02:00:00Z",
+            "period": "2026-W45",
+            "series_id": "50000000-0000-4000-8000-000000000020",
+            "todo_id": "50000000-0000-4000-8000-000000000012",
+            "updated_at": "2026-11-07T02:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          },
+          {
+            "todo_id": "50000000-0000-4000-8000-000000000110",
+            "series_id": "50000000-0000-4000-8000-000000000011",
+            "period": "2026-W46",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          }
+        ],
+        "time_entries": [
+          {
+            "created_at": "2026-11-07T02:00:00Z",
+            "ended_at": null,
+            "id": "50000000-0000-4000-8000-000000000030",
+            "started_at": "2026-11-07T02:00:00Z",
+            "task_ref": {
+              "todo_id": "50000000-0000-4000-8000-000000000012"
+            },
+            "updated_at": "2026-11-07T02:00:00Z"
+          }
+        ],
+        "todos": [
+          {
+            "completed": false,
+            "completed_at": null,
+            "completed_dates": [],
+            "content": "既有普通任务",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": null,
+            "deleted": false,
+            "id": "50000000-0000-4000-8000-000000000010",
+            "label": null,
+            "order": 0,
+            "recurring": "none",
+            "reminder": null,
+            "subtasks": [],
+            "target_count": null,
+            "task_type": "normal",
+            "time": null,
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "completed": true,
+            "completed_at": "2026-11-07T02:00:00Z",
+            "completed_dates": [
+              "2026-11-07"
+            ],
+            "content": "已打卡的任务",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": "2026-W45",
+            "id": "50000000-0000-4000-8000-000000000011",
+            "target_count": 1,
+            "task_type": "weekly_checkin",
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "completed": true,
+            "completed_at": "2026-11-07T02:00:00Z",
+            "completed_dates": [
+              "2026-11-07"
+            ],
+            "content": "系列成员",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": "2026-W45",
+            "id": "50000000-0000-4000-8000-000000000012",
+            "target_count": 1,
+            "task_type": "weekly_checkin",
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "id": "50000000-0000-4000-8000-000000000110",
+            "content": "已打卡的任务",
+            "date": "2026-W46",
+            "time": null,
+            "completed": false,
+            "created_at": "2026-11-09T01:00:00Z",
+            "completed_at": null,
+            "order": 1794186000000,
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "recurring": "none",
+            "task_type": "weekly_checkin",
+            "completed_dates": [],
+            "target_count": 1,
+            "label": null,
+            "reminder": null,
+            "subtasks": []
+          }
+        ],
+        "version": 1
+      }
+    },
+    {
+      "name": "并发改名在同一时刻收敛到一个系列名称",
+      "journal": {
+        "dataset_id": "50000000-0000-4000-8000-000000000101",
+        "descriptor_sha256": "7b1ef7e825a59a21dff146284c1abd820642fdd9789623bee1b7a3b760efdec3",
+        "records": [
+          {
+            "name": "records/50000000-0000-4000-8000-000000000104.bf43b9e4fe9b43057952889bfd2b7aba4a4fa2944affe7e800155a4e21c550ac.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNCIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwNCIsImxhbXBvcnQiOjIsIm9wZXJhdGlvbnMiOlt7ImNvbnRlbnQiOiLmr4/lkajorqHliJIiLCJzZXJpZXNfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTEiLCJ0eXBlIjoic2VyaWVzLnJlbmFtZSIsInVwZGF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiJ9XSwicGFyZW50cyI6W3siaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDIiLCJzaGEyNTYiOiJjYzA3OGJmMDgyMGNmOGIyM2U4MzM2YWEwNjRhNzY2ODIyNjcwNmMxYjc2YTg3OTU4MTM2NTdjN2M3ZjJjYzg3In1dLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000103.73449469e8f79278c01bbcb0e454d2a341982380e2f594d870b4bb796c3d510c.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMyIsImxhbXBvcnQiOjIsIm9wZXJhdGlvbnMiOlt7ImNvbnRlbnQiOiLmr4/lkajpmIXor7siLCJzZXJpZXNfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTEiLCJ0eXBlIjoic2VyaWVzLnJlbmFtZSIsInVwZGF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiJ9XSwicGFyZW50cyI6W3siaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDIiLCJzaGEyNTYiOiJjYzA3OGJmMDgyMGNmOGIyM2U4MzM2YWEwNjRhNzY2ODIyNjcwNmMxYjc2YTg3OTU4MTM2NTdjN2M3ZjJjYzg3In1dLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000102.cc078bf0820cf8b23e8336aa064a7668226706c1b76a8795813657c7c7f2cc87.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAxOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMiIsImxhbXBvcnQiOjEsIm9wZXJhdGlvbnMiOlt7ImdlbmVyYXRlZF9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTEwIl0sIm9mZnNldF9taW51dGVzIjo0ODAsInNvdXJjZV9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDExIl0sInRhcmdldCI6IjIwMjYtVzQ2IiwidHlwZSI6InNlcmllcy53b3JrZmxvdy5pbXBvcnQiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wOVQwMTowMDowMFoifV0sInBhcmVudHMiOltdLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          }
+        ],
+        "pending": []
+      },
+      "expected": {
+        "future": {
+          "keep": [
+            "原值"
+          ]
+        },
+        "last_updated": "2026-11-09T02:00:00Z",
+        "task_series": [
+          {
+            "id": "50000000-0000-4000-8000-000000000011",
+            "content": "每周阅读",
+            "content_renamed": true,
+            "content_updated_at": "2026-11-09T02:00:00Z",
+            "period_type": "week",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T02:00:00Z",
+            "deleted": false,
+            "deleted_at": null
+          },
+          {
+            "content": "系列",
+            "content_updated_at": "2026-11-07T02:00:00Z",
+            "created_at": "2026-11-07T02:00:00Z",
+            "id": "50000000-0000-4000-8000-000000000020",
+            "period_type": "week",
+            "updated_at": "2026-11-07T02:00:00Z",
+            "deleted": false,
+            "deleted_at": null,
+            "content_renamed": false
+          }
+        ],
+        "task_series_links": [
+          {
+            "todo_id": "50000000-0000-4000-8000-000000000011",
+            "series_id": "50000000-0000-4000-8000-000000000011",
+            "period": "2026-W45",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          },
+          {
+            "created_at": "2026-11-07T02:00:00Z",
+            "period": "2026-W45",
+            "series_id": "50000000-0000-4000-8000-000000000020",
+            "todo_id": "50000000-0000-4000-8000-000000000012",
+            "updated_at": "2026-11-07T02:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          },
+          {
+            "todo_id": "50000000-0000-4000-8000-000000000110",
+            "series_id": "50000000-0000-4000-8000-000000000011",
+            "period": "2026-W46",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          }
+        ],
+        "time_entries": [
+          {
+            "created_at": "2026-11-07T02:00:00Z",
+            "ended_at": null,
+            "id": "50000000-0000-4000-8000-000000000030",
+            "started_at": "2026-11-07T02:00:00Z",
+            "task_ref": {
+              "todo_id": "50000000-0000-4000-8000-000000000012"
+            },
+            "updated_at": "2026-11-07T02:00:00Z"
+          }
+        ],
+        "todos": [
+          {
+            "completed": false,
+            "completed_at": null,
+            "completed_dates": [],
+            "content": "既有普通任务",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": null,
+            "deleted": false,
+            "id": "50000000-0000-4000-8000-000000000010",
+            "label": null,
+            "order": 0,
+            "recurring": "none",
+            "reminder": null,
+            "subtasks": [],
+            "target_count": null,
+            "task_type": "normal",
+            "time": null,
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "completed": true,
+            "completed_at": "2026-11-07T02:00:00Z",
+            "completed_dates": [
+              "2026-11-07"
+            ],
+            "content": "已打卡的任务",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": "2026-W45",
+            "id": "50000000-0000-4000-8000-000000000011",
+            "target_count": 1,
+            "task_type": "weekly_checkin",
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "completed": true,
+            "completed_at": "2026-11-07T02:00:00Z",
+            "completed_dates": [
+              "2026-11-07"
+            ],
+            "content": "系列成员",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": "2026-W45",
+            "id": "50000000-0000-4000-8000-000000000012",
+            "target_count": 1,
+            "task_type": "weekly_checkin",
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "id": "50000000-0000-4000-8000-000000000110",
+            "content": "已打卡的任务",
+            "date": "2026-W46",
+            "time": null,
+            "completed": false,
+            "created_at": "2026-11-09T01:00:00Z",
+            "completed_at": null,
+            "order": 1794186000000,
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "recurring": "none",
+            "task_type": "weekly_checkin",
+            "completed_dates": [],
+            "target_count": 1,
+            "label": null,
+            "reminder": null,
+            "subtasks": []
+          }
+        ],
+        "version": 1
+      }
+    },
+    {
+      "name": "新成员解除关联后使用自己的名称",
+      "journal": {
+        "dataset_id": "50000000-0000-4000-8000-000000000101",
+        "descriptor_sha256": "7b1ef7e825a59a21dff146284c1abd820642fdd9789623bee1b7a3b760efdec3",
+        "records": [
+          {
+            "name": "records/50000000-0000-4000-8000-000000000106.2a21adefca60309aefef26f3c0133feba18d695571daeb082f15552e12e31b0b.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAzOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwNiIsImxhbXBvcnQiOjMsIm9wZXJhdGlvbnMiOlt7Im5leHRfc2VyaWVzX2lkIjoiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTExIiwic2VyaWVzX2lkIjoiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDExIiwidG9kb19pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDExMCIsInR5cGUiOiJzZXJpZXMubGluay51bmxpbmsiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wOVQwMzowMDowMFoifV0sInBhcmVudHMiOlt7ImlkIjoiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTAzIiwic2hhMjU2IjoiNzM0NDk0NjllOGY3OTI3OGMwMWJiY2IwZTQ1NGQyYTM0MTk4MjM4MGUyZjU5NGQ4NzBiNGJiNzk2YzNkNTEwYyJ9XSwicHJvdG9jb2wiOiJ0b2RvLXJlY29yZC1zeW5jLzEifQ=="
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000103.73449469e8f79278c01bbcb0e454d2a341982380e2f594d870b4bb796c3d510c.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMyIsImxhbXBvcnQiOjIsIm9wZXJhdGlvbnMiOlt7ImNvbnRlbnQiOiLmr4/lkajpmIXor7siLCJzZXJpZXNfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTEiLCJ0eXBlIjoic2VyaWVzLnJlbmFtZSIsInVwZGF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiJ9XSwicGFyZW50cyI6W3siaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDIiLCJzaGEyNTYiOiJjYzA3OGJmMDgyMGNmOGIyM2U4MzM2YWEwNjRhNzY2ODIyNjcwNmMxYjc2YTg3OTU4MTM2NTdjN2M3ZjJjYzg3In1dLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000102.cc078bf0820cf8b23e8336aa064a7668226706c1b76a8795813657c7c7f2cc87.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAxOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMiIsImxhbXBvcnQiOjEsIm9wZXJhdGlvbnMiOlt7ImdlbmVyYXRlZF9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTEwIl0sIm9mZnNldF9taW51dGVzIjo0ODAsInNvdXJjZV9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDExIl0sInRhcmdldCI6IjIwMjYtVzQ2IiwidHlwZSI6InNlcmllcy53b3JrZmxvdy5pbXBvcnQiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wOVQwMTowMDowMFoifV0sInBhcmVudHMiOltdLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          }
+        ],
+        "pending": []
+      },
+      "expected": {
+        "future": {
+          "keep": [
+            "原值"
+          ]
+        },
+        "last_updated": "2026-11-09T03:00:00Z",
+        "task_series": [
+          {
+            "id": "50000000-0000-4000-8000-000000000011",
+            "content": "每周阅读",
+            "content_renamed": true,
+            "content_updated_at": "2026-11-09T02:00:00Z",
+            "period_type": "week",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T02:00:00Z",
+            "deleted": false,
+            "deleted_at": null
+          },
+          {
+            "content": "系列",
+            "content_updated_at": "2026-11-07T02:00:00Z",
+            "created_at": "2026-11-07T02:00:00Z",
+            "id": "50000000-0000-4000-8000-000000000020",
+            "period_type": "week",
+            "updated_at": "2026-11-07T02:00:00Z",
+            "deleted": false,
+            "deleted_at": null,
+            "content_renamed": false
+          }
+        ],
+        "task_series_links": [
+          {
+            "todo_id": "50000000-0000-4000-8000-000000000011",
+            "series_id": "50000000-0000-4000-8000-000000000011",
+            "period": "2026-W45",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          },
+          {
+            "created_at": "2026-11-07T02:00:00Z",
+            "period": "2026-W45",
+            "series_id": "50000000-0000-4000-8000-000000000020",
+            "todo_id": "50000000-0000-4000-8000-000000000012",
+            "updated_at": "2026-11-07T02:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          },
+          {
+            "todo_id": "50000000-0000-4000-8000-000000000110",
+            "series_id": "50000000-0000-4000-8000-000000000011",
+            "period": "2026-W46",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T03:00:00Z",
+            "deleted": true,
+            "next_series_id": "50000000-0000-4000-8000-000000000111"
+          }
+        ],
+        "time_entries": [
+          {
+            "created_at": "2026-11-07T02:00:00Z",
+            "ended_at": null,
+            "id": "50000000-0000-4000-8000-000000000030",
+            "started_at": "2026-11-07T02:00:00Z",
+            "task_ref": {
+              "todo_id": "50000000-0000-4000-8000-000000000012"
+            },
+            "updated_at": "2026-11-07T02:00:00Z"
+          }
+        ],
+        "todos": [
+          {
+            "completed": false,
+            "completed_at": null,
+            "completed_dates": [],
+            "content": "既有普通任务",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": null,
+            "deleted": false,
+            "id": "50000000-0000-4000-8000-000000000010",
+            "label": null,
+            "order": 0,
+            "recurring": "none",
+            "reminder": null,
+            "subtasks": [],
+            "target_count": null,
+            "task_type": "normal",
+            "time": null,
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "completed": true,
+            "completed_at": "2026-11-07T02:00:00Z",
+            "completed_dates": [
+              "2026-11-07"
+            ],
+            "content": "已打卡的任务",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": "2026-W45",
+            "id": "50000000-0000-4000-8000-000000000011",
+            "target_count": 1,
+            "task_type": "weekly_checkin",
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "completed": true,
+            "completed_at": "2026-11-07T02:00:00Z",
+            "completed_dates": [
+              "2026-11-07"
+            ],
+            "content": "系列成员",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": "2026-W45",
+            "id": "50000000-0000-4000-8000-000000000012",
+            "target_count": 1,
+            "task_type": "weekly_checkin",
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "id": "50000000-0000-4000-8000-000000000110",
+            "content": "已打卡的任务",
+            "date": "2026-W46",
+            "time": null,
+            "completed": false,
+            "created_at": "2026-11-09T01:00:00Z",
+            "completed_at": null,
+            "order": 1794186000000,
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "recurring": "none",
+            "task_type": "weekly_checkin",
+            "completed_dates": [],
+            "target_count": 1,
+            "label": null,
+            "reminder": null,
+            "subtasks": []
+          }
+        ],
+        "version": 1
+      }
+    },
+    {
+      "name": "看到解除后重新关联，新成员恢复显示系列名称",
+      "journal": {
+        "dataset_id": "50000000-0000-4000-8000-000000000101",
+        "descriptor_sha256": "7b1ef7e825a59a21dff146284c1abd820642fdd9789623bee1b7a3b760efdec3",
+        "records": [
+          {
+            "name": "records/50000000-0000-4000-8000-000000000107.dd01cc8528ab4ea98e3cccebd2d6d395a9386d6641605b2b5c53ac5aea8e9025.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDA0OjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwNyIsImxhbXBvcnQiOjQsIm9wZXJhdGlvbnMiOlt7InNlcmllc19pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAxMSIsInRvZG9faWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMTAiLCJ0eXBlIjoic2VyaWVzLmxpbmsucHV0IiwidXBkYXRlZF9hdCI6IjIwMjYtMTEtMDlUMDQ6MDA6MDBaIn1dLCJwYXJlbnRzIjpbeyJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwNiIsInNoYTI1NiI6IjJhMjFhZGVmY2E2MDMwOWFlZmVmMjZmM2MwMTMzZmViYTE4ZDY5NTU3MWRhZWIwODJmMTU1NTJlMTJlMzFiMGIifV0sInByb3RvY29sIjoidG9kby1yZWNvcmQtc3luYy8xIn0="
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000106.2a21adefca60309aefef26f3c0133feba18d695571daeb082f15552e12e31b0b.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAzOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwNiIsImxhbXBvcnQiOjMsIm9wZXJhdGlvbnMiOlt7Im5leHRfc2VyaWVzX2lkIjoiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTExIiwic2VyaWVzX2lkIjoiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDExIiwidG9kb19pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDExMCIsInR5cGUiOiJzZXJpZXMubGluay51bmxpbmsiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wOVQwMzowMDowMFoifV0sInBhcmVudHMiOlt7ImlkIjoiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTAzIiwic2hhMjU2IjoiNzM0NDk0NjllOGY3OTI3OGMwMWJiY2IwZTQ1NGQyYTM0MTk4MjM4MGUyZjU5NGQ4NzBiNGJiNzk2YzNkNTEwYyJ9XSwicHJvdG9jb2wiOiJ0b2RvLXJlY29yZC1zeW5jLzEifQ=="
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000103.73449469e8f79278c01bbcb0e454d2a341982380e2f594d870b4bb796c3d510c.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMyIsImxhbXBvcnQiOjIsIm9wZXJhdGlvbnMiOlt7ImNvbnRlbnQiOiLmr4/lkajpmIXor7siLCJzZXJpZXNfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTEiLCJ0eXBlIjoic2VyaWVzLnJlbmFtZSIsInVwZGF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiJ9XSwicGFyZW50cyI6W3siaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDIiLCJzaGEyNTYiOiJjYzA3OGJmMDgyMGNmOGIyM2U4MzM2YWEwNjRhNzY2ODIyNjcwNmMxYjc2YTg3OTU4MTM2NTdjN2M3ZjJjYzg3In1dLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000102.cc078bf0820cf8b23e8336aa064a7668226706c1b76a8795813657c7c7f2cc87.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAxOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMiIsImxhbXBvcnQiOjEsIm9wZXJhdGlvbnMiOlt7ImdlbmVyYXRlZF9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTEwIl0sIm9mZnNldF9taW51dGVzIjo0ODAsInNvdXJjZV9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDExIl0sInRhcmdldCI6IjIwMjYtVzQ2IiwidHlwZSI6InNlcmllcy53b3JrZmxvdy5pbXBvcnQiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wOVQwMTowMDowMFoifV0sInBhcmVudHMiOltdLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          }
+        ],
+        "pending": []
+      },
+      "expected": {
+        "future": {
+          "keep": [
+            "原值"
+          ]
+        },
+        "last_updated": "2026-11-09T04:00:00Z",
+        "task_series": [
+          {
+            "id": "50000000-0000-4000-8000-000000000011",
+            "content": "每周阅读",
+            "content_renamed": true,
+            "content_updated_at": "2026-11-09T02:00:00Z",
+            "period_type": "week",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T02:00:00Z",
+            "deleted": false,
+            "deleted_at": null
+          },
+          {
+            "content": "系列",
+            "content_updated_at": "2026-11-07T02:00:00Z",
+            "created_at": "2026-11-07T02:00:00Z",
+            "id": "50000000-0000-4000-8000-000000000020",
+            "period_type": "week",
+            "updated_at": "2026-11-07T02:00:00Z",
+            "deleted": false,
+            "deleted_at": null,
+            "content_renamed": false
+          }
+        ],
+        "task_series_links": [
+          {
+            "todo_id": "50000000-0000-4000-8000-000000000011",
+            "series_id": "50000000-0000-4000-8000-000000000011",
+            "period": "2026-W45",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          },
+          {
+            "created_at": "2026-11-07T02:00:00Z",
+            "period": "2026-W45",
+            "series_id": "50000000-0000-4000-8000-000000000020",
+            "todo_id": "50000000-0000-4000-8000-000000000012",
+            "updated_at": "2026-11-07T02:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          },
+          {
+            "todo_id": "50000000-0000-4000-8000-000000000110",
+            "series_id": "50000000-0000-4000-8000-000000000011",
+            "period": "2026-W46",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T04:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          }
+        ],
+        "time_entries": [
+          {
+            "created_at": "2026-11-07T02:00:00Z",
+            "ended_at": null,
+            "id": "50000000-0000-4000-8000-000000000030",
+            "started_at": "2026-11-07T02:00:00Z",
+            "task_ref": {
+              "todo_id": "50000000-0000-4000-8000-000000000012"
+            },
+            "updated_at": "2026-11-07T02:00:00Z"
+          }
+        ],
+        "todos": [
+          {
+            "completed": false,
+            "completed_at": null,
+            "completed_dates": [],
+            "content": "既有普通任务",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": null,
+            "deleted": false,
+            "id": "50000000-0000-4000-8000-000000000010",
+            "label": null,
+            "order": 0,
+            "recurring": "none",
+            "reminder": null,
+            "subtasks": [],
+            "target_count": null,
+            "task_type": "normal",
+            "time": null,
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "completed": true,
+            "completed_at": "2026-11-07T02:00:00Z",
+            "completed_dates": [
+              "2026-11-07"
+            ],
+            "content": "已打卡的任务",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": "2026-W45",
+            "id": "50000000-0000-4000-8000-000000000011",
+            "target_count": 1,
+            "task_type": "weekly_checkin",
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "completed": true,
+            "completed_at": "2026-11-07T02:00:00Z",
+            "completed_dates": [
+              "2026-11-07"
+            ],
+            "content": "系列成员",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": "2026-W45",
+            "id": "50000000-0000-4000-8000-000000000012",
+            "target_count": 1,
+            "task_type": "weekly_checkin",
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "id": "50000000-0000-4000-8000-000000000110",
+            "content": "已打卡的任务",
+            "date": "2026-W46",
+            "time": null,
+            "completed": false,
+            "created_at": "2026-11-09T01:00:00Z",
+            "completed_at": null,
+            "order": 1794186000000,
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "recurring": "none",
+            "task_type": "weekly_checkin",
+            "completed_dates": [],
+            "target_count": 1,
+            "label": null,
+            "reminder": null,
+            "subtasks": []
+          }
+        ],
+        "version": 1
+      }
+    },
+    {
+      "name": "并发发现创建记录不能授权未见创建的改名",
+      "journal": {
+        "dataset_id": "50000000-0000-4000-8000-000000000101",
+        "descriptor_sha256": "7b1ef7e825a59a21dff146284c1abd820642fdd9789623bee1b7a3b760efdec3",
+        "records": [
+          {
+            "name": "records/50000000-0000-4000-8000-000000000105.164b7e73c549c8189ce79d3a4c574d64c84f3f3f179f27952d5dd304fb565cee.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNCIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwNSIsImxhbXBvcnQiOjEsIm9wZXJhdGlvbnMiOlt7ImNvbnRlbnQiOiLmnKrop4HliJvlu7oiLCJzZXJpZXNfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTEiLCJ0eXBlIjoic2VyaWVzLnJlbmFtZSIsInVwZGF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiJ9XSwicGFyZW50cyI6W10sInByb3RvY29sIjoidG9kby1yZWNvcmQtc3luYy8xIn0="
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000102.cc078bf0820cf8b23e8336aa064a7668226706c1b76a8795813657c7c7f2cc87.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAxOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMiIsImxhbXBvcnQiOjEsIm9wZXJhdGlvbnMiOlt7ImdlbmVyYXRlZF9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTEwIl0sIm9mZnNldF9taW51dGVzIjo0ODAsInNvdXJjZV9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDExIl0sInRhcmdldCI6IjIwMjYtVzQ2IiwidHlwZSI6InNlcmllcy53b3JrZmxvdy5pbXBvcnQiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wOVQwMTowMDowMFoifV0sInBhcmVudHMiOltdLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          }
+        ],
+        "pending": []
+      },
+      "error": "SERIES_TARGET_NOT_ACTIVE_IN_BASELINE"
+    },
+    {
+      "name": "已知系列仍不能操作并发创建的新关联",
+      "journal": {
+        "dataset_id": "50000000-0000-4000-8000-000000000101",
+        "descriptor_sha256": "7b1ef7e825a59a21dff146284c1abd820642fdd9789623bee1b7a3b760efdec3",
+        "records": [
+          {
+            "name": "records/50000000-0000-4000-8000-000000000109.0faecb4e6732ece50256045556f7268518041d51cedb062da5e0c5f75856b0a7.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNCIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDA0OjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwOSIsImxhbXBvcnQiOjEsIm9wZXJhdGlvbnMiOlt7InNlcmllc19pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAyMCIsInRvZG9faWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMTIiLCJ0eXBlIjoic2VyaWVzLmxpbmsucHV0IiwidXBkYXRlZF9hdCI6IjIwMjYtMTEtMDlUMDQ6MDA6MDBaIn1dLCJwYXJlbnRzIjpbXSwicHJvdG9jb2wiOiJ0b2RvLXJlY29yZC1zeW5jLzEifQ=="
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000108.fd3453a03db6116385a35c18238f3075f4be2c18179c8c6bd541c58885952707.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAxOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwOCIsImxhbXBvcnQiOjEsIm9wZXJhdGlvbnMiOlt7ImdlbmVyYXRlZF9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTEyIl0sIm9mZnNldF9taW51dGVzIjo0ODAsInNvdXJjZV9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDEyIl0sInRhcmdldCI6IjIwMjYtVzQ2IiwidHlwZSI6InNlcmllcy53b3JrZmxvdy5pbXBvcnQiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wOVQwMTowMDowMFoifV0sInBhcmVudHMiOltdLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          }
+        ],
+        "pending": []
+      },
+      "error": "SERIES_LINK_TARGET_NOT_IN_BASELINE"
+    },
+    {
+      "name": "整体删除能看到依赖中的新系列名称和成员",
+      "journal": {
+        "dataset_id": "50000000-0000-4000-8000-000000000101",
+        "descriptor_sha256": "7b1ef7e825a59a21dff146284c1abd820642fdd9789623bee1b7a3b760efdec3",
+        "records": [
+          {
+            "name": "records/50000000-0000-4000-8000-000000000113.797217089224bd586e46c81096a9f5e2d807950f95ea2f0eea1912d9eaea84ad.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDA1OjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDExMyIsImxhbXBvcnQiOjMsIm9wZXJhdGlvbnMiOlt7ImNvbmZpcm1lZF90aW1lcl9pZHMiOltdLCJtZW1iZXJfaWRzIjpbIjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAxMSIsIjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDExMCJdLCJwcmV2aWV3X3NoYTI1NiI6IjcxMWUzZDc5MmJjYmY5N2I3ZDIwZmY5ODEwZjVmOGQzZjdiY2EyY2I1YzU0ODlkMDQzZDI2MmYwNzQyMmQzNWIiLCJzZXJpZXNfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTEiLCJ0b2RvX2lkIjoiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTEwIiwidHlwZSI6InNlcmllcy53b3JrZmxvdy5kZWxldGUiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wOVQwNTowMDowMFoifV0sInBhcmVudHMiOlt7ImlkIjoiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTAzIiwic2hhMjU2IjoiNzM0NDk0NjllOGY3OTI3OGMwMWJiY2IwZTQ1NGQyYTM0MTk4MjM4MGUyZjU5NGQ4NzBiNGJiNzk2YzNkNTEwYyJ9XSwicHJvdG9jb2wiOiJ0b2RvLXJlY29yZC1zeW5jLzEifQ=="
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000102.cc078bf0820cf8b23e8336aa064a7668226706c1b76a8795813657c7c7f2cc87.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAxOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMiIsImxhbXBvcnQiOjEsIm9wZXJhdGlvbnMiOlt7ImdlbmVyYXRlZF9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTEwIl0sIm9mZnNldF9taW51dGVzIjo0ODAsInNvdXJjZV9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDExIl0sInRhcmdldCI6IjIwMjYtVzQ2IiwidHlwZSI6InNlcmllcy53b3JrZmxvdy5pbXBvcnQiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wOVQwMTowMDowMFoifV0sInBhcmVudHMiOltdLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000103.73449469e8f79278c01bbcb0e454d2a341982380e2f594d870b4bb796c3d510c.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMyIsImxhbXBvcnQiOjIsIm9wZXJhdGlvbnMiOlt7ImNvbnRlbnQiOiLmr4/lkajpmIXor7siLCJzZXJpZXNfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTEiLCJ0eXBlIjoic2VyaWVzLnJlbmFtZSIsInVwZGF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiJ9XSwicGFyZW50cyI6W3siaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDIiLCJzaGEyNTYiOiJjYzA3OGJmMDgyMGNmOGIyM2U4MzM2YWEwNjRhNzY2ODIyNjcwNmMxYjc2YTg3OTU4MTM2NTdjN2M3ZjJjYzg3In1dLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          }
+        ],
+        "pending": []
+      },
+      "expected": {
+        "future": {
+          "keep": [
+            "原值"
+          ]
+        },
+        "last_updated": "2026-11-09T05:00:00Z",
+        "task_series": [
+          {
+            "id": "50000000-0000-4000-8000-000000000011",
+            "content": "每周阅读",
+            "content_renamed": true,
+            "content_updated_at": "2026-11-09T02:00:00Z",
+            "period_type": "week",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T05:00:00Z",
+            "deleted": true,
+            "deleted_at": "2026-11-09T05:00:00Z"
+          },
+          {
+            "content": "系列",
+            "content_updated_at": "2026-11-07T02:00:00Z",
+            "created_at": "2026-11-07T02:00:00Z",
+            "id": "50000000-0000-4000-8000-000000000020",
+            "period_type": "week",
+            "updated_at": "2026-11-07T02:00:00Z",
+            "deleted": false,
+            "deleted_at": null,
+            "content_renamed": false
+          }
+        ],
+        "task_series_links": [
+          {
+            "todo_id": "50000000-0000-4000-8000-000000000011",
+            "series_id": "50000000-0000-4000-8000-000000000011",
+            "period": "2026-W45",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          },
+          {
+            "created_at": "2026-11-07T02:00:00Z",
+            "period": "2026-W45",
+            "series_id": "50000000-0000-4000-8000-000000000020",
+            "todo_id": "50000000-0000-4000-8000-000000000012",
+            "updated_at": "2026-11-07T02:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          },
+          {
+            "todo_id": "50000000-0000-4000-8000-000000000110",
+            "series_id": "50000000-0000-4000-8000-000000000011",
+            "period": "2026-W46",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          }
+        ],
+        "time_entries": [
+          {
+            "created_at": "2026-11-07T02:00:00Z",
+            "ended_at": null,
+            "id": "50000000-0000-4000-8000-000000000030",
+            "started_at": "2026-11-07T02:00:00Z",
+            "task_ref": {
+              "todo_id": "50000000-0000-4000-8000-000000000012"
+            },
+            "updated_at": "2026-11-07T02:00:00Z"
+          }
+        ],
+        "todos": [
+          {
+            "completed": false,
+            "completed_at": null,
+            "completed_dates": [],
+            "content": "既有普通任务",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": null,
+            "deleted": false,
+            "id": "50000000-0000-4000-8000-000000000010",
+            "label": null,
+            "order": 0,
+            "recurring": "none",
+            "reminder": null,
+            "subtasks": [],
+            "target_count": null,
+            "task_type": "normal",
+            "time": null,
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "completed": true,
+            "completed_at": "2026-11-07T02:00:00Z",
+            "completed_dates": [
+              "2026-11-07"
+            ],
+            "content": "已打卡的任务",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": "2026-W45",
+            "id": "50000000-0000-4000-8000-000000000011",
+            "target_count": 1,
+            "task_type": "weekly_checkin",
+            "updated_at": "2026-11-09T05:00:00Z",
+            "deleted": true,
+            "label": null,
+            "reminder": null,
+            "subtasks": [],
+            "time": null,
+            "order": 0,
+            "recurring": "none"
+          },
+          {
+            "completed": true,
+            "completed_at": "2026-11-07T02:00:00Z",
+            "completed_dates": [
+              "2026-11-07"
+            ],
+            "content": "系列成员",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": "2026-W45",
+            "id": "50000000-0000-4000-8000-000000000012",
+            "target_count": 1,
+            "task_type": "weekly_checkin",
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "id": "50000000-0000-4000-8000-000000000110",
+            "content": "已打卡的任务",
+            "date": "2026-W46",
+            "time": null,
+            "completed": false,
+            "created_at": "2026-11-09T01:00:00Z",
+            "completed_at": null,
+            "order": 1794186000000,
+            "updated_at": "2026-11-09T05:00:00Z",
+            "deleted": true,
+            "recurring": "none",
+            "task_type": "weekly_checkin",
+            "completed_dates": [],
+            "target_count": 1,
+            "label": null,
+            "reminder": null,
+            "subtasks": []
+          }
+        ],
+        "version": 1
+      }
+    },
+    {
+      "name": "并发改名与整体删除分别保留名称与删除状态",
+      "journal": {
+        "dataset_id": "50000000-0000-4000-8000-000000000101",
+        "descriptor_sha256": "7b1ef7e825a59a21dff146284c1abd820642fdd9789623bee1b7a3b760efdec3",
+        "records": [
+          {
+            "name": "records/50000000-0000-4000-8000-000000000103.73449469e8f79278c01bbcb0e454d2a341982380e2f594d870b4bb796c3d510c.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMyIsImxhbXBvcnQiOjIsIm9wZXJhdGlvbnMiOlt7ImNvbnRlbnQiOiLmr4/lkajpmIXor7siLCJzZXJpZXNfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTEiLCJ0eXBlIjoic2VyaWVzLnJlbmFtZSIsInVwZGF0ZWRfYXQiOiIyMDI2LTExLTA5VDAyOjAwOjAwWiJ9XSwicGFyZW50cyI6W3siaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDIiLCJzaGEyNTYiOiJjYzA3OGJmMDgyMGNmOGIyM2U4MzM2YWEwNjRhNzY2ODIyNjcwNmMxYjc2YTg3OTU4MTM2NTdjN2M3ZjJjYzg3In1dLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000102.cc078bf0820cf8b23e8336aa064a7668226706c1b76a8795813657c7c7f2cc87.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDAxOjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDEwMiIsImxhbXBvcnQiOjEsIm9wZXJhdGlvbnMiOlt7ImdlbmVyYXRlZF9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTEwIl0sIm9mZnNldF9taW51dGVzIjo0ODAsInNvdXJjZV9pZHMiOlsiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDExIl0sInRhcmdldCI6IjIwMjYtVzQ2IiwidHlwZSI6InNlcmllcy53b3JrZmxvdy5pbXBvcnQiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wOVQwMTowMDowMFoifV0sInBhcmVudHMiOltdLCJwcm90b2NvbCI6InRvZG8tcmVjb3JkLXN5bmMvMSJ9"
+          },
+          {
+            "name": "records/50000000-0000-4000-8000-000000000114.dd3945eb87c3bf9ee6f098780f039fc2f1b92d9631bf7ea4bcc2663816de2362.json",
+            "content": "eyJhY3Rvcl9pZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwNCIsImNyZWF0ZWRfYXQiOiIyMDI2LTExLTA5VDA1OjAwOjAwWiIsImRhdGFzZXRfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAxMDEiLCJkZXNjcmlwdG9yX3NoYTI1NiI6IjdiMWVmN2U4MjVhNTlhMjFkZmYxNDYyODRjMWFiZDgyMDY0MmZkZDk3ODk2MjNiZWUxYjdhM2I3NjBlZmRlYzMiLCJpZCI6IjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDExNCIsImxhbXBvcnQiOjIsIm9wZXJhdGlvbnMiOlt7ImNvbmZpcm1lZF90aW1lcl9pZHMiOltdLCJtZW1iZXJfaWRzIjpbIjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAxMSIsIjUwMDAwMDAwLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDExMCJdLCJwcmV2aWV3X3NoYTI1NiI6IjZlNTVjMmY5ZDhmZDRlMzRhNGZmZDA2ZjJkNGY0YmViMDI4NTk1YzY3N2Q2N2UzMzk5YTg5YjQxMWZmYWFiODYiLCJzZXJpZXNfaWQiOiI1MDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMTEiLCJ0b2RvX2lkIjoiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTEwIiwidHlwZSI6InNlcmllcy53b3JrZmxvdy5kZWxldGUiLCJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wOVQwNTowMDowMFoifV0sInBhcmVudHMiOlt7ImlkIjoiNTAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTAyIiwic2hhMjU2IjoiY2MwNzhiZjA4MjBjZjhiMjNlODMzNmFhMDY0YTc2NjgyMjY3MDZjMWI3NmE4Nzk1ODEzNjU3YzdjN2YyY2M4NyJ9XSwicHJvdG9jb2wiOiJ0b2RvLXJlY29yZC1zeW5jLzEifQ=="
+          }
+        ],
+        "pending": []
+      },
+      "expected": {
+        "future": {
+          "keep": [
+            "原值"
+          ]
+        },
+        "last_updated": "2026-11-09T05:00:00Z",
+        "task_series": [
+          {
+            "id": "50000000-0000-4000-8000-000000000011",
+            "content": "每周阅读",
+            "content_renamed": true,
+            "content_updated_at": "2026-11-09T02:00:00Z",
+            "period_type": "week",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T05:00:00Z",
+            "deleted": true,
+            "deleted_at": "2026-11-09T05:00:00Z"
+          },
+          {
+            "content": "系列",
+            "content_updated_at": "2026-11-07T02:00:00Z",
+            "created_at": "2026-11-07T02:00:00Z",
+            "id": "50000000-0000-4000-8000-000000000020",
+            "period_type": "week",
+            "updated_at": "2026-11-07T02:00:00Z",
+            "deleted": false,
+            "deleted_at": null,
+            "content_renamed": false
+          }
+        ],
+        "task_series_links": [
+          {
+            "todo_id": "50000000-0000-4000-8000-000000000011",
+            "series_id": "50000000-0000-4000-8000-000000000011",
+            "period": "2026-W45",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          },
+          {
+            "created_at": "2026-11-07T02:00:00Z",
+            "period": "2026-W45",
+            "series_id": "50000000-0000-4000-8000-000000000020",
+            "todo_id": "50000000-0000-4000-8000-000000000012",
+            "updated_at": "2026-11-07T02:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          },
+          {
+            "todo_id": "50000000-0000-4000-8000-000000000110",
+            "series_id": "50000000-0000-4000-8000-000000000011",
+            "period": "2026-W46",
+            "created_at": "2026-11-09T01:00:00Z",
+            "updated_at": "2026-11-09T01:00:00Z",
+            "deleted": false,
+            "next_series_id": null
+          }
+        ],
+        "time_entries": [
+          {
+            "created_at": "2026-11-07T02:00:00Z",
+            "ended_at": null,
+            "id": "50000000-0000-4000-8000-000000000030",
+            "started_at": "2026-11-07T02:00:00Z",
+            "task_ref": {
+              "todo_id": "50000000-0000-4000-8000-000000000012"
+            },
+            "updated_at": "2026-11-07T02:00:00Z"
+          }
+        ],
+        "todos": [
+          {
+            "completed": false,
+            "completed_at": null,
+            "completed_dates": [],
+            "content": "既有普通任务",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": null,
+            "deleted": false,
+            "id": "50000000-0000-4000-8000-000000000010",
+            "label": null,
+            "order": 0,
+            "recurring": "none",
+            "reminder": null,
+            "subtasks": [],
+            "target_count": null,
+            "task_type": "normal",
+            "time": null,
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "completed": true,
+            "completed_at": "2026-11-07T02:00:00Z",
+            "completed_dates": [
+              "2026-11-07"
+            ],
+            "content": "已打卡的任务",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": "2026-W45",
+            "id": "50000000-0000-4000-8000-000000000011",
+            "target_count": 1,
+            "task_type": "weekly_checkin",
+            "updated_at": "2026-11-09T05:00:00Z",
+            "deleted": true,
+            "label": null,
+            "reminder": null,
+            "subtasks": [],
+            "time": null,
+            "order": 0,
+            "recurring": "none"
+          },
+          {
+            "completed": true,
+            "completed_at": "2026-11-07T02:00:00Z",
+            "completed_dates": [
+              "2026-11-07"
+            ],
+            "content": "系列成员",
+            "created_at": "2026-11-07T02:00:00Z",
+            "date": "2026-W45",
+            "id": "50000000-0000-4000-8000-000000000012",
+            "target_count": 1,
+            "task_type": "weekly_checkin",
+            "updated_at": "2026-11-07T02:00:00Z"
+          },
+          {
+            "id": "50000000-0000-4000-8000-000000000110",
+            "content": "已打卡的任务",
+            "date": "2026-W46",
+            "time": null,
+            "completed": false,
+            "created_at": "2026-11-09T01:00:00Z",
+            "completed_at": null,
+            "order": 1794186000000,
+            "updated_at": "2026-11-09T05:00:00Z",
+            "deleted": true,
+            "recurring": "none",
+            "task_type": "weekly_checkin",
+            "completed_dates": [],
+            "target_count": 1,
+            "label": null,
+            "reminder": null,
+            "subtasks": []
+          }
+        ],
+        "version": 1
+      }
+    }
+  ]
+}

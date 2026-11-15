@@ -13,6 +13,9 @@ pnpm-debug.log*
 # 2. Rust / Tauri 构建产物
 # -----------------------------
 **/target/
+/windows/target-[0-9]*/
+# 根目录的本机运行副本，发布时使用 Release 附件
+/Todo.exe
 # Cargo.lock 纳入版本控制以锁定依赖版本
 
 # -----------------------------
@@ -40,6 +43,19 @@ todo_data.lock
 collaborations.lock
 *.lock.tmp
 backups/
+/Data Backups/
+/数据备份-*/
+personal_targets/
+personal-planning/
+record-journals/
+record-sandbox/
+migration-archives/
+
+# 同步演练生成的临时目录
+/tools/record-sync-protocol-lab/.scratch-durability-*/
+/tools/record-sync-protocol-lab/.scratch-recovery-*/
+/tools/record-sync-prototype/.scratch-prototype-*/
+/todo-migration-*/
 
 # -----------------------------
 # 5. Python 缓存
@@ -63,6 +79,8 @@ venv/
 windows/~/
 # Tauri 配置文件含 WebDAV 明文凭据，禁止提交
 config.json
+collaboration-credentials.json
+collaboration-credentials.lock
 
 # -----------------------------
 # 7. 操作系统与 IDE 配置文件
@@ -76,3 +94,6 @@ config.json
 *.log
 .DS_Store
 Thumbs.db
+
+# 本地开发过程文档，保留在本机，后续按需清理
+/docs/

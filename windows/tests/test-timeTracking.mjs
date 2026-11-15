@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeLabel, normalizeLearningData, mergeLearningRecords, canonicalLearning, splitTimeEntry, summarizeLearning, validateTimeEntry, overlappingEntries, learningRange, formatDuration, sameTask, taskReference, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE, canTimeTodo, recentTimingTasks } from '../src/timeTracking.js';
+import { normalizeLabel, normalizeLearningData, mergeLearningRecords, canonicalLearning, splitTimeEntry, summarizeLearning, validateTimeEntry, overlappingEntries, learningRange, formatDuration, sameTask, taskReference, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE, canTimeTodo, lastTimedText, recentTimingTasks } from '../src/timeTracking.js';
 
 const entry = (id, start, end, label = '数学') => ({ id, task_ref: {source_type:'personal',source_id:null,todo_id:'task'}, task_content_snapshot:'定理', label_snapshot:label, started_at:start, ended_at:end, created_at:start, updated_at:end || start, deleted:false });
 process.env.TZ = 'Asia/Shanghai';
@@ -63,6 +63,21 @@ test('最近任务支持不同时区、同时间按 ID 稳定排序，补录及�
     assert.deepEqual(recentTimingTasks(todos, records).map(x => x.todo.id), ['c', 'a', 'b']);
     records[2].started_at = '2026-09-10T00:00:00Z';
     assert.deepEqual(recentTimingTasks(todos, records).map(x => x.todo.id), ['a', 'b', 'c']);
+});
+
+test('最近任务携带所选记录的结束时间，同日显示相对时间，跨日使用本地日期', () => {
+    const records = [history('a', '2026-09-09T23:00:00Z', { ended_at: '2026-09-10T02:00:00Z' }),
+        history('a', '2026-09-10T03:00:00Z', { ended_at: '2026-09-10T04:00:00Z' })];
+    const recent = recentTimingTasks([timingTodo('a')], records)[0];
+    assert.equal(recent.endedAt, '2026-09-10T04:00:00Z');
+    const now = new Date('2026-09-10T06:15:00Z');
+    assert.equal(lastTimedText(recent.endedAt, now), '上次结束：2小时15分钟前');
+    assert.equal(lastTimedText('2026-09-10T06:14:30Z', now), '上次结束：刚刚');
+    assert.equal(lastTimedText('2026-09-10T06:14:00Z', now), '上次结束：1分钟前');
+    assert.equal(lastTimedText('2026-09-10T05:15:00Z', now), '上次结束：1小时前');
+    assert.equal(lastTimedText('2026-09-09T23:00:00Z', now), '上次结束：7小时15分钟前');
+    assert.equal(lastTimedText('2026-09-09T15:59:00Z', new Date('2026-09-09T16:01:00Z')), '上次结束：2026-09-09 23:59');
+    assert.equal(lastTimedText('2026-09-10T07:00:00Z', now), '上次结束：2026-09-10 15:00');
 });
 
 test('计时资格仅按本地周期目标排除打卡任务，不依赖或修改旧完成状态', () => {

@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -145,7 +146,7 @@ private fun MakeupIcon(shape: String, color: Color, dotRadius: androidx.compose.
 }
 
 @Composable
-fun StatsView(viewModel: TodoViewModel) {
+internal fun StatsView(viewModel: TodoViewModel, navigation: InsightsNavigation = remember { InsightsNavigation() }) {
     val source by viewModel.activeSource.collectAsState()
     val loading by viewModel.collabLoading.collectAsState()
     val error by viewModel.collabError.collectAsState()
@@ -162,14 +163,14 @@ fun StatsView(viewModel: TodoViewModel) {
     Column(modifier = Modifier.fillMaxSize()) {
         // 二级 Tab (顶栏零间距挂载，固定 48.dp 高度)
         TabRow(selectedTabIndex = subTab, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-            Tab(selected = subTab == 0, onClick = { subTab = 0 }, text = { Text("效率洞察", fontWeight = FontWeight.Bold, maxLines = 1) })
-            Tab(selected = subTab == 1, onClick = { subTab = 1 }, text = { Text("清单健康", fontWeight = FontWeight.Bold, maxLines = 1) })
+            Tab(selected = subTab == 0, onClick = { navigation.request { subTab = 0 } }, text = { Text("效率洞察", fontWeight = FontWeight.Bold, maxLines = 1) })
+            Tab(selected = subTab == 1, onClick = { navigation.request { subTab = 1 } }, text = { Text("清单健康", fontWeight = FontWeight.Bold, maxLines = 1) })
         }
 
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             AnimatedContent(targetState = subTab, label = "statsSubTab") { currentTab ->
                 when (currentTab) {
-                    0 -> InsightsContent(viewModel, onEditTodo = { showEditDialogFor = it })
+                    0 -> InsightsContent(viewModel, navigation, onEditTodo = { showEditDialogFor = it })
                     1 -> HealthContent(viewModel)
                 }
             }
@@ -191,15 +192,33 @@ fun StatsView(viewModel: TodoViewModel) {
 }
 
 @Composable
-fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
+internal fun InsightsContent(viewModel: TodoViewModel, navigation: InsightsNavigation, onEditTodo: (Todo) -> Unit) {
     val todos by viewModel.activeTodos.collectAsState()
     val activeSource by viewModel.activeSource.collectAsState()
+    val learning = currentLearningData(viewModel)
     var period by remember { mutableStateOf("day") }
     var targetDate by remember { mutableStateOf(LocalDate.now()) }
+    val planning = if (activeSource is TodoViewModel.ActiveSource.Personal)
+        rememberPersonalPlanning(viewModel.configManager, viewModel::updatePlanningSync) else null
+    val listState = rememberLazyListState()
+    var scrollTarget by remember { mutableStateOf<String?>(null) }
+    fun navigate(nextPeriod: String, day: LocalDate = targetDate, scroll: String? = null) = navigation.request {
+        period = nextPeriod
+        targetDate = day
+        scrollTarget = scroll
+    }
+    LaunchedEffect(scrollTarget, period, targetDate) {
+        // 前两项为周期和日期导航，统计摘要与时间分布各占一项。
+        when (scrollTarget) {
+            "daily-review" -> listState.scrollToItem(4)
+            "period-planning" -> listState.scrollToItem(2)
+        }
+        scrollTarget = null
+    }
 
     var showTimingPreference by remember { mutableStateOf(viewModel.configManager.statsShowTiming) }
     val personalTimingEnabled by viewModel.timeTrackingEnabled.collectAsState()
-    val timingEnabled = personalTimingEnabled || currentLearningData(viewModel).readOnly
+    val timingEnabled = personalTimingEnabled || learning.readOnly
     val showTiming = timingEnabled && (period == "day" || showTimingPreference)
     var showTaskList by remember { mutableStateOf(false) }
     var expandedFilterMenu by remember { mutableStateOf(false) }
@@ -298,6 +317,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
     val nightPct = if (totalSlots == 0) 0 else Math.round((nightCount.toDouble() / totalSlots) * 100).toInt()
 
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
@@ -333,7 +353,7 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
-                                    onClick = { period = key }
+                                    onClick = { if (period != key) navigate(key) }
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
@@ -401,27 +421,33 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
             Spacer(Modifier.height(4.dp))
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = {
-                    targetDate = when (period) {
+                    navigate(period, when (period) {
                         "day" -> targetDate.minusDays(1)
                         "week" -> targetDate.minusWeeks(1)
                         else -> targetDate.minusMonths(1)
-                    }
+                    })
                 }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Prev") }
 
                 val label = when (period) {
-                    "day" -> targetDate.toString()
+                    "day" -> "$targetDate · ${chineseWeekday(targetDate)}"
                     "week" -> "${targetDate.get(IsoFields.WEEK_BASED_YEAR)}年 第${targetDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)}周"
                     else -> "${targetDate.year}年 ${targetDate.monthValue}月"
                 }
                 Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
 
                 IconButton(onClick = {
-                    targetDate = when (period) {
+                    navigate(period, when (period) {
                         "day" -> targetDate.plusDays(1)
                         "week" -> targetDate.plusWeeks(1)
                         else -> targetDate.plusMonths(1)
-                    }
+                    })
                 }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next") }
+            }
+        }
+
+        if (planning != null && period != "day") item(key = "period-planning") {
+            key(planning.target) {
+                PersonalPlanningStats(planning, targetDate, period, navigation) { day -> navigate("day", day, "daily-review") }
             }
         }
 
@@ -887,7 +913,11 @@ fun InsightsContent(viewModel: TodoViewModel, onEditTodo: (Todo) -> Unit) {
             }
         }
 
-        item { LearningInsights(viewModel, period, targetDate) }
+        item(key = "daily-review") {
+            LearningInsights(viewModel, period, targetDate, planning, navigation) { day ->
+                navigate("week", day, "period-planning")
+            }
+        }
 
         // Toggle list button
         item {

@@ -31,7 +31,7 @@ data class LearningPart(val date: LocalDate, val duration: Long, val entry: Time
 data class LearningGroup(val label: String, val duration: Long, val count: Int)
 data class LearningSummary(val duration: Long, val count: Int, val parts: List<LearningPart>,
     val groups: List<LearningGroup>, val pending: Int, val running: Int)
-data class RecentTimingTask(val todo: Todo, val startedAt: Instant)
+data class RecentTimingTask(val todo: Todo, val startedAt: Instant, val endedAt: Instant)
 
 object Learning {
     const val SHORT_TIME_ENTRY_MESSAGE = "计时未超过 30 秒，不保存为记录。"
@@ -63,15 +63,24 @@ object Learning {
             val end = instant(entry.ended_at) ?: continue
             if (Duration.between(start, end) <= minimumDuration) continue
             val previous = latest[todo.id]
-            if (previous == null || start > previous.startedAt) latest[todo.id] = RecentTimingTask(todo, start)
+            if (previous == null || start > previous.startedAt) latest[todo.id] = RecentTimingTask(todo, start, end)
         }
         return latest.values.sortedWith(compareByDescending<RecentTimingTask> { it.startedAt }.thenBy { it.todo.id }).take(5)
     }
 
-    fun lastTimedText(startedAt: Instant, today: LocalDate = LocalDate.now(), zone: ZoneId = ZoneId.systemDefault()): String {
-        val local = startedAt.atZone(zone)
-        val day = if (local.toLocalDate() == today) "今天" else local.toLocalDate().toString()
-        return "上次计时：$day ${local.toLocalTime().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))}"
+    fun lastTimedText(endedAt: Instant, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): String {
+        val local = endedAt.atZone(zone)
+        if (local.toLocalDate() == now.atZone(zone).toLocalDate() && !endedAt.isAfter(now)) {
+            val minutes = Duration.between(endedAt, now).toMinutes()
+            if (minutes == 0L) return "上次结束：刚刚"
+            val hours = minutes / 60
+            val duration = buildString {
+                if (hours > 0) append("${hours}小时")
+                if (minutes % 60 > 0 || hours == 0L) append("${minutes % 60}分钟")
+            }
+            return "上次结束：${duration}前"
+        }
+        return "上次结束：${local.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}"
     }
 
     // 短计时保留删除标记参与同步，避免其他设备恢复已丢弃的运行记录。
@@ -176,24 +185,28 @@ object Learning {
     fun preview(review: DailyReview): String = fields(review).firstOrNull { it.second.isNotBlank() }?.let { "${it.first}：${it.second.lines().take(2).joinToString("\n")}" } ?: ""
     fun export(data: TodoData, period: String, date: LocalDate, includeLearning: Boolean = true, zone: ZoneId = ZoneId.systemDefault(),
         tasks: Map<TaskReference, Todo> = data.todos.associateBy { TaskReference(it.id) },
-        conflicts: Set<String> = overlaps(data.timeEntries), sourceId: String? = null): Pair<String, String> {
+        conflicts: Set<String> = overlaps(data.timeEntries), sourceId: String? = null,
+        planning: WeeklyPlanning.ExportContent? = null): Pair<String, String> {
         val resolved = resolveEntries(data.timeEntries, tasks, data, sourceId)
         val (start, end) = range(period, date)
         val reviews = data.dailyReviews.filter { !it.deleted && it.date >= start.toString() && it.date < end.toString() }
         val totals = summary(resolved, start, end, zone, conflicts = conflicts)
         val dates = (reviews.map { LocalDate.parse(it.date) } + if (includeLearning) totals.parts.map { it.date } else emptyList()).toSortedSet()
-        require(dates.isNotEmpty()) { "这个时间范围没有可导出的内容" }
+        dates.addAll(planning?.days?.keys.orEmpty())
+        require(dates.isNotEmpty() || planning?.history?.isNotEmpty() == true) { "这个时间范围没有可导出的内容" }
         val lines = mutableListOf("# 每日复盘", "")
         dates.forEach { day ->
             lines.addAll(listOf("## $day", ""))
             val review = reviews.find { it.date == day.toString() }
             if (review == null) lines.addAll(listOf("当日未填写复盘", "")) else fields(review).forEach { (title, value) -> lines.addAll(listOf("### $title", "", value.trim().ifEmpty { "未填写" }, "")) }
+            lines.addAll(planning?.days?.get(day).orEmpty())
             if (includeLearning) {
                 val summary = summary(resolved, day, day.plusDays(1), zone, conflicts = conflicts)
                 lines.addAll(listOf("### 学习投入", "", "合计：${duration(summary.duration)}，${summary.count} 次。", "", "| 标签 | 时长 | 次数 |", "| --- | --- | --- |"))
                 summary.groups.forEach { g -> lines.add("| ${g.label.replace("\\", "\\\\").replace("|", "\\|").replace(Regex("[\\r\\n]"), " ")} | ${duration(g.duration)} | ${g.count} |") }; lines.add("")
             }
         }
+        if (planning?.history?.isNotEmpty() == true) lines.addAll(listOf("", "## 周计划历史", "") + planning.history)
         if (includeLearning) {
             lines.add("统计时区：${zone.id}。次数按每天有效记录计数，跨日记录每天均计次。")
             if (totals.pending > 0) lines.add("有 ${totals.pending} 条待核对记录未计入。")

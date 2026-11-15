@@ -1,3 +1,4 @@
+import { mainStoreHarness } from './mainStoreHarness.mjs';
 import * as seriesHelpers from '../src/taskSeries.js';
 import { requirePersonalTarget } from '../src/collaborationView.js';
 import { parse as parseSource } from 'acorn';
@@ -56,6 +57,177 @@ function readContractFixture(name) {
     const fixturePath = resolve(import.meta.dirname, '..', '..', 'tests', 'fixtures', 'contract', name);
     return JSON.parse(readFileSync(fixturePath, 'utf8'));
 }
+
+describe('普通待办正式入口的跨平台固定决胜规则', () => {
+    const fixture = JSON.parse(readFileSync(new URL('../../tests/fixtures/normal-todo/conflicts.json', import.meta.url), 'utf8'));
+    const sorted = todos => [...todos].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    const merge = (a, b) => mergeTodoData(structuredClone(a), structuredClone(b));
+    for (const sample of fixture.validCases) {
+        it(`共享样本 ${sample.id}：单端、交换、重复与分批读取一致`, () => {
+            const expected = sample.winners;
+            for (const records of [sample.records, [...sample.records].reverse(), [...sample.records, ...sample.records]]) {
+                assert.deepEqual(sorted(merge(makeData(records), null).data.todos), expected);
+                assert.deepEqual(sorted(merge(null, makeData(records)).data.todos), expected);
+                assert.deepEqual(sorted(merge(makeData(records), makeData()).data.todos), expected);
+                let state = makeData();
+                for (const record of records) state = merge(state, makeData([record])).data;
+                assert.deepEqual(sorted(state.todos), expected);
+                assert.deepEqual(sorted(merge(state, makeData(records)).data.todos), expected);
+            }
+        });
+    }
+    it('正常任务日期数组保持整条赢家的顺序与重复，原时间不变', () => {
+        const older = makeTodo({ id: 'whole-array', updated_at: '2026-11-05T00:00:00Z', completed_dates: ['2026-11-05'] });
+        const newer = makeTodo({ id: older.id, updated_at: '2026-11-05T00:01:00Z', completed_dates: ['2026-11-04', '2026-11-03', '2026-11-03'] });
+        for (const [a, b] of [[older, newer], [newer, older]]) {
+            const result = merge(makeData([a]), makeData([b])).data.todos[0];
+            assert.deepEqual(result.completed_dates, newer.completed_dates);
+            assert.equal(result.updated_at, newer.updated_at);
+        }
+    });
+    it('普通任务与迁移后的周期任务同 ID 时继续执行原打卡流程', () => {
+        const normal = makeTodo({ id: 'mixed-type', completed_dates: ['2026-06-01'] });
+        const period = { ...makeTodo({ id: normal.id, completed_dates: ['2026-06-02'] }), recurring: 'weekly' };
+        const result = merge(makeData([normal]), makeData([period])).data.todos[0];
+        assert.deepEqual(result.completed_dates, ['2026-06-01', '2026-06-02']);
+    });
+    it('原型形扩展参与决胜且正确触发云端内容变化标记', () => {
+        const base = makeTodo({ id: 'unknown-proto' });
+        const a = { ...base, ...JSON.parse('{"__proto__":{"x":"z"}}') };
+        const b = { ...base, ...JSON.parse('{"__proto__":{"x":"aa"}}') };
+        assert.equal(hasTodoDataContentChanges(makeData([a]), makeData([b])), true);
+        const result = merge(makeData([b]), makeData([a]));
+        assert.deepEqual(result.data.todos[0].__proto__, { x: 'aa' });
+        assert.equal(Object.hasOwn(result.data.todos[0], '__proto__'), true);
+        assert.equal(result.cloudChanged, true);
+        assert.equal(result.changed, false);
+    });
+    it('未知嵌套坏 Unicode 在没有冲突时也明确拒绝', () => {
+        assert.throws(() => merge(makeData([{ ...makeTodo(), extension: { value: '\ud800' } }]), null), /INVALID_UNICODE/);
+    });
+    it('周期等长同日记录选择较晚实际时刻，多日顺序由完整入口排序', () => {
+        const base = makeTodo({ id: 'period-scope', task_type: 'weekly_checkin', date: '2026-W45', target_count: 3,
+            updated_at: '2026-11-05T01:00:00Z' });
+        const a = { ...base, completed_dates: ['2026-11-05T10:00:00+08:00'] };
+        const b = { ...base, completed_dates: ['2026-11-05T11:00:00+08:00'] };
+        for (const [local, cloud] of [[a, b], [b, a]]) {
+            const result = merge(makeData([local]), makeData([cloud])).data.todos[0];
+            assert.deepEqual(result.completed_dates, b.completed_dates);
+            assert.equal(result.completed, false);
+        }
+        const reversed = { ...base, completed_dates: ['2026-11-06', '2026-11-05'] };
+        assert.deepEqual(merge(makeData([reversed]), makeData([reversed])).data.todos[0].completed_dates,
+            ['2026-11-05', '2026-11-06']);
+    });
+    it('周期亚毫秒补卡边界保持 Windows 既有毫秒比较行为', () => {
+        const base = makeTodo({ id: 'period-sub-ms', task_type: 'weekly_checkin', date: '2026-W45', target_count: 3,
+            updated_at: '2026-11-05T00:00:00.0000Z', completed_dates: ['2026-11-05T00:00:00.0002Z'] });
+        const removed = { ...base, updated_at: '2026-11-05T00:00:00.0001Z', completed_dates: [] };
+        for (const [a, b] of [[base, removed], [removed, base]]) {
+            assert.deepEqual(merge(makeData([a]), makeData([b])).data.todos[0].completed_dates, []);
+        }
+    });
+});
+
+describe('打卡长度、实际毫秒与固定平局共享规范', () => {
+    const fixture = JSON.parse(readFileSync(new URL('../../tests/fixtures/checkin/conflicts.json', import.meta.url), 'utf8'));
+    for (const sample of fixture.cases) {
+        for (const type of ['weekly_checkin', 'monthly_checkin']) {
+            it(`${type} ${sample.id}：完整入口双向、乱序与重复同日一致`, () => {
+                const base = makeTodo({ id: 'shared-checkin', task_type: type,
+                    date: type === 'weekly_checkin' ? '2026-W45' : '2026-11', target_count: 1,
+                    created_at: '2026-11-01T00:00:00Z' });
+                const left = { ...base, updated_at: sample.local_updated, completed_dates: sample.local_dates };
+                const right = { ...base, updated_at: sample.cloud_updated, completed_dates: sample.cloud_dates };
+                for (const [a, b] of [[left, right], [right, left]]) {
+                    for (const reverseDates of [false, true]) {
+                        const local = { ...a, completed_dates: reverseDates ? [...a.completed_dates].reverse() : a.completed_dates };
+                        const result = mergeTodoData(makeData([structuredClone(local)]), makeData([structuredClone(b)])).data.todos[0];
+                        assert.deepEqual(result.completed_dates, sample.expected);
+                        assert.equal(result.completed, sample.expected.length >= 1);
+                    }
+                }
+            });
+        }
+    }
+    it('同日去重在单端加载也按实际时刻选择，保留原始表示', () => {
+        const dates = ['2026-11-05T10:00:00+09:00', '2026-11-05T09:30:00+00:00'];
+        for (const array of [dates, [...dates].reverse(), [...dates, ...dates]]) {
+            const input = makeData([makeTodo({ task_type: 'weekly_checkin', date: '2026-W45', completed_dates: array })]);
+            assert.deepEqual(mergeTodoData(input, null).data.todos[0].completed_dates, [dates[1]]);
+        }
+    });
+    it('截短的旧日期不把另一天有效记录重复匹配到两组', () => {
+        const a = makeTodo({ id: 'prefix-group', task_type: 'monthly_checkin', date: '2026-11', completed_dates: ['2026-11-0'] });
+        const b = { ...a, completed_dates: ['2026-11-05'] };
+        for (const [left, right] of [[a, b], [b, a]]) {
+            assert.deepEqual(mergeTodoData(makeData([structuredClone(left)]), makeData([structuredClone(right)])).data.todos[0].completed_dates,
+                ['2026-11-0', '2026-11-05']);
+        }
+    });
+    it('周计数使用有效日历前缀，兼容年周边界与负偏移，忽略坏日期', () => {
+        assert.equal(getWeeklyCompletedCount({ date: '2020-W53', completed_dates: [
+            '2020-12-31', '2021-01-01T23:00:00-04:00', '2021-01-03T23:00:00Z', '2021-01-04T00:00:00+14:00'
+        ] }), 3);
+        assert.equal(getWeeklyCompletedCount({ date: '2026-W09', completed_dates: ['2026-02-30', 'bad', '2026-03-01'] }), 1);
+    });
+    it('同长度按实际时刻判断而非原始时间字符串，同毫秒用固定字典序', () => {
+        const a = '2026-11-05T10:00:00+09:00', b = '2026-11-05T09:30:00+00:00';
+        assert.equal(resolveCheckinConflict(a, b, 0, 0), b);
+        assert.equal(resolveCheckinConflict(b, a, 0, 0), b);
+        const first = '2026-11-05T10:00:00.0002+08:00', second = '2026-11-05T10:00:00.0001+08:00';
+        assert.equal(resolveCheckinConflict(first, second, 0, 0), first);
+        assert.equal(resolveCheckinConflict(second, first, 0, 0), first);
+    });
+});
+
+describe('周月任务基础版本固定选择共享规范', () => {
+    const fixture = JSON.parse(readFileSync(new URL('../../tests/fixtures/period-base/conflicts.json', import.meta.url), 'utf8'));
+    const base = todo => Object.fromEntries(Object.entries(todo)
+        .filter(([key]) => !['completed_dates', 'completed', 'completed_at', 'updated_at'].includes(key)));
+    it('单侧周期任务也拒绝未知扩展里的坏 Unicode', () => {
+        const damaged = { ...makeTodo({ task_type: 'weekly_checkin', date: '2026-W45' }), future: { nested: '\ud800' } };
+        assert.throws(() => mergeTodoData(makeData([damaged]), null), /INVALID_UNICODE/);
+    });
+    for (const sample of fixture.cases) {
+        it(`${sample.id}：基础整条双向相同，打卡日期继续独立归并`, () => {
+            for (const records of [sample.records, [...sample.records].reverse(), [...sample.records, ...sample.records]]) {
+                const normalized = mergeTodoData(makeData(structuredClone(records)), null).data.todos[0];
+                assert.deepEqual(base(normalized), base(sample.winner));
+            }
+            if (sample.records.length !== 2) return;
+            for (const [a, b] of [sample.records, [...sample.records].reverse()]) {
+                const merged = mergeTodoData(makeData([structuredClone(a)]), makeData([structuredClone(b)])).data.todos[0];
+                assert.deepEqual(base(merged), base(sample.winner));
+                assert.deepEqual(merged.completed_dates, sample.expected_dates);
+                const count = merged.task_type === 'weekly_checkin' ? getWeeklyCompletedCount(merged) : getMonthlyCompletedCount(merged);
+                const expectedCompleted = Boolean(merged.target_count && count >= merged.target_count);
+                assert.equal(merged.completed, expectedCompleted);
+                if (JSON.stringify(sample.winner.completed_dates) === JSON.stringify(sample.expected_dates) && sample.winner.completed === expectedCompleted) {
+                    assert.equal(merged.updated_at, sample.winner.updated_at);
+                }
+            }
+        });
+    }
+});
+
+describe('提醒设置整份固定选择共享规范', () => {
+    const fixture = JSON.parse(readFileSync(new URL('../../tests/fixtures/reminder-settings/conflicts.json', import.meta.url), 'utf8'));
+    for (const sample of fixture.cases) {
+        it(`${sample.id}：双向实际入口选择同一份设置并保留原时钟`, () => {
+            for (const [local, cloud] of [[sample.local, sample.cloud], [sample.cloud, sample.local]]) {
+                assert.deepEqual(mergeReminderSettings(structuredClone(local), structuredClone(cloud)), sample.winner);
+                const result = mergeTodoData({ ...makeData(), ...structuredClone(local) }, { ...makeData(), ...structuredClone(cloud) });
+                assert.deepEqual(result.data.reminder_settings, sample.winner);
+            }
+        });
+    }
+    it('提醒设置及规则的坏 Unicode 在单侧加载也拒绝，不改写源数据', () => {
+        const source = makeData([], { reminder_settings: { future: { text: '\ud800' } } });
+        assert.throws(() => mergeTodoData(structuredClone(source), null), /INVALID_UNICODE/);
+        assert.equal(source.reminder_settings.future.text, '\ud800');
+    });
+});
 
 describe('共享数据契约样例', () => {
     it('旧版个人数据经生产迁移后补齐默认值', () => {
@@ -258,11 +430,11 @@ describe('mergeTodoData', () => {
     it('completed_dates 销卡同步 (即一方删除了打卡，且该方 updatedAt 较新时，合并后应删除该打卡)', () => {
         const id = 'checkin-delete-sync';
         const local = makeData([makeTodo({
-            id, completed_dates: ['2026-06-02T10:00:00.000Z'],
+            id, task_type: 'weekly_checkin', completed_dates: ['2026-06-02T10:00:00.000Z'],
             updated_at: '2026-06-02T10:00:00.000Z'
         })]);
         const cloud = makeData([makeTodo({
-            id, completed_dates: [],
+            id, task_type: 'weekly_checkin', completed_dates: [],
             updated_at: '2026-06-02T12:00:00.000Z' // Cloud deleted it later
         })]);
 
@@ -274,11 +446,11 @@ describe('mergeTodoData', () => {
     it('completed_dates 取并集', () => {
         const id = 'checkin-1';
         const local = makeData([makeTodo({
-            id, completed_dates: ['2026-06-01', '2026-06-02'],
+            id, task_type: 'weekly_checkin', completed_dates: ['2026-06-01', '2026-06-02'],
             updated_at: '2026-06-28T00:00:00Z'
         })]);
         const cloud = makeData([makeTodo({
-            id, completed_dates: ['2026-06-02', '2026-06-03'],
+            id, task_type: 'weekly_checkin', completed_dates: ['2026-06-02', '2026-06-03'],
             updated_at: '2026-06-28T00:00:00Z'
         })]);
 
@@ -290,11 +462,11 @@ describe('mergeTodoData', () => {
     it('completed_dates 合并去重并优先保留时间戳', () => {
         const id = 'checkin-dedup';
         const local = makeData([makeTodo({
-            id, completed_dates: ['2026-06-02', '2026-06-03T10:00:00.000Z'],
+            id, task_type: 'weekly_checkin', completed_dates: ['2026-06-02', '2026-06-03T10:00:00.000Z'],
             updated_at: '2026-06-28T00:00:00Z'
         })]);
         const cloud = makeData([makeTodo({
-            id, completed_dates: ['2026-06-02T12:00:00.000Z', '2026-06-03'],
+            id, task_type: 'weekly_checkin', completed_dates: ['2026-06-02T12:00:00.000Z', '2026-06-03'],
             updated_at: '2026-06-28T00:00:00Z'
         })]);
 
@@ -391,7 +563,7 @@ describe('mergeTodoData', () => {
         });
 
         const result = mergeTodoData(local, cloud);
-        assert.deepEqual(result.data.reminder_settings.global_rules, [localRule]);
+        assert.deepEqual(result.data.reminder_settings.global_rules, [{ ...localRule, enabled: true, title: '' }]);
         assert.equal(result.changed, false);
         assert.equal(result.cloudChanged, true);
     });
@@ -426,7 +598,7 @@ describe('mergeTodoData', () => {
         });
 
         const result = mergeTodoData(local, cloud);
-        assert.deepEqual(result.data.reminder_settings.global_rules, [legacyRule]);
+        assert.deepEqual(result.data.reminder_settings.global_rules, [{ ...legacyRule, enabled: true, condition: 'unconditional', task_scope: 'all', title: '', body: '' }]);
     });
 
     it('业务内容比较忽略根级 last_updated，但能识别提醒设置变化', () => {
@@ -686,8 +858,9 @@ describe('生产数据合并模块', () => {
 
     it('独立提醒设置合并沿用新的有效时间戳', () => {
         const local = { reminder_settings: { updated_at: '2026-09-10T01:00:00Z', global_rules: [] } };
-        const cloud = { reminder_settings: { updated_at: '2026-09-10T02:00:00Z', global_rules: [{ id: 'rule' }] } };
-        assert.deepEqual(mergeReminderSettings(local, cloud), cloud.reminder_settings);
+        const cloud = { reminder_settings: { updated_at: '2026-09-10T02:00:00Z', global_rules: [{ id: 'rule', time: '09:00' }] } };
+        assert.deepEqual(mergeReminderSettings(local, cloud), { updated_at: '2026-09-10T02:00:00Z', enabled: true, privacy_mode: false,
+            global_rules: [{ id: 'rule', time: '09:00', enabled: true, condition: 'unconditional', task_scope: 'all', title: '', body: '' }] });
     });
 
     it('纯日期销卡记录在单端缺席时仍按任务更新时间裁决', () => {
@@ -699,6 +872,11 @@ describe('学习保存失败与串行队列', () => {
     const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
     const tree = parseSource(source, {ecmaVersion:'latest',sourceType:'module'});
     const declaration = name => { const n = tree.body.find(n => n.type === 'FunctionDeclaration' && n.id.name === name); return source.slice(n.start,n.end); };
+    function runMain(script, context) {
+        return runInNewContext(declaration('commitPersonal') +
+            'const dataStore = mainStoreHarness(appState, (data, options) => _doSaveData(data, options));' + script,
+            { learningUI: { refresh() {} }, mainStoreHarness, ...context });
+    }
     function timerHarness(afterSync = () => {}, save = () => true) {
         const viewSource = readFileSync(new URL('../src/learningView.js', import.meta.url), 'utf8');
         const viewTree = parseSource(viewSource, { ecmaVersion: 'latest', sourceType: 'module' });
@@ -709,7 +887,7 @@ describe('学习保存失败与串行队列', () => {
             daily_reviews: [{ id: 'review', date: '2026-09-22', fact: '保留复盘' }], reminder_settings: { enabled: true }
         } };
         let writes = 0;
-        const begin = runInNewContext('let _saveQueue=Promise.resolve();let _lastRenderedHash="";' + declaration('commitLearning') +
+        const begin = runMain('let _saveQueue=Promise.resolve();let _lastRenderedHash="";' + declaration('commitLearning') +
             'const requireEnabled=()=>{if(state.appConfig.time_tracking_enabled===false)throw new Error("计时已关闭");};' +
             'const commit=change=>{requirePersonalTarget(state.activeSource);return commitLearning(change);};' +
             viewSource.slice(start.start, start.end) + ';startTiming', {
@@ -763,7 +941,7 @@ describe('学习保存失败与串行队列', () => {
         const original = { todos: [task, { id: 'deleted', deleted: true }], time_entries: [entry], daily_reviews: [{ id: 'r', fact: '保留复盘' }], reminder_settings: { enabled: false } };
         const state = { todoData: original, collabData: { todos: [{ ...task, content: '协作任务' }] }, activeSource: { type: 'collaboration' }, appConfig: { sync_mode: 'webdav' }, saveVersion: 0 };
         let fail = true, writes = 0, saved;
-        const commit = runInNewContext('let _saveQueue=Promise.resolve();let _lastRenderedHash="";' + declaration('_doSaveData') + declaration('commitPersonalLabels') + ';commitPersonalLabels', {
+        const commit = runMain('let _saveQueue=Promise.resolve();let _lastRenderedHash="";' + declaration('_doSaveData') + declaration('commitPersonalLabels') + ';commitPersonalLabels', {
             requirePersonalTarget, ...learningHelpers, applyLabelChange, appState: state, structuredClone, Date, setTimeout: () => {},
             render: () => {}, learningUI: { refresh: () => {} }, setSyncStatus: () => {}, SyncState: { SYNCING: 1, ERROR: 2, IDLE: 0 },
             purgeOldDeletedTodos: () => { throw new Error('标签保存不能清理记录'); }, showToast: () => {}, console: { error: () => {} },
@@ -790,7 +968,7 @@ describe('学习保存失败与串行队列', () => {
         const state = {appConfig:{},todoData:{todos:[original]},activeSource:{type:'personal'},currentEditingTodo:structuredClone(original),currentEditingOriginalType:{task_type:'normal',recurring:'none'},currentEditingSubtasks:[]};
         const fields = {'edit-content':{value:'新内容'},'edit-learning-label':{value:'数学'}};
         const calls = [];
-        const save = runInNewContext('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";'+declaration('commitPeriodData')+declaration('saveEditModal')+';saveEditModal', {
+        const save = runMain('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";'+declaration('commitPeriodData')+declaration('saveEditModal')+';saveEditModal', {
             requirePersonalTarget, ...learningHelpers,...dateHelpers,...seriesHelpers,structuredClone,appState:state,document:{getElementById:id=>fields[id]},
             extractCollaborator:()=>({nickname:null}),deepClone:structuredClone,closeEditModal:()=>closed++,render:()=>{},
             showToast:m=>notices.push(m),console:{error:()=>{}},_doSaveData:async()=>success,invoke:async(cmd,args)=>calls.push([cmd,args])
@@ -806,7 +984,7 @@ describe('学习保存失败与串行队列', () => {
     it('落盘失败回滚新集合并保留旧数据，下一次保存仍可成功', async () => {
         let success = false;
         const state = {activeSource:{type:'personal'},todoData:{todos:[{id:'existing',content:'原有任务'}],time_entries:[],daily_reviews:[]}};
-        const commit = runInNewContext('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";' + declaration('commitLearning') + ';commitLearning', {
+        const commit = runMain('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";' + declaration('commitLearning') + ';commitLearning', {
             requirePersonalTarget, ...learningHelpers, appState:state, structuredClone, render:()=>{}, learningUI:{refresh:()=>{}}, _doSaveData:async()=>success
         });
         await assert.rejects(commit(d=>d.daily_reviews.push({id:'r',date:'2026-09-10',fact:'不能丢失的草稿'})),/保存失败/);
@@ -817,18 +995,18 @@ describe('学习保存失败与串行队列', () => {
         assert.equal(state.todoData.daily_reviews[0].fact,'重试保存');
     });
     it('实际写入命令失败会返回失败，而非误报成功', async () => {
-        const save = runInNewContext(declaration('_doSaveData') + ';_doSaveData', {
+        const save = runMain(declaration('_doSaveData') + ';_doSaveData', {
             requirePersonalTarget, ...learningHelpers, appState:{todoData:{todos:[]},appConfig:{sync_mode:'local'},saveVersion:0},
             setSyncStatus:()=>{}, SyncState:{SYNCING:1,ERROR:2}, purgeOldDeletedTodos:()=>{},
             invoke:async()=>{throw new Error('磁盘写入失败');}, console:{error:()=>{}}, Date
         });
-        assert.equal(await save(),false);
+        await assert.rejects(save({todos:[]}), /磁盘写入失败/);
     });
     it('实际写入成功后保留计时记录，云端失败不回滚已经落盘的记录', async () => {
         for (const mode of ['local', 'webdav']) {
             let persisted;
             const state = {activeSource:{type:'personal'},todoData:{todos:[],time_entries:[],daily_reviews:[]},appConfig:{sync_mode:mode},saveVersion:0};
-            const commit = runInNewContext('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";' + declaration('_doSaveData') + declaration('commitLearning') + ';commitLearning', {
+            const commit = runMain('let _saveQueue=Promise.resolve(); let _lastRenderedHash="";' + declaration('_doSaveData') + declaration('commitLearning') + ';commitLearning', {
                 requirePersonalTarget, ...learningHelpers, appState:state, structuredClone, Date, setTimeout:()=>{},
                 setSyncStatus:()=>{}, SyncState:{SYNCING:1,ERROR:2,IDLE:0}, purgeOldDeletedTodos:()=>{},
                 render:()=>{}, learningUI:{refresh:()=>{}}, showToast:()=>{}, console:{error:()=>{}},

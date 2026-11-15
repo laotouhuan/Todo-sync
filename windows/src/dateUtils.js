@@ -267,17 +267,17 @@ export function generateUUID() {
 
 // ====== Todo Factory ======
 
-export function createTodo(content, date = null, subtaskContents = []) {
+export function createTodo(content, date = null, subtaskContents = [], fixedIdentity = null) {
     return {
-        id: generateUUID(),
+        id: fixedIdentity?.id ?? generateUUID(),
         content,
         date,
         time: null,
         completed: false,
-        created_at: new Date().toISOString(),
+        created_at: fixedIdentity?.at ?? new Date().toISOString(),
         completed_at: null,
-        order: Date.now(),
-        updated_at: new Date().toISOString(),
+        order: fixedIdentity ? Date.parse(fixedIdentity.at) : Date.now(),
+        updated_at: fixedIdentity?.at ?? new Date().toISOString(),
         deleted: false,
         recurring: 'none',
         task_type: 'normal',

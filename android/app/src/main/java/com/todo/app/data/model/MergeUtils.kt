@@ -54,18 +54,30 @@ object MergeUtils {
      */
     fun normalizeData(data: TodoData): TodoData {
         TaskSeriesLogic.validate(data)
-        val migratedTodos = data.todos.map { migrateTodo(it) }
+        val migratedTodos = data.todos.map { migrateTodo(it) }.map {
+            when {
+                it.taskType == TaskType.NORMAL -> NormalTodoConflict.normalize(it)
+                NormalTodoConflict.isPeriod(it) -> NormalTodoConflict.validatePeriodCandidate(
+                    it.copy(completedDates = deduplicateDates(it.completedDates), label = NormalTodoConflict.normalizeLabel(it.label)))
+                else -> it
+            }
+        }
 
         // 去重复 ID（保留 updatedAt 最新的）
         val uniqueTodos = migratedTodos.groupBy { it.id }
             .map { (_, list) ->
-                list.maxByOrNull {
-                    runCatching { OffsetDateTime.parse(it.updatedAt) }.getOrDefault(OffsetDateTime.MIN)
-                } ?: list.first()
+                when {
+                    list.all { it.taskType == TaskType.NORMAL } -> list.reduce(NormalTodoConflict::choose)
+                    list.all(NormalTodoConflict::isPeriod) -> list.reduce(NormalTodoConflict::choosePeriodBase)
+                    else -> list.maxByOrNull {
+                        runCatching { OffsetDateTime.parse(it.updatedAt) }.getOrDefault(OffsetDateTime.MIN)
+                    } ?: list.first()
+                }
             }
 
         // 去重复 completedDates
         val deduplicatedTodos = uniqueTodos.map { todo ->
+            if (todo.taskType == TaskType.NORMAL) return@map todo
             val deduped = deduplicateDates(todo.completedDates)
             if (deduped != todo.completedDates) {
                 todo.copy(completedDates = deduped)
@@ -74,20 +86,22 @@ object MergeUtils {
             }
         }
 
-        return data.copy(todos = deduplicatedTodos.map { it.copy(label = Learning.label(it.label)) }, timeEntries = Learning.mergeTimes(data.timeEntries), dailyReviews = Learning.mergeReviews(data.dailyReviews))
+        return data.copy(reminderSettings = ReminderSettingsConflict.normalize(data.reminderSettings), todos = deduplicatedTodos.map {
+            if (it.taskType == TaskType.NORMAL || NormalTodoConflict.isPeriod(it)) it else it.copy(label = Learning.label(it.label))
+        }, timeEntries = Learning.mergeTimes(data.timeEntries), dailyReviews = Learning.mergeReviews(data.dailyReviews))
     }
 
     private fun deduplicateDates(dates: List<String>): List<String> {
         return dates.groupBy { it.substringBefore('T') }
             .map { (_, group) ->
-                group.maxWithOrNull(compareBy<String> { it.length }.thenBy { it })!!
+                group.reduce(::chooseCheckinDate)
             }
             .sorted()
     }
 
     /**
      * 合并本地和云端数据。
-     * 策略：相同 id 按 updatedAt 取更新版本（Last-Write-Wins），completedDates 取并集。
+     * 普通待办选择整条版本；周/月任务继续使用独立的打卡冲突规则。
      */
     fun mergeTodoData(local: TodoData, cloud: TodoData): TodoData {
         val localTodos = normalizeData(local).todos.associateBy { it.id }
@@ -97,12 +111,18 @@ object MergeUtils {
             val l = localTodos[id]
             val c = cloudTodos[id]
             if (l != null && c != null) {
+                if (l.taskType == TaskType.NORMAL && c.taskType == TaskType.NORMAL) {
+                    merged[id] = NormalTodoConflict.choose(l, c)
+                    continue
+                }
                 val lTime = try { OffsetDateTime.parse(l.updatedAt) } catch (_: Exception) { OffsetDateTime.MIN }
                 val cTime = try { OffsetDateTime.parse(c.updatedAt) } catch (_: Exception) { OffsetDateTime.MIN }
-                val base = if (cTime.isAfter(lTime)) c else l
+                val base = if (NormalTodoConflict.isPeriod(l) && NormalTodoConflict.isPeriod(c)) {
+                    NormalTodoConflict.choosePeriodBase(l, c)
+                } else if (cTime.isAfter(lTime)) c else l
 
                 // completedDates 智能合并：支持销卡（删除打卡）同步与离线补卡合并
-                val mergedDates = mergeCompletedDates(l.completedDates, c.completedDates, lTime, cTime)
+                val mergedDates = mergeCompletedDates(l.completedDates, c.completedDates, l.updatedAt, c.updatedAt)
                 var updatedTodo = base.copy(completedDates = mergedDates)
                 if (mergedDates != base.completedDates) {
                     updatedTodo = updatedTodo.copy(updatedAt = nowIso())
@@ -148,61 +168,27 @@ object MergeUtils {
     fun hasContentChanges(first: TodoData, second: TodoData): Boolean =
         first.copy(last_updated = "") != second.copy(last_updated = "")
 
-    private fun mergeReminderSettings(local: TodoData, cloud: TodoData): ReminderSettings {
-        val ls = local.reminderSettings
-        val cs = cloud.reminderSettings
-        val lSettingsTime = parseTimestamp(ls.updatedAt)
-        val cSettingsTime = parseTimestamp(cs.updatedAt)
-
-        // 新格式以提醒设置自己的时间戳为准，普通待办的 last_updated 不再参与判断。
-        if (lSettingsTime != null || cSettingsTime != null) {
-            return when {
-                lSettingsTime == null -> cs
-                cSettingsTime == null -> ls
-                cSettingsTime.isAfter(lSettingsTime) -> cs
-                else -> ls
-            }
-        }
-
-        // 兼容两端都没有独立时间戳的旧数据：优先保住非空规则，避免升级同步清空。
-        if (ls == cs) return ls
-        if (ls.globalRules.isNotEmpty() && cs.globalRules.isEmpty()) return ls
-        if (cs.globalRules.isNotEmpty() && ls.globalRules.isEmpty()) return cs
-
-        // 两端旧配置均非空且内容不同，已无法精确判断修改先后，只能回退旧版文件时间。
-        val lDataTime = parseTimestamp(local.last_updated) ?: OffsetDateTime.MIN
-        val cDataTime = parseTimestamp(cloud.last_updated) ?: OffsetDateTime.MIN
-        return if (cDataTime.isAfter(lDataTime)) cs else ls
-    }
-
-    private fun parseTimestamp(value: String?): OffsetDateTime? =
-        value?.takeIf { it.isNotBlank() }?.let {
-            try { OffsetDateTime.parse(it) } catch (_: Exception) { null }
-        }
+    private fun mergeReminderSettings(local: TodoData, cloud: TodoData): ReminderSettings =
+        ReminderSettingsConflict.choose(local, cloud)
 
     private fun mergeCompletedDates(
         lDates: List<String>,
         cDates: List<String>,
-        lTime: OffsetDateTime,
-        cTime: OffsetDateTime
+        lTime: String,
+        cTime: String
     ): List<String> {
         val allDateParts = (lDates.map { it.substringBefore('T') } + cDates.map { it.substringBefore('T') }).distinct()
         val mergedDates = mutableListOf<String>()
 
         for (datePart in allDateParts) {
-            val checkinL = lDates.find { it.startsWith(datePart) }
-            val checkinC = cDates.find { it.startsWith(datePart) }
+            val checkinL = lDates.find { it.substringBefore('T') == datePart }
+            val checkinC = cDates.find { it.substringBefore('T') == datePart }
 
             if (checkinL != null && checkinC != null) {
-                if (checkinL.length >= checkinC.length) {
-                    mergedDates.add(checkinL)
-                } else {
-                    mergedDates.add(checkinC)
-                }
+                mergedDates.add(chooseCheckinDate(checkinL, checkinC))
             } else if (checkinL != null) {
                 if (checkinL.length > 10) {
-                    val tCheck = try { OffsetDateTime.parse(checkinL) } catch (_: Exception) { OffsetDateTime.MIN }
-                    if (tCheck.isAfter(cTime)) {
+                    if (isCheckinNewer(checkinL, cTime)) {
                         mergedDates.add(checkinL)
                     }
                 } else {
@@ -210,8 +196,7 @@ object MergeUtils {
                 }
             } else if (checkinC != null) {
                 if (checkinC.length > 10) {
-                    val tCheck = try { OffsetDateTime.parse(checkinC) } catch (_: Exception) { OffsetDateTime.MIN }
-                    if (tCheck.isAfter(lTime)) {
+                    if (isCheckinNewer(checkinC, lTime)) {
                         mergedDates.add(checkinC)
                     }
                 } else {
@@ -221,4 +206,23 @@ object MergeUtils {
         }
         return mergedDates.sorted()
     }
+
+    // 同日先保留较长记录；等长再按实际毫秒和 UTF-16 字符串序选择同一表示。
+    internal fun chooseCheckinDate(first: String, second: String): String {
+        val length = first.length.compareTo(second.length)
+        if (length != 0) return if (length > 0) first else second
+        val time = (checkinTimestampMillis(first) ?: Long.MIN_VALUE)
+            .compareTo(checkinTimestampMillis(second) ?: Long.MIN_VALUE)
+        if (time != 0) return if (time > 0) first else second
+        return if (first >= second) first else second
+    }
+
+    private fun isCheckinNewer(mark: String, updatedAt: String): Boolean {
+        val markTime = checkinTimestampMillis(mark) ?: return false
+        val updateTime = checkinTimestampMillis(updatedAt) ?: return false
+        return markTime > updateTime
+    }
+
+    private fun checkinTimestampMillis(value: String): Long? =
+        runCatching { NormalTodoConflict.timestampMillis(value) }.getOrNull()
 }

@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "个人待办、提醒、计时与复盘独立记录实验操作；不是生产协议",
+  "description": "operation_set 为 lab-personal-learning/1；学习操作仅提交单条完整候选，计时按id、复盘按date沿用原整条归并规则。",
+  "oneOf": [
+    { "$ref": "./personal-record-profile.schema.json" },
+    { "$ref": "#/definitions/timeOperation" },
+    { "$ref": "#/definitions/reviewOperation" }
+  ],
+  "definitions": {
+    "timeEntry": {
+      "type": "object",
+      "required": ["id", "task_ref", "started_at", "created_at", "updated_at", "deleted", "ended_at", "task_content_snapshot", "label_snapshot"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "已知旧计时ID可保留；新ID须UUIDv4，例外仅来自计时自己的基线/历史。" },
+        "task_ref": {
+          "type": "object",
+          "required": ["todo_id", "source_type", "source_id"],
+          "properties": {
+            "todo_id": { "type": "string", "minLength": 1, "description": "允许历史引用字符串，不要求原任务当前仍存在。" },
+            "source_type": { "$ref": "../../todo_data.schema.json#/properties/time_entries/items/properties/task_ref/properties/source_type" },
+            "source_id": { "$ref": "../../todo_data.schema.json#/properties/time_entries/items/properties/task_ref/properties/source_id" }
+          }
+        },
+        "started_at": { "$ref": "../../todo_data.schema.json#/properties/time_entries/items/properties/started_at" },
+        "created_at": { "$ref": "../../todo_data.schema.json#/properties/time_entries/items/properties/created_at" },
+        "updated_at": { "$ref": "../../todo_data.schema.json#/properties/time_entries/items/properties/updated_at" },
+        "deleted": { "$ref": "../../todo_data.schema.json#/properties/time_entries/items/properties/deleted" },
+        "ended_at": { "$ref": "../../todo_data.schema.json#/properties/time_entries/items/properties/ended_at" },
+        "task_content_snapshot": { "$ref": "../../todo_data.schema.json#/properties/time_entries/items/properties/task_content_snapshot" },
+        "label_snapshot": { "$ref": "../../todo_data.schema.json#/properties/time_entries/items/properties/label_snapshot" }
+      }
+    },
+    "review": {
+      "type": "object",
+      "required": ["id", "date", "created_at", "updated_at", "deleted", "fact", "obstacle", "effective_action", "next_step"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "旧ID仅可在同一日期的既有基线或历史中复用，包括输掉同日归并的原始记录。新日期的ID须为UUIDv4。" },
+        "date": { "$ref": "../../todo_data.schema.json#/properties/daily_reviews/items/properties/date" },
+        "created_at": { "$ref": "../../todo_data.schema.json#/properties/daily_reviews/items/properties/created_at" },
+        "updated_at": { "$ref": "../../todo_data.schema.json#/properties/daily_reviews/items/properties/updated_at" },
+        "deleted": { "$ref": "../../todo_data.schema.json#/properties/daily_reviews/items/properties/deleted" },
+        "fact": { "$ref": "../../todo_data.schema.json#/properties/daily_reviews/items/properties/fact" },
+        "obstacle": { "$ref": "../../todo_data.schema.json#/properties/daily_reviews/items/properties/obstacle" },
+        "effective_action": { "$ref": "../../todo_data.schema.json#/properties/daily_reviews/items/properties/effective_action" },
+        "next_step": { "$ref": "../../todo_data.schema.json#/properties/daily_reviews/items/properties/next_step" }
+      }
+    },
+    "timeOperation": {
+      "type": "object",
+      "required": ["type", "entry"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["time.entry.put", "time.entry.delete"] },
+        "entry": { "$ref": "#/definitions/timeEntry" }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "time.entry.put" } } }, "then": { "properties": { "entry": { "properties": { "deleted": { "const": false } } } } } },
+        { "if": { "properties": { "type": { "const": "time.entry.delete" } } }, "then": { "properties": { "entry": { "properties": { "deleted": { "const": true } } } } } }
+      ]
+    },
+    "reviewOperation": {
+      "type": "object",
+      "required": ["type", "review"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["daily.review.put", "daily.review.delete"] },
+        "review": { "$ref": "#/definitions/review" }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "daily.review.put" } } }, "then": { "properties": { "review": { "properties": { "deleted": { "const": false } } } } } },
+        { "if": { "properties": { "type": { "const": "daily.review.delete" } } }, "then": { "properties": { "review": { "properties": { "deleted": { "const": true } } } } } }
+      ]
+    }
+  }
+}

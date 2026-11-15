@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "跨周期导入及系列整体删除实验操作",
+  "description": "operation_set 为 lab-personal-series-workflows/1。工作流独占一条记录，从这条记录自己的父记录重建确认范围。",
+  "oneOf": [
+    { "$ref": "./series-record-profile.schema.json" },
+    { "$ref": "#/definitions/import" },
+    { "$ref": "#/definitions/delete" }
+  ],
+  "definitions": {
+    "id": { "type": "string", "format": "uuid" },
+    "clock": { "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/updated_at" },
+    "import": {
+      "type": "object",
+      "required": ["type", "source_ids", "target", "updated_at", "offset_minutes", "generated_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "series.workflow.import" },
+        "source_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/id" } },
+        "target": { "$ref": "../../todo_data.schema.json#/properties/task_series_links/items/properties/period" },
+        "updated_at": { "$ref": "#/definitions/clock" },
+        "offset_minutes": { "type": "integer", "minimum": -840, "maximum": 840 },
+        "generated_ids": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$" }
+        }
+      }
+    },
+    "delete": {
+      "type": "object",
+      "required": ["type", "series_id", "todo_id", "updated_at", "member_ids", "confirmed_timer_ids", "preview_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "series.workflow.delete" },
+        "series_id": { "$ref": "#/definitions/id" },
+        "todo_id": { "$ref": "#/definitions/id" },
+        "updated_at": { "$ref": "#/definitions/clock" },
+        "member_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/id" } },
+        "confirmed_timer_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "preview_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

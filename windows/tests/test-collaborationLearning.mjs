@@ -1,3 +1,4 @@
+import { mainStoreHarness } from './mainStoreHarness.mjs';
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -141,7 +142,9 @@ it('实际个人保存队列按目标判断权限，接受的保存不因切换�
     const queue = new Promise(resolve => { release = resolve; });
     const context = { appState, requirePersonalTarget, normalizeLearningData, structuredClone, _saveQueue: queue,
         _doSaveData: async () => { saves++; return true; }, _lastRenderedHash: '', render() {}, learningUI: { refresh() {} } };
-    runInNewContext(declarations(['commitLearning']) + '\nthis.commit = commitLearning;', context);
+    context.dataStore = mainStoreHarness(appState, context._doSaveData);
+    context.dataStore.enqueue(() => queue);
+    runInNewContext(declarations(['commitPersonal', 'commitLearning']) + '\nthis.commit = commitLearning;', context);
     const accepted = context.commit(data => { data.daily_reviews = [{ id: 'mine', date: '2026-10-06', fact: '个人复盘' }]; });
     appState.activeSource = { type: 'collaboration', id: target.id };
     release(); await accepted;
@@ -149,5 +152,5 @@ it('实际个人保存队列按目标判断权限，接受的保存不因切换�
     assert.equal(appState.collabData.daily_reviews[0].fact, '分享者复盘');
     assert.throws(() => context.commit(() => {}), /仅允许/);
     await context.commit(() => {}, { type: 'personal' });
-    assert.equal(saves, 2);
+    assert.equal(saves, 2); // 后一次提交补齐首次注入的旧版复盘默认字段
 });

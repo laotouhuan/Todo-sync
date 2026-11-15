@@ -1,0 +1,782 @@
+{
+  "version": 1,
+  "scope": "approved-reminder-whole-settings-fixed-ties",
+  "cases": [
+    {
+      "id": "same-clock-toggle-on",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": false,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07T02:00:00Z",
+        "enabled": true,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "same-clock-privacy-fixed",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": true,
+          "privacy_mode": true,
+          "global_rules": []
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07T02:00:00Z",
+        "enabled": true,
+        "privacy_mode": true,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "newer-disable",
+      "local": {
+        "last_updated": "2026-11-07T02:01:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:01:00Z",
+          "enabled": false,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07T02:01:00Z",
+        "enabled": false,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "independent-clock-over-legacy-rules",
+      "local": {
+        "last_updated": "2026-11-07T02:01:00Z",
+        "reminder_settings": {
+          "updated_at": null,
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": [
+            {
+              "id": "70000000-0000-4000-8000-000000000001",
+              "time": "09:00",
+              "enabled": true,
+              "condition": "unconditional",
+              "task_scope": "all",
+              "title": "",
+              "body": ""
+            }
+          ]
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07T02:00:00Z",
+        "enabled": true,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "newer-empty-clears-rules",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": [
+            {
+              "id": "70000000-0000-4000-8000-000000000001",
+              "time": "09:00",
+              "enabled": true,
+              "condition": "unconditional",
+              "task_scope": "all",
+              "title": "",
+              "body": ""
+            }
+          ]
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:01:00Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07T02:01:00Z",
+        "enabled": true,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "legacy-nonempty-over-newer-file",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": null,
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": [
+            {
+              "id": "70000000-0000-4000-8000-000000000001",
+              "time": "09:00",
+              "enabled": true,
+              "condition": "unconditional",
+              "task_scope": "all",
+              "title": "",
+              "body": ""
+            }
+          ]
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:01:00Z",
+        "reminder_settings": {
+          "updated_at": null,
+          "enabled": false,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": null,
+        "enabled": true,
+        "privacy_mode": false,
+        "global_rules": [
+          {
+            "id": "70000000-0000-4000-8000-000000000001",
+            "time": "09:00",
+            "enabled": true,
+            "condition": "unconditional",
+            "task_scope": "all",
+            "title": "",
+            "body": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "legacy-both-rules-file-time",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": null,
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": [
+            {
+              "id": "70000000-0000-4000-8000-000000000001",
+              "time": "09:00",
+              "enabled": true,
+              "condition": "unconditional",
+              "task_scope": "all",
+              "title": "",
+              "body": ""
+            }
+          ]
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:01:00Z",
+        "reminder_settings": {
+          "updated_at": null,
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": [
+            {
+              "id": "70000000-0000-4000-8000-000000000002",
+              "time": "09:00",
+              "enabled": true,
+              "condition": "unconditional",
+              "task_scope": "all",
+              "title": "",
+              "body": ""
+            }
+          ]
+        }
+      },
+      "winner": {
+        "updated_at": null,
+        "enabled": true,
+        "privacy_mode": false,
+        "global_rules": [
+          {
+            "id": "70000000-0000-4000-8000-000000000002",
+            "time": "09:00",
+            "enabled": true,
+            "condition": "unconditional",
+            "task_scope": "all",
+            "title": "",
+            "body": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "legacy-empty-file-time",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": null,
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:01:00Z",
+        "reminder_settings": {
+          "updated_at": null,
+          "enabled": false,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": null,
+        "enabled": false,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "independent-equal-ignores-file-clock",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:01:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": false,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07T02:00:00Z",
+        "enabled": true,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "actual-offset-time-over-text",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T09:00:00+08:00",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T01:30:00Z",
+          "enabled": false,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07T01:30:00Z",
+        "enabled": false,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "offset-same-point-content",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T10:00:00+08:00",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": false,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07T10:00:00+08:00",
+        "enabled": true,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "sub-ms-content-tie",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00.0009Z",
+          "enabled": false,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00.0001Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07T02:00:00.0001Z",
+        "enabled": true,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "invalid-own-clock-uses-file",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "bad-clock",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:01:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07",
+          "enabled": false,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07",
+        "enabled": false,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "unknown-extension-business-key",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": [],
+          "extra": {
+            "future": "z"
+          }
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": [],
+          "extra": {
+            "future": "aa"
+          }
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07T02:00:00Z",
+        "enabled": true,
+        "privacy_mode": false,
+        "global_rules": [],
+        "extra": {
+          "future": "aa"
+        }
+      }
+    },
+    {
+      "id": "legacy-rule-defaults-and-extensions",
+      "local": {
+        "last_updated": "2026-11-07T02:01:00Z",
+        "reminder_settings": {
+          "global_rules": [
+            {
+              "id": "旧规则身份",
+              "time": "08:30",
+              "extra": {
+                "keep": true
+              }
+            }
+          ]
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": null,
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": [
+            {
+              "id": "70000000-0000-4000-8000-000000000001",
+              "time": "09:00",
+              "enabled": true,
+              "condition": "unconditional",
+              "task_scope": "all",
+              "title": "",
+              "body": ""
+            }
+          ]
+        }
+      },
+      "winner": {
+        "updated_at": null,
+        "enabled": true,
+        "privacy_mode": false,
+        "global_rules": [
+          {
+            "id": "旧规则身份",
+            "time": "08:30",
+            "extra": {
+              "keep": true
+            },
+            "enabled": true,
+            "condition": "unconditional",
+            "task_scope": "all",
+            "title": "",
+            "body": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-root-settings-model-default",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z"
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:01:00Z",
+        "reminder_settings": {
+          "updated_at": null,
+          "enabled": false,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": null,
+        "enabled": false,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "equivalent-metadata-numeric-proto",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": [],
+          "extension": {
+            "2": 1e-7,
+            "10": 0,
+            "__proto__": {
+              "n": 1e+21
+            },
+            "😀": "字"
+          }
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T10:00:00+08:00",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": [],
+          "extension": {
+            "2": 1e-7,
+            "10": 0,
+            "__proto__": {
+              "n": 1e+21
+            },
+            "😀": "字"
+          }
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07T10:00:00+08:00",
+        "enabled": true,
+        "privacy_mode": false,
+        "global_rules": [],
+        "extension": {
+          "2": 1e-7,
+          "10": 0,
+          "__proto__": {
+            "n": 1e+21
+          },
+          "😀": "字"
+        }
+      }
+    },
+    {
+      "id": "rule-list-order-preserved",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": [
+            {
+              "id": "70000000-0000-4000-8000-000000000001",
+              "time": "09:00",
+              "enabled": true,
+              "condition": "unconditional",
+              "task_scope": "all",
+              "title": "",
+              "body": ""
+            },
+            {
+              "id": "70000000-0000-4000-8000-000000000002",
+              "time": "09:00",
+              "enabled": true,
+              "condition": "unconditional",
+              "task_scope": "all",
+              "title": "",
+              "body": ""
+            }
+          ]
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": [
+            {
+              "id": "70000000-0000-4000-8000-000000000002",
+              "time": "09:00",
+              "enabled": true,
+              "condition": "unconditional",
+              "task_scope": "all",
+              "title": "",
+              "body": ""
+            },
+            {
+              "id": "70000000-0000-4000-8000-000000000001",
+              "time": "09:00",
+              "enabled": true,
+              "condition": "unconditional",
+              "task_scope": "all",
+              "title": "",
+              "body": ""
+            }
+          ]
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07T02:00:00Z",
+        "enabled": true,
+        "privacy_mode": false,
+        "global_rules": [
+          {
+            "id": "70000000-0000-4000-8000-000000000002",
+            "time": "09:00",
+            "enabled": true,
+            "condition": "unconditional",
+            "task_scope": "all",
+            "title": "",
+            "body": ""
+          },
+          {
+            "id": "70000000-0000-4000-8000-000000000001",
+            "time": "09:00",
+            "enabled": true,
+            "condition": "unconditional",
+            "task_scope": "all",
+            "title": "",
+            "body": ""
+          }
+        ]
+      }
+    },
+    {
+      "id": "null-empty-clock-metadata-fixed",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": null,
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": "",
+        "enabled": true,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "epoch-zero-valid",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "1969-12-31T23:59:59.9999Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "1970-01-01T00:00:00Z",
+          "enabled": false,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": "1970-01-01T00:00:00Z",
+        "enabled": false,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "long-fraction-millisecond",
+      "local": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00.0010000001Z",
+          "enabled": false,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T02:00:00Z",
+        "reminder_settings": {
+          "updated_at": "2026-11-07T02:00:00.0009999999Z",
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": "2026-11-07T02:00:00.0010000001Z",
+        "enabled": false,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    },
+    {
+      "id": "legacy-file-offset-actual-point",
+      "local": {
+        "last_updated": "2026-11-07T09:00:00+08:00",
+        "reminder_settings": {
+          "updated_at": null,
+          "enabled": true,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "cloud": {
+        "last_updated": "2026-11-07T01:30:00Z",
+        "reminder_settings": {
+          "updated_at": null,
+          "enabled": false,
+          "privacy_mode": false,
+          "global_rules": []
+        }
+      },
+      "winner": {
+        "updated_at": null,
+        "enabled": false,
+        "privacy_mode": false,
+        "global_rules": []
+      }
+    }
+  ]
+}

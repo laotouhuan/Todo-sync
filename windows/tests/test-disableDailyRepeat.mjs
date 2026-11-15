@@ -1,3 +1,4 @@
+import { mainStoreHarness } from './mainStoreHarness.mjs';
 import * as seriesHelpers from '../src/taskSeries.js';
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,7 +33,7 @@ const dragEnd = findTypeChange(tree, "FunctionExpression", "const originalTaskTy
 function harness(todos, completeSubtasks = true) {
     function element() {
         const selectors = new Map(), classes = new Set(), events = new Map();
-        return { value: '', checked: false, style: {}, dataset: {}, children: [], scrollHeight: 30,
+        return { value: '', checked: false, style: {}, validity: { valid: true }, dataset: {}, children: [], scrollHeight: 30,
             classList: { add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name) },
             querySelector(selector) { if (!selectors.has(selector)) selectors.set(selector, element()); return selectors.get(selector); },
             appendChild(node) { this.children.push(node); }, focus() {},
@@ -49,16 +50,16 @@ function harness(todos, completeSubtasks = true) {
         activeSource: { type: 'personal' }, currentEditingSubtasks: [], dateFilter: 'today' };
     let writes = 0;
     const scheduled = [];
-    const names = ['acceptPeriodMove', 'commitPeriodData', 'createTodoItemElement', 'saveEditModal', 'openEditModal', 'closeEditModal', 'updateEditModalFields', 'getMetaHtml', 'getMondayFromWeek', 'applyTaskType', 'createAndAddTodo'];
+    const names = ['commitPersonal', 'commitAction', 'commitDrag', 'acceptPeriodMove', 'commitPeriodData', 'createTodoItemElement', 'saveEditModal', 'openEditModal', 'closeEditModal', 'updateEditModalFields', 'getMetaHtml', 'getMondayFromWeek', 'applyTaskType', 'createAndAddTodo'];
     const api = runInNewContext('let _saveQueue=Promise.resolve(),_lastRenderedHash="",activeCheckinDropdown=null,_pendingMidnightRefresh=false,pendingAnimations=0,_currentlyDraggedTodoId=null,_currentlyHoveredHeaderType=null;' +
-        names.map(declaration).join('\n') + `;({${names.join(',')}, changeType:${source.slice(typeChange.start, typeChange.end)}, dragHeader:(evt,header)=>{_currentlyHoveredHeaderType=header;return (${source.slice(dragEnd.start,dragEnd.end)})(evt);}})`, {
-        ...dates, ...data, ...learning, ...seriesHelpers, normalizeLearningData: learning.normalizeLearningData, requirePersonalTarget: source => { if (source.type !== "personal") throw new Error("只读"); }, appState: state, structuredClone, document, Date,
+        names.map(declaration).join('\n') + 'const dataStore = mainStoreHarness(appState, _doSaveData);' + `;({${names.join(',')}, changeType:${source.slice(typeChange.start, typeChange.end)}, dragHeader:(evt,header)=>{_currentlyHoveredHeaderType=header;return (${source.slice(dragEnd.start,dragEnd.end)})(evt);}})`, {
+        mainStoreHarness, ...dates, ...data, ...learning, ...seriesHelpers, normalizeLearningData: learning.normalizeLearningData, requirePersonalTarget: source => { if (source.type !== "personal") throw new Error("只读"); }, appState: state, structuredClone, document, Date,
         todayStr: dates.getTodayString(), thisWeekStr: dates.getThisWeekString(), thisMonthStr: dates.getThisMonthString(),
         taskTypeSelect: document.getElementById('edit-task-type'),
         deepClone: structuredClone, extractCollaborator: content => ({ cleanContent: content, nickname: null }),
         escapeHtml: value => value, isReminderOverdue: () => false, renderMonthCalendar() {},
         renderEditSubtasks() {}, renderEditCheckinGrid() {}, render() {},
-        learningUI: { editTask() {}, compactEditor() {}, attachTimer() {} },
+        learningUI: { refresh() {}, editTask() {}, compactEditor() {}, attachTimer() {} },
         saveData: async () => { writes++; }, _doSaveData: async () => { writes++; return true; },
         showToast: message => { throw new Error(message); }, console,
         setTimeout: callback => { scheduled.push(Promise.resolve(callback())); }
@@ -156,6 +157,26 @@ it('快捷创建保留退休语法正文，沿用默认日期且新任务不带�
         assert.equal(task.content, '背单词 @daily');
         assert.equal(task.task_type, 'normal'); assert.equal(task.recurring, 'none');
         assert.equal(task.date, pref === 'today' ? dates.getTodayString() : pref === 'tomorrow' ? dates.getTomorrowString() : null);
+    }
+});
+
+it('编辑一个关联周/月任务后，其他周期打开编辑时显示同一新名称', async () => {
+    const at = '2026-10-15T12:00:00Z';
+    for (const [taskType, source, target] of [
+        ['weekly_checkin', '2026-W41', '2026-W42'],
+        ['monthly_checkin', '2026-09', '2026-10']
+    ]) {
+        const task = { ...dates.createTodo('系列旧名', source), task_type: taskType };
+        const h = harness([task]);
+        h.state.todoData = seriesHelpers.importPeriods(h.state.todoData, [task], target, at);
+        const [previous, current] = h.state.todoData.todos;
+        h.api.openEditModal(current);
+        h.field('edit-content').value = '系列新名';
+        await h.api.saveEditModal();
+        assert.equal(h.writes(), 1);
+        assert.equal(seriesHelpers.displayTaskName(h.state.todoData, current.id), '系列新名');
+        h.api.openEditModal(previous);
+        assert.equal(h.field('edit-content').value, '系列新名');
     }
 });
 

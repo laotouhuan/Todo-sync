@@ -8,6 +8,7 @@ import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import java.time.*
+import java.time.temporal.ChronoUnit
 import java.text.Normalizer
 import java.util.UUID
 
@@ -151,7 +152,9 @@ object TaskSeriesLogic {
     }
     fun merge(a: TodoData, b: TodoData): Pair<List<TaskSeries>, List<TaskSeriesLink>> {
         validate(a); validate(b)
-        val names = compareBy<TaskSeries> { it.content_renamed }.thenBy { Learning.instant(it.content_updated_at) }.thenBy { name(it.content) }.thenBy { it.content }.thenBy { it.content_updated_at }
+        val names = compareBy<TaskSeries> { it.content_renamed }
+            .thenBy { Learning.instant(it.content_updated_at)?.truncatedTo(ChronoUnit.MILLIS) }
+            .thenBy { name(it.content) }.thenBy { it.content }.thenBy { it.content_updated_at }
         val series = (a.taskSeries + b.taskSeries).groupBy { it.id }.toSortedMap().values.map { versions ->
             require(versions.map { it.period_type }.distinct().size == 1) { "同一任务系列的周期类型冲突" }
             val base = versions.maxWith(compareBy<TaskSeries> { Learning.instant(it.updated_at) }.thenBy { json.encodeToString(it) })
@@ -162,7 +165,8 @@ object TaskSeriesLogic {
                 deleted = versions.any { it.deleted }, deleted_at = versions.filter { it.deleted }.mapNotNull { it.deleted_at }.minWithOrNull(compareBy<String> { Learning.instant(it) }.thenBy { it }))
         }
         val links = (a.taskSeriesLinks + b.taskSeriesLinks).groupBy { it.todo_id }.toSortedMap().values.map { versions ->
-            versions.maxWith(compareBy<TaskSeriesLink> { Learning.instant(it.updated_at) }.thenBy { it.deleted }.thenBy { canonicalLink(it) })
+            versions.maxWith(compareBy<TaskSeriesLink> { Learning.instant(it.updated_at)?.truncatedTo(ChronoUnit.MILLIS) }
+                .thenBy { it.deleted }.thenBy { canonicalLink(it) })
         }
         return series to links
     }
@@ -195,17 +199,22 @@ object TaskSeriesLogic {
                 PeriodCandidate(id, display(data, choices.first().id), choices, choices.first().takeIf { t -> choices.count { it.date == t.date } == 1 }, members(data, id, target).isNotEmpty())
             }.sortedWith(compareByDescending<PeriodCandidate> { it.choices.first().date }.thenComparator { a, b -> TodoComparator.compare(a.choices.first(), b.choices.first()) })
     }
-    fun import(data: TodoData, references: List<Todo>, target: String, now: String = nowIso(), generate: () -> String = { UUID.randomUUID().toString() }): TodoData {
+    fun import(data: TodoData, references: List<Todo>, target: String, now: String = nowIso(), generate: () -> String = { UUID.randomUUID().toString() }): TodoData =
+        requireNotNull(Learning.instant(now)).let { instant ->
+            importAt(data, references, target, now, generate, instant.atZone(ZoneId.systemDefault()).toLocalDate(), instant.toEpochMilli())
+        }
+
+    internal fun importAt(data: TodoData, references: List<Todo>, target: String, now: String, generate: () -> String, today: LocalDate, nowMillis: Long): TodoData {
         var result = validate(data); val used = mutableSetOf<String>()
         references.forEachIndexed { index, reference ->
             val source = result.todos.find { it.id == reference.id }
-            require(source != null && source == reference && !source.deleted && type(source) != null && range(source.date.orEmpty()) != null && source.date!! < target && target == current(type(source)!!, Learning.instant(now)!!.atZone(ZoneId.systemDefault()).toLocalDate())) { "参考任务或周期已变化，请重新选择" }
+            require(source != null && source == reference && !source.deleted && type(source) != null && range(source.date.orEmpty()) != null && source.date!! < target && target == current(type(source)!!, today)) { "参考任务或周期已变化，请重新选择" }
             val id = identity(result, source, generate)
             require(used.add(id) && members(result, id, target).isEmpty() && members(result, id, source.date).size <= 1) { "本期已存在或参考期重复" }
             result = ensure(result, source, id, now); result = link(result, source, id, now)
-            val todo = Todo.create(display(result, source.id), target).copy(id = generate(), taskType = source.taskType, targetCount = source.targetCount,
+            val todo = Todo(id = generate(), content = display(result, source.id), date = target, taskType = source.taskType, targetCount = source.targetCount,
                 label = source.label, time = source.time, reminder = null, subtasks = source.subtasks.map { it.copy(id = generate(), completed = false, completedAt = null) },
-                createdAt = now, updatedAt = now, order = Learning.instant(now)!!.toEpochMilli().toDouble() + index * 1000)
+                createdAt = now, updatedAt = now, order = nowMillis.toDouble() + index * 1000)
             result = link(result.copy(todos = result.todos + todo), todo, id, now)
         }
         return result

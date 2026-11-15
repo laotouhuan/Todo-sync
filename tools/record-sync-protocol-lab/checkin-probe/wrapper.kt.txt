@@ -1,0 +1,32 @@
+// 包装仅负责测试输入输出；打卡归并函数来自实际源码的逐字抽取。
+fun main() {
+    val output = PrintWriter(OutputStreamWriter(System.out, Charsets.UTF_8), true)
+    System.`in`.bufferedReader(Charsets.UTF_8).useLines { lines ->
+        lines.forEach { line ->
+            var id: JsonElement = JsonNull
+            val response = try {
+                val request = Json.parseToJsonElement(line).jsonObject
+                id = request["id"] ?: JsonNull
+                fun text(name: String): String {
+                    val value = request[name] as? JsonPrimitive ?: error("EXPECTED_STRING")
+                    if (!value.isString) error("EXPECTED_STRING")
+                    return value.content
+                }
+                fun dates(name: String): List<String> = (request[name] as? JsonArray ?: error("EXPECTED_ARRAY")).map { item ->
+                    val value = item as? JsonPrimitive ?: error("EXPECTED_DATE_STRING")
+                    if (!value.isString) error("EXPECTED_DATE_STRING")
+                    value.content
+                }
+                val merged = mergeCompletedDates(dates("local_dates"), dates("cloud_dates"),
+                    OffsetDateTime.parse(text("local_updated")), OffsetDateTime.parse(text("cloud_updated")))
+                buildJsonObject {
+                    put("id", id); put("ok", true)
+                    put("dates", JsonArray(merged.map { JsonPrimitive(it) }))
+                }
+            } catch (_: Exception) {
+                buildJsonObject { put("id", id); put("ok", false) }
+            }
+            output.println(response.toString())
+        }
+    }
+}

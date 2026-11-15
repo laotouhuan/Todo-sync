@@ -18,6 +18,7 @@ export function editTimelineSubtask(todo, subtask, save) {
     const pad = n => String(n).padStart(2, '0');
     const local = date && !isNaN(date) ? `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` : '';
     const completed = field('完成时间（无具体时间可留空）', 'datetime-local', local); completed.step = '1'; completed.readOnly = !save;
+    const initialValue = completed.value;
     const error = element('p'); error.className = 'learning-error'; dialog.append(error);
     const confirm = element('button', '保存'), close = element('button', '取消');
     confirm.className = close.className = 'learning-button';
@@ -26,7 +27,7 @@ export function editTimelineSubtask(todo, subtask, save) {
         try {
             if (!content.value.trim()) throw new Error('子步骤内容不能为空');
             if (completed.validity.badInput || (completed.value && isNaN(Date.parse(completed.value)))) throw new Error('请输入有效的完成时间');
-            await save({ content: content.value.trim(), completed_at: completed.value === local ? originalTime : completed.value ? new Date(completed.value).toISOString() : null });
+            await save({ content: content.value.trim(), completed_at: completed.value === initialValue ? originalTime : completed.value ? new Date(completed.value).toISOString() : null });
             dialog.close();
         } catch (e) { error.textContent = e.message || String(e); }
         finally { confirm.disabled = close.disabled = false; }

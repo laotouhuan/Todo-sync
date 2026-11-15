@@ -2793,13 +2793,17 @@ textarea {
 .learning-banner>span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .learning-dialog { color: var(--text-primary, #222); background: var(--modal-bg-solid, #222); margin: auto; border: 1px solid #8886; border-radius: 14px; padding: 20px; width: min(520px, 90vw); max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 70px #0005; }
 .learning-dialog::backdrop { background: #0007; }
+#legacy-cache-notice > button { flex-shrink: 0; }
+.legacy-cache-dialog p, .legacy-cache-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.legacy-cache-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.legacy-cache-actions > button { flex: 1 1 180px; margin: 0; }
 .learning-records-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
 .learning-records-dialog > h3, .learning-records-actions { flex-shrink: 0; }
 .learning-records-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .learning-records-actions > :last-child { margin-left: auto; }
 .learning-records-body { min-height: 0; overflow-y: auto; }
 .learning-dialog label,.learning-edit-extra label { display: block; font-size: .85rem; margin: 12px 0; }
-.learning-dialog input:not([type=checkbox]),.learning-dialog textarea,.learning-edit-extra input { display: block; width: 100%; box-sizing: border-box; margin-top: 5px; padding: 9px; color: inherit; background: #8881; border: 1px solid #8886; border-radius: 6px; }
+.learning-dialog input:not([type=checkbox]),.learning-dialog textarea,.learning-edit-extra input,.planning-fields :is(textarea, input) { display: block; width: 100%; box-sizing: border-box; margin-top: 5px; padding: 9px; color: inherit; background: #8881; border: 1px solid #8886; border-radius: 6px; }
 .learning-dialog input[type=checkbox] { margin-left: 10px; }
 .learning-dialog textarea { resize: vertical; min-height: 65px; }
 .learning-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; margin: 5px 0; }
@@ -3146,3 +3150,107 @@ dialog[data-period-dialog] .period-comparison-fields label { display: block; col
   .period-comparison-fields { grid-template-columns: 1fr; gap: 0; }
   .period-comparison { padding: 14px; }
 }
+#record-sandbox :is(input, textarea, select) {
+    max-width: 100%;
+}
+
+#record-sandbox textarea {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#record-sandbox [data-content] {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+#record-sandbox td {
+    vertical-align: top;
+    white-space: pre-wrap;
+    width: 45%;
+}
+
+.stats-planning {
+    margin: 10px 0 12px;
+    background: var(--bg-secondary);
+    overflow-wrap: anywhere;
+}
+
+.stats-planning fieldset { min-width: 0; border: 0; margin: 0; padding: 0; }
+.planning-header { display: flex; align-items: baseline; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; margin-bottom: 10px; }
+.stats-planning .planning-header h3 { margin: 0; font-size: .95rem; }
+.planning-meta, .planning-status { color: var(--text-secondary); font-size: .75rem; }
+.planning-status.learning-error { color: var(--danger-color, #ff828b); }
+.planning-week-days { display: grid; gap: 10px; margin: 10px 0; }
+.planning-week-days > div, .daily-review-plan { min-width: 0; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; }
+.planning-week-days p, .daily-review-plan p, .learning-dialog .learning-text { overflow-wrap: anywhere; }
+.planning-score-choices { display: flex; flex-wrap: wrap; gap: 4px; }
+.planning-score-choices .learning-button { min-width: 36px; min-height: 36px; padding: 6px; }
+.daily-review-plan [aria-pressed="true"] { border-color: var(--accent-color); color: var(--accent-color); }
+.stats-planning .learning-button { margin: 0; min-height: 32px; font: inherit; font-size: .8rem; }
+.stats-planning .learning-button:hover:not(:disabled),
+.stats-planning .learning-button[aria-pressed="true"] {
+    border-color: var(--accent-color);
+    background: color-mix(in srgb, var(--accent-color) 18%, transparent);
+}
+.stats-planning :is(button, summary, textarea, input):focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
+.planning-fold { font-size: .82rem; }
+.planning-fold > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 32px;
+    cursor: pointer;
+    list-style: none;
+}
+.planning-fold > summary::after {
+    content: '';
+    flex: 0 0 6px;
+    height: 6px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(-45deg);
+    margin-right: 3px;
+}
+.planning-fold[open] > summary::after { transform: rotate(45deg); }
+.planning-fold > summary:hover { color: var(--accent-color); }
+.planning-fold details { margin-top: 8px; }
+.planning-fold details > summary { cursor: pointer; color: var(--text-secondary); }
+.planning-meta { margin: 3px 0 10px; }
+.planning-fields { display: grid; gap: 8px; margin-bottom: 10px; }
+.planning-fields label { color: var(--text-secondary); font-size: .78rem; }
+.planning-fields :is(textarea, input) { color: var(--text-primary); font: inherit; }
+.planning-fields textarea { display: block; resize: vertical; }
+.stats-planning .planning-primary { border-color: color-mix(in srgb, var(--accent-color) 58%, transparent); }
+.planning-score-summary { margin: 10px 0 7px; color: var(--text-secondary); font-size: .8rem; }
+.stats-planning table { width: 100%; table-layout: fixed; }
+.stats-planning th { width: 3em; color: var(--text-secondary); }
+.stats-planning td { vertical-align: top; white-space: pre-wrap; }
+.record-rating-grid[hidden] { display: none; }
+
+.record-rating-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 3px;
+    text-align: center;
+}
+
+.record-rating-grid button {
+    min-height: 34px;
+    padding: 0;
+    color: inherit;
+    background: color-mix(in srgb, currentColor 8%, transparent);
+    border: 1px solid transparent;
+    border-radius: 4px;
+}
+
+.record-rating-grid [data-score="1"] { background: color-mix(in srgb, #718bea 14%, transparent); }
+.record-rating-grid [data-score="2"] { background: color-mix(in srgb, #718bea 24%, transparent); }
+.record-rating-grid [data-score="3"] { background: color-mix(in srgb, #718bea 34%, transparent); }
+.record-rating-grid [data-score="4"] { background: color-mix(in srgb, #718bea 44%, transparent); }
+.record-rating-grid [data-score="5"] { background: color-mix(in srgb, #718bea 54%, transparent); }
+.record-rating-grid [data-in-range="false"] { opacity: 0.56; }
+.record-rating-grid [data-today="true"] { border-color: currentColor; }
+.record-rating-grid [aria-pressed="true"] { outline: 2px solid currentColor; outline-offset: -3px; }

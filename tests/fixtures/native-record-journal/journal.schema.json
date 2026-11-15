@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "原生记录日志隔离验收文件",
+  "description": "实验文件。摘要覆盖 payload 解码后的完整 UTF-8 状态，不依赖外层或内层 JSON 属性顺序。",
+  "type": "object",
+  "required": ["format", "sha256", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "format": { "const": "lab-native-journal/1" },
+    "sha256": { "$ref": "#/definitions/sha256" },
+    "payload": { "type": "string", "contentEncoding": "base64" }
+  },
+  "definitions": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artifact": {
+      "type": "object",
+      "required": ["name", "content"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "pattern": "^records/[0-9a-f-]{36}\\.[0-9a-f]{64}\\.json$" },
+        "content": { "type": "string", "contentEncoding": "base64" }
+      }
+    },
+    "state": {
+      "type": "object",
+      "required": ["dataset_id", "descriptor_sha256", "records", "pending"],
+      "additionalProperties": false,
+      "properties": {
+        "dataset_id": { "type": "string", "format": "uuid" },
+        "descriptor_sha256": { "$ref": "#/definitions/sha256" },
+        "records": { "type": "array", "items": { "$ref": "#/definitions/artifact" } },
+        "pending": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "fault": { "$ref": "#/definitions/fault" },
+        "resolved_faults": {
+          "type": "array",
+          "uniqueItems": true,
+          "default": [],
+          "items": { "$ref": "#/definitions/fault" }
+        },
+        "unread": {
+          "type": "array",
+          "uniqueItems": true,
+          "default": [],
+          "items": { "type": "string", "pattern": "^records/[0-9a-f-]{36}\\.[0-9a-f]{64}\\.json$" }
+        }
+      }
+    },
+    "fault": {
+      "type": "object",
+      "required": ["code", "observed"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "enum": ["RECORD_REMOTE_BYTES_CHANGED", "RECORD_REMOTE_INVALID"] },
+        "observed": { "$ref": "#/definitions/artifact" }
+      }
+    }
+  }
+}

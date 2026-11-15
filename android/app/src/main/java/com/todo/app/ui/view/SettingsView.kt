@@ -586,6 +586,8 @@ fun SettingsView(viewModel: TodoViewModel) {
                         }
 
                         TextDivider("数据维护")
+                        RecordRecoverySettings(viewModel.configManager)
+                        RecordSandboxSettings()
                         ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text("如果因为误操作同步导致数据丢失，可以从本地自动生成的快照中恢复，或从云端强制覆盖本地数据。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

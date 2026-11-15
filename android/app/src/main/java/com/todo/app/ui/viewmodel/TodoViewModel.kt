@@ -251,6 +251,13 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
             initialValue = HealthMetrics()
         )
     val isSyncing = repository.isSyncing
+    private val _planningSync = MutableStateFlow<Pair<String, com.todo.app.data.model.SyncPhase>?>(null)
+    internal val planningSync = _planningSync.asStateFlow()
+
+    internal fun updatePlanningSync(target: String, phase: com.todo.app.data.model.SyncPhase) {
+        if (configManager.personalPlanningTarget() == target) _planningSync.value = target to phase
+    }
+
     val syncOutcome = kotlinx.coroutines.flow.combine(repository.syncOutcome, collabSyncState.outcome, activeSource) { personal, collaboration, source ->
         val target = syncTarget(source)
         val result = if (source is ActiveSource.Personal) personal else collaboration
@@ -480,10 +487,7 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
     }
 
     fun saveConfig(serverUrl: String, username: String, appPassword: String, filePath: String) {
-        configManager.webDavUrl = serverUrl
-        configManager.username = username
-        configManager.appPassword = appPassword
-        configManager.filePath = filePath
+        configManager.saveWebDavConnection(serverUrl, username, appPassword, filePath)
         repository.resetWebDavClient()
     }
 

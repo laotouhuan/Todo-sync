@@ -216,7 +216,7 @@ const CRITICAL_TOP_LEVEL_FUNCTIONS = [
     'initApp',
     'render',
     'loadData',
-    'saveData',
+    'commitPersonal',
     'createTodoItemElement',
     'showCheckinDropdown',
     'onDropdownCheckinUpdate',

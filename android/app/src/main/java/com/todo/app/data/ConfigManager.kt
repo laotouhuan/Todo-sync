@@ -6,6 +6,9 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
 import kotlinx.serialization.encodeToString
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.callbackFlow
+import com.todo.app.data.repository.PlanningCloudConnection
 class ConfigManager(val context: Context) {
     val completeSubtasksWithParent: Boolean
         get() = prefs.getBoolean("complete_subtasks_with_parent", false)
@@ -98,5 +101,28 @@ class ConfigManager(val context: Context) {
 
     fun isConfigured(): Boolean {
         return username.isNotEmpty() && appPassword.isNotEmpty()
+    }
+
+    internal fun personalPlanningTarget(): String {
+        if (username.isEmpty()) return "local"
+        val identity = kotlinx.serialization.json.Json.encodeToString(listOf(webDavUrl, username, filePath))
+        return com.todo.app.data.recordsync.sha(identity.encodeToByteArray())
+    }
+
+    internal fun planningTargets() = callbackFlow {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key in setOf("webdav_url", "username", "file_path", "app_password")) trySend(planningSettings())
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        trySend(planningSettings())
+        awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    internal fun planningSettings(): Pair<String, PlanningCloudConnection?> =
+        personalPlanningTarget() to if (isConfigured()) PlanningCloudConnection(webDavUrl, username, appPassword, filePath) else null
+
+    internal fun saveWebDavConnection(url: String, user: String, password: String, path: String) {
+        prefs.edit().putString("webdav_url", url).putString("username", user)
+            .putString("app_password", password).putString("file_path", path).apply()
     }
 }

@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "既有系列与关联独立记录实验操作",
+  "description": "operation_set 为 lab-personal-series/1。改名作用于固定基线的有效系列，关联操作作用于基线已有的关联身份。",
+  "oneOf": [
+    { "$ref": "./period-record-profile.schema.json" },
+    { "$ref": "#/definitions/rename" },
+    { "$ref": "#/definitions/link" }
+  ],
+  "definitions": {
+    "rename": {
+      "type": "object",
+      "required": ["type", "series_id", "content", "updated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "series.rename" },
+        "series_id": { "$ref": "../../todo_data.schema.json#/properties/task_series/items/properties/id" },
+        "content": { "$ref": "../../todo_data.schema.json#/properties/task_series/items/properties/content" },
+        "updated_at": { "$ref": "../../todo_data.schema.json#/properties/task_series/items/properties/content_updated_at" }
+      }
+    },
+    "link": {
+      "type": "object",
+      "required": ["type", "todo_id", "series_id", "updated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["series.link.put", "series.link.unlink"] },
+        "todo_id": { "$ref": "../../todo_data.schema.json#/properties/task_series_links/items/properties/todo_id" },
+        "series_id": { "$ref": "../../todo_data.schema.json#/properties/task_series_links/items/properties/series_id" },
+        "updated_at": { "$ref": "../../todo_data.schema.json#/properties/task_series_links/items/properties/updated_at" },
+        "next_series_id": { "type": "string", "format": "uuid", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$" }
+      },
+      "if": { "properties": { "type": { "const": "series.link.unlink" } } },
+      "then": { "required": ["next_series_id"] },
+      "else": { "not": { "required": ["next_series_id"] } }
+    }
+  }
+}

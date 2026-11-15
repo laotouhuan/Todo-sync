@@ -1,0 +1,161 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "普通待办独立记录实验操作；不是生产协议",
+  "description": "operation_set 为 lab-normal-todo/1。单条完整普通任务候选，禁止整份 TodoData 替换；接收时另验证固定归一、完整时钟和实体类型。",
+  "type": "object",
+  "required": [
+    "type",
+    "todo"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "enum": [
+        "todo.normal.put",
+        "todo.normal.delete"
+      ]
+    },
+    "todo": {
+      "type": "object",
+      "required": [
+        "id",
+        "content",
+        "date",
+        "time",
+        "completed_at",
+        "order",
+        "completed",
+        "created_at",
+        "updated_at",
+        "deleted",
+        "recurring",
+        "task_type",
+        "completed_dates",
+        "target_count",
+        "reminder",
+        "subtasks",
+        "label"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "保留已知旧身份；仅新实体须UUIDv4，由基线/记录上下文校验。"
+        },
+        "content": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/content"
+        },
+        "date": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/date"
+        },
+        "time": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/time"
+        },
+        "completed_at": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/completed_at"
+        },
+        "order": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/order"
+        },
+        "completed": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/completed"
+        },
+        "created_at": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/created_at"
+        },
+        "updated_at": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/updated_at"
+        },
+        "deleted": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/deleted"
+        },
+        "recurring": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/recurring"
+        },
+        "task_type": {
+          "const": "normal"
+        },
+        "completed_dates": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/completed_dates"
+        },
+        "target_count": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/target_count"
+        },
+        "reminder": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/reminder"
+        },
+        "subtasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "content",
+              "completed",
+              "completed_at"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "仅基线/已知历史中的旧身份可保留；新子任务由运行时强制UUIDv4。"
+              },
+              "content": {
+                "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/subtasks/items/properties/content"
+              },
+              "completed": {
+                "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/subtasks/items/properties/completed"
+              },
+              "completed_at": {
+                "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/subtasks/items/properties/completed_at"
+              }
+            }
+          }
+        },
+        "label": {
+          "$ref": "../../todo_data.schema.json#/properties/todos/items/properties/label"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "todo.normal.put"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "todo": {
+            "properties": {
+              "deleted": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "todo.normal.delete"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "todo": {
+            "properties": {
+              "deleted": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
