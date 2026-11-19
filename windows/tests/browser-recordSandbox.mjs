@@ -151,7 +151,8 @@ try {
     await set('#record-sandbox textarea', '浏览器合成计划二');
     await clickText('保存计划');
     await waitFor(browser, `[...document.querySelectorAll('#record-sandbox summary')].some(node=>node.textContent==='对比版本')`);
-    assert.equal(await browser.evaluate(`document.querySelector('#record-sandbox td ins').textContent`), '二');
+    assert.equal(await browser.evaluate(`[...document.querySelectorAll('#record-sandbox tr')]
+        .find(row => row.querySelector('th')?.textContent === '周一').querySelector('ins').textContent`), '二');
     await clickText('5 分');
     await waitFor(browser, `document.querySelector('#record-sandbox [data-planning]').textContent.includes('当日评分 5')`);
     await clickText('清除评分');

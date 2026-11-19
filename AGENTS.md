@@ -242,6 +242,21 @@ Windows 端使用以下机制保证文件安全：
 - **软删除**：用户删除操作设置 `deleted = true`；待办记录超过 7 天的保留期后由统一清理函数物理清除，规则及实现差异见 §5.3
 - **更新时间戳**：任何修改操作必须同时更新 `updated_at` 字段
 
+#### 界面文字样式
+
+新增或修改界面文字时，先按用途选择**页面或弹窗标题、分组标题、正文与控件、辅助说明**。对照已有页面，同一级文字沿用相同的字号、字重和主题文字色。
+
+- **Windows** 普通正文继承主题主文字色。组件按用途复用 [styles.css](windows/src/styles.css) 的 `--ui-title`、`--ui-heading`、`--ui-body` 或 `--ui-note`。提示和空状态可直接使用 `.ui-note`，动态创建的 DOM 同样适用。
+- **Android** 复用 `MaterialTheme.typography` 和 Material 控件的默认文字样式。提示、空状态和记录说明优先使用 [SupportingText](android/app/src/main/java/com/todo/app/ui/theme/SupportingText.kt)，随主题和系统字号调整。
+- 钟面刻度、计时数字、闪电录入等有专门显示需求时，沿用对应组件的排版。Android 桌面小组件的字号集中在 [WidgetTheme](android/app/src/main/java/com/todo/app/widget/TodoWidget.kt)。
+
+#### 常用控件与统计配色
+
+- **Windows** 常规操作按钮使用 `.ui-button`，保存、确认等主操作加 `.primary`，删除、销卡等危险操作加 `.danger`。用 `disabled` 和 `aria-pressed` 表达禁用和切换状态。内容卡片使用 `.ui-card`，钟面提示、打卡浮层和短时消息使用 `.ui-popup-surface`，各组件自行安排位置和内容间距。
+- **Android** 操作按钮和卡片沿用 Material 3 组件。统计中的任务完成提示和计时提示复用 [TimelineTimerTooltip.kt](android/app/src/main/java/com/todo/app/ui/view/TimelineTimerTooltip.kt) 中的提示卡片。
+- **Windows 表单与弹窗** 普通输入框、文本域和下拉框使用原生元素即可继承公共外观。静态弹窗的 `.modal-content` 与原生 `dialog` 共享底色、描边、圆角和阴影。按内容调整宽度、紧凑间距和滚动区域。
+- **统计时段配色** 钟面圆弧、时段标注和纵向时间线共用每端的时段色板。Windows 见 [timeSlotColors](windows/src/statsTimeline.js)，Android 见 [TimeSlotColors](android/app/src/main/java/com/todo/app/ui/view/TimelineLabelColors.kt)。
+
 ### 6.2 Windows 端规范
 
 - 前端为**纯 Vanilla JS**（ES Module），不使用任何框架（React/Vue 等），不要引入框架

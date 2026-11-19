@@ -33,6 +33,8 @@ internal interface PersonalPlanningSession {
     suspend fun sync(): RecordSandboxView
     suspend fun change(action: JsonObject, revision: String?): RecordSandboxView
     suspend fun retry(): Pair<RecordSandboxView, Boolean>
+    suspend fun enableFocus(): RecordSandboxView = error("本周重点暂不可用")
+    suspend fun hasPendingRating(date: String): Boolean = false
     suspend fun close()
 }
 
@@ -88,7 +90,7 @@ internal class PersonalPlanningRepository(
             val error = when {
                 opened.retainedLocal -> "本机已有独立的计划与评分，已保留在本机，尚未接入云端计划同步"
                 next.preview.view == null -> "计划与评分暂不可用，请重试读取"
-                next.syncIncomplete -> "计划与评分同步未完成，请检查网络后重试"
+                next.syncIncomplete -> "计划与评分同步未完成，请检查网络后重试" + (next.transportError?.let { "（$it）" } ?: "")
                 opened.connectedCloud && next.preview.journal.pending.isNotEmpty() -> "部分计划与评分尚未上传，请重试"
                 else -> null
             }
@@ -112,6 +114,14 @@ internal class PersonalPlanningRepository(
     }
 
     suspend fun retry(target: PlanningSettings) = write(target) { it.retry() }
+
+    suspend fun enableFocus(target: PlanningSettings) = write(target) { it.enableFocus() to true }
+
+    suspend fun readLocal(target: PlanningSettings) = write(target) { it.open() to false }
+
+    suspend fun hasPendingRating(target: PlanningSettings, date: String) = mutex.withLock {
+        settings() == target && ensureSession(target).hasPendingRating(date)
+    }
 
     private suspend fun write(target: PlanningSettings,
         operation: suspend (PersonalPlanningSession) -> Pair<RecordSandboxView, Boolean>
@@ -138,10 +148,11 @@ internal fun createPersonalPlanningRepository(context: Context, config: ConfigMa
                     ?: RecordSandboxTarget(UUID.randomUUID().toString(), UUID.randomUUID().toString(), Instant.now().toString())
                         .also { check(preferences.edit().putString(key, Json.encodeToString(RecordSandboxTarget.serializer(), it)).commit()) }
             }
-            val legacy = RecordSandbox(context.filesDir, fixed, localOnly = true)
+            val legacy = RecordSandbox(context.filesDir, fixed, localOnly = true, focusPreferences = preferences)
             val retained = cloud != null && legacy.open().preview.retainsLocalPlanning()
             val connected = cloud != null && !retained
-            val selected = if (connected) RecordSandbox(context.filesDir, cloud!!.target(fixed.actorId), localOnly = true, cloud = cloud) else legacy
+            val selected = if (connected) RecordSandbox(context.filesDir, cloud!!.target(fixed.actorId), localOnly = true,
+                cloud = cloud, focusPreferences = preferences) else legacy
             object : PersonalPlanningSession {
                 override val connectedCloud = connected
                 override val retainedLocal = retained
@@ -149,6 +160,8 @@ internal fun createPersonalPlanningRepository(context: Context, config: ConfigMa
                 override suspend fun sync() = selected.sync()
                 override suspend fun change(action: JsonObject, revision: String?) = selected.change(action, revision)
                 override suspend fun retry() = selected.retryWithResult()
+                override suspend fun enableFocus() = selected.enableFocus { config.planningSettings() == (target to cloud) }
+                override suspend fun hasPendingRating(date: String) = selected.hasPendingRating(date)
                 override suspend fun close() = selected.close()
             }
         }

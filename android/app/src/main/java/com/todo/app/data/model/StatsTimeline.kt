@@ -1,9 +1,13 @@
 package com.todo.app.data.model
 
 import java.time.*
+import kotlin.math.roundToLong
 
 data class SubtaskEvent(val todo: Todo, val subtask: Subtask, val date: LocalDate, val time: Instant?)
-data class TimerArc(val part: LearningPart, val startMinute: Float, val endMinute: Float)
+data class TimerArc(val part: LearningPart, internal val startMinuteExact: Double, internal val endMinuteExact: Double) {
+    val startMinute: Float get() = startMinuteExact.toFloat()
+    val endMinute: Float get() = endMinuteExact.toFloat()
+}
 data class TimelineCompletion(val todo: Todo, val date: LocalDate, val time: Instant?)
 
 object StatsTimeline {
@@ -51,12 +55,29 @@ object StatsTimeline {
                     val transition = zone.rules.nextTransition(cursor)?.instant
                     val next = if (transition != null && transition < part.endedAt) transition else part.endedAt
                     val minute = clockMinute(cursor, zone)
-                    result.add(TimerArc(part, minute.toFloat(), minOf(1440.0, minute + Duration.between(cursor, next).toMillis() / 60000.0).toFloat()))
+                    result.add(TimerArc(part, minute, minOf(1440.0, minute + Duration.between(cursor, next).toMillis() / 60000.0)))
                     cursor = next
                 }
                 result
             }
     }
+
+    // 圆弧已按午夜和时区偏移变化切分。依次返回深夜、上午、下午、晚上的毫秒数。
+    fun checkinDurationBySlot(arcs: List<TimerArc>, todos: List<Todo>): List<Long> {
+        val checkinIds = todos.filter { !it.deleted &&
+            (it.taskType == TaskType.WEEKLY_CHECKIN || it.taskType == TaskType.MONTHLY_CHECKIN) }
+            .map { it.id }.toSet()
+        val checkinArcs = arcs.filter { it.part.entry.task_ref.todo_id in checkinIds }
+        return List(4) { slot ->
+            val start = slot * 360.0
+            val end = start + 360.0
+            checkinArcs.sumOf { arc ->
+                val overlap = minOf(arc.endMinuteExact, end) - maxOf(arc.startMinuteExact, start)
+                (overlap.coerceAtLeast(0.0) * 60000).roundToLong()
+            }
+        }
+    }
+
     fun hitArcs(arcs: List<TimerArc>, minute: Float, tolerance: Float = 0f): List<TimerArc> = arcs.filter { a ->
         listOf(minute, minute + 1440, minute - 1440).any { it >= a.startMinute - tolerance && it <= a.endMinute + tolerance }
     }

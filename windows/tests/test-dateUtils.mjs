@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 
 // dateUtils.js 使用 export，我们直接 import
 import {
-    formatDate, getISOWeekString,
+    formatDate, getISOWeekString, statsPeriodKey,
     getTodayString, getTomorrowString, getThisWeekString,
     getThisMonthString, getLastWeekString, getLastMonthString,
     isWeekDate, isMonthDate, isOverdue, getDateLabel, getCompletionStatusLabel,
@@ -20,6 +20,19 @@ import {
     sortFunc, parseInputSyntax, createTodo, groupTodosByDate,
     categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade, calculateStatsPeriodProgress, generateUUID
 } from '../src/dateUtils.js';
+
+describe('statsPeriodKey', () => {
+    it('按本地日历归属日、周和月，纯日期保留原日，不接收无效值', () => {
+        const midnight = new Date(2026, 5, 1, 0, 30).toISOString();
+        for (const value of [midnight, '2026-06-01']) {
+            assert.equal(statsPeriodKey(value), '2026-06-01');
+            assert.equal(statsPeriodKey(value, 'week'), '2026-W23');
+            assert.equal(statsPeriodKey(value, 'month'), '2026-06');
+        }
+        assert.equal(statsPeriodKey('2026-02-30'), '');
+        assert.equal(statsPeriodKey(null), '');
+    });
+});
 
 describe('generateUUID', () => {
     it('生成标准 UUID v4 格式字符串', () => {
@@ -511,21 +524,21 @@ describe('calculateStatsPeriodProgress', () => {
         assert.deepEqual(result, { totalCount: 3, completedCount: 1, progress: 33 });
     });
 
-    it('日统计按日期前缀计入纯日期和带时间打卡，并封顶目标次数', () => {
+    it('日统计按本地日期计入纯日期和带时间打卡，并封顶目标次数', () => {
         const result = calculateStatsPeriodProgress([
             task({
                 task_type: 'weekly_checkin',
                 target_count: 2,
-                completed_dates: ['2026-06-24', '2026-06-24T13:00:00Z', '2026-06-23']
+                completed_dates: ['2026-06-24', new Date(2026, 5, 24, 13).toISOString(), '2026-06-23']
             }),
             task({
                 task_type: 'monthly_checkin',
-                completed_dates: ['2026-06-24', '2026-06-24T23:59:00-08:00']
+                completed_dates: ['2026-06-24', new Date(2026, 5, 25, 0, 30).toISOString()]
             }),
             task({ task_type: 'weekly_checkin', target_count: 3, completed_dates: [] })
         ], 'day', '2026-06-24');
 
-        assert.deepEqual(result, { totalCount: 7, completedCount: 4, progress: 57 });
+        assert.deepEqual(result, { totalCount: 6, completedCount: 3, progress: 50 });
     });
 
     it('周统计忽略无效日期、排除周期外记录并封顶目标次数', () => {
@@ -544,7 +557,7 @@ describe('calculateStatsPeriodProgress', () => {
         assert.deepEqual(result, { totalCount: 2, completedCount: 2, progress: 100 });
     });
 
-    it('月统计保留文本日期前缀规则并忽略周期外记录', () => {
+    it('月统计按本地月份归组并忽略周期外记录', () => {
         const result = calculateStatsPeriodProgress([
             task({
                 task_type: 'monthly_checkin',

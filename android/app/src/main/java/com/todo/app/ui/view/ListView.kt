@@ -9,12 +9,11 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.text.font.FontWeight
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
@@ -43,7 +42,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.clip
@@ -249,12 +247,13 @@ fun ClassicListView(viewModel: TodoViewModel) {
     var showAllHistory by remember { mutableStateOf(false) }
     var hoveredHeaderKey by remember { mutableStateOf<String?>(null) }
 
+    fun matchesSearch(todo: Todo): Boolean = searchQuery.isBlank() || todo.content.contains(searchQuery, ignoreCase = true)
     val filteredTodos = remember(activeTodos, searchQuery) {
-        if (searchQuery.isBlank()) activeTodos else activeTodos.filter { it.content.contains(searchQuery, ignoreCase = true) }
+        if (searchQuery.isBlank()) activeTodos else activeTodos.filter(::matchesSearch)
     }
 
-    val filtered = remember(filteredTodos, todayStr, thisWeekStr, thisMonthStr) {
-        filteredTodos.filter {
+    val focusGroups = remember(activeTodos, todayStr, thisWeekStr, thisMonthStr) {
+        val focusTodos = activeTodos.filter {
             val completedToday = it.completed && it.completedAt?.startsWith(todayStr) == true
             val wasOverdue = it.date != null && it.date!! < todayStr && !isWeekDate(it.date!!) && !isMonthDate(it.date!!)
             val isOverdueCompletedToday = completedToday && wasOverdue
@@ -264,50 +263,44 @@ fun ClassicListView(viewModel: TodoViewModel) {
                 || it.date == thisWeekStr
                 || it.date == thisMonthStr
                 || isOverdueCompletedToday
-        }.sortedWith(TodoComparator)
+        }
+        classifyForTodayFocus(focusTodos, todayStr, thisWeekStr, thisMonthStr)
     }
 
-    // 按实际设置的本周任务判断顺序，不受搜索或完成状态影响。
-    val hasWeekTasks = activeTodos.any { !it.deleted && it.date == thisWeekStr }
-    val focusItemsOriginal = remember(filtered, hasWeekTasks, todayStr, thisWeekStr, thisMonthStr, expandToday, expandNoDate, expandWeek, expandMonth) {
-        val groups = classifyForTodayFocus(filtered, todayStr, thisWeekStr, thisMonthStr)
-        val todayTasks = groups.todayTasks
-        val noDateTasks = groups.noDateTasks
-        val weekTasks = groups.weekTasks
-        val monthTasks = groups.monthTasks
-
-        val list = mutableListOf<FocusItem>()
-
-        // 1. Today Tasks
-        list.add(FocusItem.Header("HEADER_TODAY", "今日任务", Color(0xFF1890FF), expandToday, { expandToday = !expandToday }))
-        if (expandToday) {
-            list.addAll(todayTasks.map { FocusItem.Task(it) })
-        }
-
-        val weekItems = buildList<FocusItem> {
-            add(FocusItem.Header("HEADER_WEEK", "本周任务", Color(0xFFFADB14), expandWeek, { expandWeek = !expandWeek }))
-            if (expandWeek) {
-                if (weekTasks.isEmpty()) {
-                    add(FocusItem.EmptyPlaceholder("PLACEHOLDER_WEEK", "本周无打卡计划，您可从上期导入", "weekly"))
-                } else {
-                    addAll(weekTasks.map { FocusItem.Task(it) })
+    val focusItemsOriginal = remember(focusGroups, searchQuery, expandToday, expandWeek, expandMonth) {
+        fun buildGroup(
+            tasks: List<Todo>,
+            header: FocusItem.Header,
+            placeholder: FocusItem.EmptyPlaceholder? = null
+        ): Pair<Boolean, List<FocusItem>> {
+            val items = buildList<FocusItem> {
+                add(header)
+                if (header.isExpanded) {
+                    val visibleTasks = tasks.filter(::matchesSearch)
+                    if (visibleTasks.isEmpty() && placeholder != null) add(placeholder)
+                    addAll(visibleTasks.map { FocusItem.Task(it) })
                 }
             }
+            return tasks.isEmpty() to items
         }
 
-        val monthItems = buildList<FocusItem> {
-            add(FocusItem.Header("HEADER_MONTH", "本月任务", Color(0xFFFF7A45), expandMonth, { expandMonth = !expandMonth }))
-            if (expandMonth) {
-                if (monthTasks.isEmpty()) {
-                    add(FocusItem.EmptyPlaceholder("PLACEHOLDER_MONTH", "本月无打卡计划，您可从上期导入", "monthly"))
-                } else {
-                    addAll(monthTasks.map { FocusItem.Task(it) })
-                }
-            }
-        }
-
-        list.addAll(if (hasWeekTasks) weekItems + monthItems else monthItems + weekItems)
-        list
+        // 搜索只筛选区块内的任务，区块顺序取决于实际分组是否为空。
+        listOf(
+            buildGroup(
+                focusGroups.todayTasks,
+                FocusItem.Header("HEADER_TODAY", "今日任务", Color(0xFF1890FF), expandToday, { expandToday = !expandToday })
+            ),
+            buildGroup(
+                focusGroups.weekTasks,
+                FocusItem.Header("HEADER_WEEK", "本周任务", Color(0xFFFADB14), expandWeek, { expandWeek = !expandWeek }),
+                FocusItem.EmptyPlaceholder("PLACEHOLDER_WEEK", "本周无打卡计划，您可从上期导入", "weekly")
+            ),
+            buildGroup(
+                focusGroups.monthTasks,
+                FocusItem.Header("HEADER_MONTH", "本月任务", Color(0xFFFF7A45), expandMonth, { expandMonth = !expandMonth }),
+                FocusItem.EmptyPlaceholder("PLACEHOLDER_MONTH", "本月无打卡计划，您可从上期导入", "monthly")
+            )
+        ).sortedBy { (isEmpty, _) -> isEmpty }.flatMap { (_, items) -> items }
     }
 
     var reorderableFocusItems by remember { mutableStateOf<List<FocusItem>>(emptyList()) }
@@ -419,8 +412,8 @@ fun ClassicListView(viewModel: TodoViewModel) {
 
     Column(modifier = Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = selectedTab, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("今天聚焦", fontWeight = FontWeight.Bold, maxLines = 1) })
-            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("全部待办", fontWeight = FontWeight.Bold, maxLines = 1) })
+            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("今天聚焦", maxLines = 1) })
+            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("全部待办", maxLines = 1) })
         }
 
         // Real-time Search Input Bar
@@ -725,7 +718,7 @@ fun ClassicListView(viewModel: TodoViewModel) {
                                 item {
                                     Text(
                                         text = dateStr,
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        style = MaterialTheme.typography.titleMedium,
                                         color = Color(0xFF52C41A),
                                         modifier = Modifier.padding(vertical = 12.dp)
                                     )
@@ -923,6 +916,9 @@ fun TodoItemRow(
     val density = androidx.compose.ui.platform.LocalDensity.current.density
     val maxSwipePx = -60f * density
     var expanded by remember { mutableStateOf(false) }
+    val checkinCellSize = with(androidx.compose.ui.platform.LocalDensity.current) {
+        maxOf(20.dp, MaterialTheme.typography.labelSmall.lineHeight.toDp() + 4.dp)
+    }
     var calendarExpanded by remember { mutableStateOf(false) }
 
     Box(
@@ -1022,7 +1018,7 @@ fun TodoItemRow(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             val textColor by animateColorAsState(
-                                targetValue = if (isVisualCompleted) Color.Gray else MaterialTheme.colorScheme.onSurface,
+                                targetValue = if (isVisualCompleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                                 animationSpec = tween(durationMillis = 300)
                             )
                             val strikethroughProgress by animateFloatAsState(
@@ -1042,7 +1038,7 @@ fun TodoItemRow(
                                         if (strikethroughProgress > 0f) {
                                             val y = size.height / 2f
                                             drawLine(
-                                                color = Color.Gray,
+                                                color = textColor,
                                                 start = androidx.compose.ui.geometry.Offset(0f, y),
                                                 end = androidx.compose.ui.geometry.Offset(size.width * strikethroughProgress, y),
                                                 strokeWidth = 2f
@@ -1073,37 +1069,32 @@ fun TodoItemRow(
                         }
                         if (todo.subtasks.isNotEmpty()) meta.add("📋 ${todo.subtasks.count { it.completed }}/${todo.subtasks.size}")
                         if (meta.isNotEmpty()) {
-                            Text(text = meta.joinToString(" | "), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            Text(text = meta.joinToString(" | "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
 
                         if (todo.taskType == TaskType.WEEKLY_CHECKIN && todo.targetCount != 1) {
                             Spacer(Modifier.height(6.dp))
                             val dates = remember { getThisWeekDates() }
                             val labels = listOf("一", "二", "三", "四", "五", "六", "日")
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 dates.forEachIndexed { idx, date ->
                                     val dateStr = date.toString()
                                     val isChecked = todo.completedDates.any { it.startsWith(dateStr) }
                                     val isToday = dateStr == highlightDate
                                     Box(
                                         modifier = Modifier
-                                            .size(20.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(
-                                                if (isChecked) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-                                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                                            )
-                                            .border(
-                                                width = if (isToday) 2.dp else 0.5.dp,
-                                                color = if (isToday) Color(0xFFFAAD14) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
-                                                shape = RoundedCornerShape(4.dp)
+                                            .size(checkinCellSize)
+                                            .calendarCell(
+                                                today = isToday,
+                                                fill = if (isChecked) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                                    else Color.Unspecified
                                             ),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
                                             text = labels[idx],
                                             color = if (isChecked) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
-                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp)
+                                            style = MaterialTheme.typography.labelSmall
                                         )
                                     }
                                 }
@@ -1123,7 +1114,7 @@ fun TodoItemRow(
                                 )
                                 Text(
                                     text = "$count/$target 天",
-                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                                    style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
@@ -1144,17 +1135,17 @@ fun TodoItemRow(
                                 val chunks = dates.chunked(7)
                                 val weekLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Column(modifier = Modifier.horizontalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     // Weekday Headers
                                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                         weekLabels.forEach { label ->
                                             Box(
-                                                modifier = Modifier.size(20.dp),
+                                                modifier = Modifier.size(checkinCellSize),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Text(
                                                     text = label,
-                                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                                    style = MaterialTheme.typography.labelSmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                                                 )
                                             }
@@ -1171,20 +1162,13 @@ fun TodoItemRow(
 
                                                 Box(
                                                     modifier = Modifier
-                                                        .size(20.dp)
-                                                        .clip(RoundedCornerShape(4.dp))
-                                                        .background(
-                                                            if (isChecked) {
-                                                                if (isCurrentMonth) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-                                                                else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                                                            } else {
-                                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (isCurrentMonth) 0.4f else 0.15f)
-                                                            }
-                                                        )
-                                                        .border(
-                                                            width = if (isToday) 2.dp else 0.5.dp,
-                                                            color = if (isToday) Color(0xFFFAAD14) else MaterialTheme.colorScheme.outline.copy(alpha = if (isCurrentMonth) 0.2f else 0.05f),
-                                                            shape = RoundedCornerShape(4.dp)
+                                                        .size(checkinCellSize)
+                                                        .calendarCell(
+                                                            today = isToday,
+                                                            inRange = isCurrentMonth,
+                                                            fill = if (isChecked) MaterialTheme.colorScheme.primary.copy(
+                                                                alpha = if (isCurrentMonth) 0.8f else 0.3f
+                                                            ) else Color.Unspecified
                                                         ),
                                                     contentAlignment = Alignment.Center
                                                 ) {
@@ -1195,7 +1179,7 @@ fun TodoItemRow(
                                                         } else {
                                                             MaterialTheme.colorScheme.onSurface.copy(alpha = if (isCurrentMonth) 0.8f else 0.25f)
                                                         },
-                                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 9.sp)
+                                                        style = MaterialTheme.typography.labelSmall
                                                     )
                                                 }
                                             }
@@ -1246,7 +1230,7 @@ fun TodoItemRow(
                                         sub.content
                                     },
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = if (sub.completed) Color.Gray else MaterialTheme.colorScheme.onSurface,
+                                    color = if (sub.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                                     textDecoration = if (sub.completed) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
                                 )
                             }

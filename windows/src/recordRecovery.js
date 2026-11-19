@@ -56,9 +56,13 @@ async function persist(invoke, input) {
 }
 
 function projectPreview({ operation_set, baseline, journal, dependencies, records }) {
+    const operations = records?.map(record => JSON.parse(record));
+    const focusHistory = operations?.some(record => record.operations.some(operation =>
+        operation.version && Object.hasOwn(operation.version, 'focus')));
     return {
         journal,
         missing: dependencies.missing,
-        view: records === null ? null : replayPersonalRecords(JSON.parse(baseline).data, records.map(record => JSON.parse(record)), operation_set)
+        ...(focusHistory ? { focusHistory } : {}),
+        view: operations == null ? null : replayPersonalRecords(JSON.parse(baseline).data, operations, operation_set)
     };
 }

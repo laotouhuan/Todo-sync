@@ -1,5 +1,7 @@
 package com.todo.app.ui.view
 
+import com.todo.app.ui.theme.SupportingText
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
@@ -122,7 +124,7 @@ internal fun RecordRecoverySettings(config: ConfigManager) {
         OutlinedButton(enabled = !busy && exportPin == null, onClick = { open.launch(arrayOf("application/json", "text/plain")) }) {
             Text("打开恢复材料")
         }
-        if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.bodySmall)
+        if (status.isNotEmpty()) SupportingText(status)
         selectedPin?.let { pin ->
             OutlinedButton(enabled = !busy && exportPin == null, onClick = {
                 exportPin = pin

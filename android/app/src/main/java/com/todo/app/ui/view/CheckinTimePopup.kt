@@ -5,7 +5,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.todo.app.data.model.formatCheckinDateTime
@@ -115,7 +114,7 @@ fun CheckinTimePopup(
                             modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                         ) {
-                            Text("保存", fontSize = 11.sp)
+                            Text("保存")
                         }
                         Button(
                             onClick = {
@@ -126,7 +125,7 @@ fun CheckinTimePopup(
                             modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                         ) {
-                            Text("销卡", fontSize = 11.sp)
+                            Text("销卡")
                         }
                     } else {
                         Button(
@@ -138,14 +137,14 @@ fun CheckinTimePopup(
                             modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                         ) {
-                            Text("打卡", fontSize = 11.sp)
+                            Text("打卡")
                         }
                         OutlinedButton(
                             onClick = onDismiss,
                             modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                         ) {
-                            Text("取消", fontSize = 11.sp)
+                            Text("取消")
                         }
                     }
                 }

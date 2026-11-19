@@ -571,6 +571,7 @@
         "id": { "$ref": "#/definitions/recordId" },
         "week_start": { "$ref": "#/definitions/calendarDate" },
         "base_version_id": { "type": ["string", "null"], "format": "uuid", "default": null },
+        "focus": { "type": "string", "default": "" },
         "days": { "type": "array", "items": { "type": "string" }, "minItems": 7, "maxItems": 7, "default": ["", "", "", "", "", "", ""] },
         "change_reason": { "type": "string", "default": "" },
         "created_at": { "$ref": "#/definitions/instant" },

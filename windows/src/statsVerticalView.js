@@ -1,4 +1,5 @@
-import { timelineDays, collectTaskTimelineEvents, clockMinute, clockTooltipDateTime, hitTimelineSegments } from './statsTimeline.js';
+import { createStatsTaskMark, statsTaskStyle } from './statsTaskMark.js';
+import { timelineDays, clockMinute, clockTooltipDateTime, hitTimelineSegments, unclassifiedTimerColor, timeSlotColors } from './statsTimeline.js';
 import { prepareClockEntry, playClockEntry } from './clockAnimation.js';
 
 const ns = 'http://www.w3.org/2000/svg';
@@ -6,21 +7,7 @@ function svg(tag, attrs, text) {
     const n = document.createElementNS(ns, tag); Object.entries(attrs).forEach(([k, v]) => n.setAttribute(k, v));
     if (text != null) n.textContent = text; return n;
 }
-const colors = { normal: '#10B981', weekly: '#6366F1', monthly: '#F43F5E' };
-const type = t => t.task_type === 'weekly_checkin' ? 'weekly' : t.task_type === 'monthly_checkin' ? 'monthly' : 'normal';
-
-function completionMark(event, x, y, radius) {
-    const color = colors[type(event.todo)];
-    if (event.subtask || type(event.todo) === 'normal') return svg('circle', { cx: x, cy: y, r: radius, fill: event.subtask ? 'var(--modal-bg-solid)' : color, stroke: event.subtask ? color : '#fff', 'stroke-width': 1.5 });
-    const kind = type(event.todo), count = kind === 'weekly' ? 4 : 10;
-    const points = Array.from({ length: count }, (_, i) => {
-        const angle = i / count * Math.PI * 2 - Math.PI / 2, r = kind === 'monthly' && i % 2 ? radius * .45 : radius;
-        return `${x + r * Math.cos(angle)},${y + r * Math.sin(angle)}`;
-    }).join(' ');
-    return svg('polygon', { points, fill: color, stroke: '#fff', 'stroke-width': 1 });
-}
-
-export function renderVerticalTimeline({ host, todos, steps, arcs, period, target, bindTooltip, timerTooltip, openTimers, openTodo, openSubtask, showDetails }) {
+export function renderVerticalTimeline({ host, completed, steps, arcs, labelColors, period, target, bindTooltip, timerTooltip, openTimers, openTodo, openSubtask, showDetails }) {
     const days = timelineDays(period, target), month = period === 'month';
     const stride = month ? 32 : 42, width = days.length * stride, top = 44, height = 288, total = 356;
     const yAt = minute => top + minute / 1440 * height;
@@ -34,17 +21,18 @@ export function renderVerticalTimeline({ host, todos, steps, arcs, period, targe
     const chart = svg('svg', { width, height: total, viewBox: `0 0 ${width} ${total}`, preserveAspectRatio: 'none', 'aria-label': month ? '本月每日时间线' : '本周每日时间线' });
     chart.style.minWidth = `${width}px`; chart.style.width = '100%'; scroll.append(chart);
     const tracks = svg('g', {}), marks = svg('g', {}); chart.append(tracks, marks);
-    const completed = collectTaskTimelineEvents(todos, period, target), events = [...completed, ...steps];
+    const events = [...completed, ...steps];
     days.forEach((date, index) => {
         const x = (index + .5) * stride, weekday = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'][index];
         tracks.append(svg('text', { x, y: 17, 'text-anchor': 'middle', class: 'timeline-axis-label' }, month ? `${Number(date.slice(8))}日` : weekday));
         if (!month) tracks.append(svg('text', { x, y: 32, 'text-anchor': 'middle', class: 'timeline-axis-label' }, date.slice(5)));
-        ['#3b82f6', '#f59e0b', '#7b61ff', '#6366f1'].forEach((color, slot) => tracks.append(svg('line', {
+        Object.values(timeSlotColors).forEach((color, slot) => tracks.append(svg('line', {
             x1: x, x2: x, y1: yAt(slot * 360), y2: yAt((slot + 1) * 360), stroke: color, 'stroke-width': month ? 3 : 6, opacity: .25
         })));
         const dayParts = arcs.filter(a => a.date === date);
         dayParts.forEach(a => {
-            const path = svg('path', { d: `M ${x} ${yAt(a.startMinute)} L ${x} ${yAt(a.endMinute)}`, fill: 'none', stroke: '#22d3ee', 'stroke-width': month ? 3 : 6 });
+            const path = svg('path', { d: `M ${x} ${yAt(a.startMinute)} L ${x} ${yAt(a.endMinute)}`, fill: 'none',
+                stroke: labelColors.get(a.entry.label_snapshot) ?? unclassifiedTimerColor, 'stroke-width': month ? 3 : 6 });
             prepareClockEntry(path, a.startMinute, a.endMinute); tracks.append(path);
         });
         if (dayParts.length) {
@@ -61,8 +49,8 @@ export function renderVerticalTimeline({ host, todos, steps, arcs, period, targe
             tracks.append(hit);
         }
         events.filter(e => e.date === date && e.explicit).forEach(e => {
-            const minute = clockMinute(e.completed_at), color = colors[type(e.todo)];
-            const mark = completionMark(e, x + (e.subtask ? -6 : 6), yAt(minute), month ? 3 : 4);
+            const minute = clockMinute(e.completed_at), color = statsTaskStyle(e.todo.task_type).color;
+            const mark = createStatsTaskMark(e.todo.task_type, x + (e.subtask ? -6 : 6), yAt(minute), month ? 3 : 4, Boolean(e.subtask));
             const stamp = clockTooltipDateTime(e.completed_at), title = e.subtask?.content || e.todo.content;
             mark.setAttribute('role', 'button'); mark.setAttribute('tabindex', '0'); mark.setAttribute('aria-label', `${title} ${stamp.date} ${stamp.time}`);
             prepareClockEntry(mark, minute);
@@ -70,10 +58,6 @@ export function renderVerticalTimeline({ host, todos, steps, arcs, period, targe
             const open = () => e.subtask ? openSubtask(e.todo, e.subtask) : showDetails('任务完成', [e.todo.content, `${stamp.date} ${stamp.time}`], '编辑任务', () => openTodo(e.todo));
             mark.onclick = open; mark.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } }; marks.append(mark);
         });
-    });
-    completed.filter(e => !e.explicit).forEach(e => {
-        const b = document.createElement('button'); b.className = 'learning-button'; b.textContent = `${e.date.slice(5)} · ${e.todo.content}（无具体时间）`;
-        b.onclick = () => openTodo(e.todo); host.append(b);
     });
     scroll.addEventListener('scroll', () => { const tooltip = document.getElementById('clock-tooltip'); if (tooltip) tooltip.style.display = 'none'; });
     playClockEntry(chart);

@@ -22,6 +22,18 @@ export function getISOWeekString(d) {
     return `${date.getFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
+// 统计用本地日历日期归组，旧版纯日期保持原值。
+export function statsPeriodKey(value, period = 'day') {
+    if (typeof value !== 'string') return '';
+    const timed = value.includes('T');
+    const instant = new Date(timed ? value : value + 'T12:00:00');
+    if (!Number.isFinite(instant.getTime())) return '';
+    const day = formatDate(instant);
+    if (!timed && day !== value) return '';
+    if (period === 'week') return getISOWeekString(instant);
+    return period === 'month' ? day.slice(0, 7) : day;
+}
+
 // ====== Convenience Date Strings ======
 
 export function getTodayString() { return formatDate(new Date()); }
@@ -376,22 +388,10 @@ export function calculateStatsPeriodProgress(todos, period, targetPeriod) {
 
     todos.forEach(todo => {
         if (todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin') {
-            let periodCheckinCount = 0;
-            const completedDates = todo.completed_dates || [];
-            completedDates.forEach(dateValue => {
-                if (period === 'day') {
-                    if (dateValue.startsWith(targetPeriod)) periodCheckinCount++;
-                } else if (period === 'week') {
-                    const checkDate = new Date(dateValue);
-                    if (!isNaN(checkDate.getTime()) && getISOWeekString(checkDate) === targetPeriod) {
-                        periodCheckinCount++;
-                    }
-                } else if (dateValue.startsWith(targetPeriod)) {
-                    periodCheckinCount++;
-                }
-            });
+            const periodCheckinCount = [...new Set(todo.completed_dates || [])].filter(value =>
+                statsPeriodKey(value, period) === targetPeriod).length;
 
-            if (todo.target_count !== null) {
+            if (todo.target_count != null) {
                 completedCount += Math.min(todo.target_count, periodCheckinCount);
                 totalCount += todo.target_count;
             } else {

@@ -6,6 +6,7 @@ import com.todo.app.data.model.TodoData
 import java.io.File
 import java.time.LocalDate
 import kotlinx.coroutines.runBlocking
+import org.junit.Assume.assumeNotNull
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Rule
@@ -104,6 +105,67 @@ class RecordSandboxTest {
         assertTrue(markdown.contains("\\<b\\>计划\\<\\/b\\>"))
         assertTrue(markdown.contains("2026-11-15"))
         assertEquals(WeeklyPlanning.TextDifference("😀第", "1", "2", "天🙂"), WeeklyPlanning.compare("😀第1天🙂", "😀第2天🙂"))
+    }
+
+    @Test fun focusOnlyVersionsReplayWithLegacyRecordsAndKeepTheirOwnHistory() = runBlocking {
+        fun save(version: Int, tip: String?, focus: String?, days: String = "", day: String = week) = action("save") {
+            put("week", day); put("versionId", id(version)); put("reason", "")
+            put("tips", JsonArray(listOfNotNull(tip).map(::JsonPrimitive)))
+            put("days", JsonArray((listOf(days) + List(6) { "" }).map(::JsonPrimitive)))
+            if (focus != null) put("focus", focus)
+        }
+        val legacy = RecordSandbox(folder.root, target(1))
+        assertFalse(legacy.change(save(8, null, null, "旧计划", "2026-11-02"), legacy.open().revision).preview.focusHistory)
+        legacy.close()
+        val session = RecordSandbox(folder.root, target(1), localOnly = true)
+        val initial = session.open()
+        assertEquals("enabled", initial.focusStatus)
+        assertFalse(initial.canEnableFocus)
+        val first = session.change(save(9, null, "准备 <例题>\n第二行 😀"), initial.revision)
+        assertTrue(first.preview.focusHistory)
+        val tip = WeeklyPlanning.state(first.view(), week).tips.single()
+        val second = session.change(save(10, tip, "新的重点"), first.revision)
+        val current = WeeklyPlanning.state(second.view(), week)
+        assertEquals("新的重点", current.current?.get("focus")?.jsonPrimitive?.content)
+        assertEquals("准备 <例题>\n第二行 😀", current.history.first().getValue("focus").jsonPrimitive.content)
+        assertEquals("", WeeklyPlanning.state(second.view(), "2026-11-02").current?.get("focus")?.jsonPrimitive?.content)
+        val date = LocalDate.parse(week)
+        val export = WeeklyPlanning.export(second.view(), date, date.plusDays(7), WeeklyPlanning.ExportOptions(true, false, true))
+        assertEquals(1, export.days.values.flatten().count { it == "### 本周重点" })
+        assertTrue(export.history.contains("准备 \\<例题\\>\n第二行 😀"))
+        session.close()
+        assertEquals(second.view(), RecordSandbox(folder.root, target(1), localOnly = true).open().view())
+    }
+
+    @Test fun ratingBaselineAllowsUnrelatedWritesAndRejectsConcurrentFirstRating() = runBlocking {
+        val session = RecordSandbox(folder.root, target(1), localOnly = true)
+        fun rate(day: String, score: Int) = action("rate") {
+            put("date", day); put("score", score); put("expectedRating", JsonNull)
+        }
+        val initial = session.open().revision
+        session.change(rate("2026-11-10", 2), initial)
+        val saved = session.change(rate(week, 4), initial)
+        val refused = runCatching { session.change(rate(week, 5), initial) }
+        assertTrue(refused.exceptionOrNull()?.message.orEmpty().contains("当日评分已更新"))
+        assertEquals(saved.revision, session.open().revision)
+        assertEquals("4.0", WeeklyPlanning.average(session.open().view(), week, week))
+    }
+
+    @Test fun planningFocusRealWebDav() = runBlocking {
+        val text = System.getenv("TODO_PLANNING_FOCUS_PROBE")
+        assumeNotNull(text)
+        val fixture = Json.parseToJsonElement(requireNotNull(text)).jsonObject.getValue("binding").jsonObject
+        val pin = fixture.getValue("pin").jsonObject
+        val target = RecordSandboxTarget(pin.getValue("dataset_id").jsonPrimitive.content, id(99), "1970-01-01T00:00:00Z")
+        val binding = target.binding(CLOUD_PLANNING_OPERATION_SET)
+        val transport = RecordWebDavTransport(fixture.getValue("endpoint").jsonPrimitive.content,
+            fixture.getValue("directory").jsonArray.map { it.jsonPrimitive.content },
+            fixture.getValue("username").jsonPrimitive.content, fixture.getValue("password").jsonPrimitive.content,
+            binding.pin, initialization = binding)
+        assertTrue(transport.list().isEmpty())
+        assertFalse(transport.readFocus())
+        transport.enableFocus()
+        assertTrue(transport.readFocus())
     }
 
     @Test fun clearedLegacyRatingDoesNotBlockCloudButSavedPlansAndValidRatingsDo() = runBlocking {

@@ -5,7 +5,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke
@@ -43,7 +42,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
@@ -142,6 +140,10 @@ internal fun buildUpdatedTodo(
     } else {
         content
     }
+    // 未修改完成信息时保留旧值（含缺失时间），显式修改日期或时间时必须提交草稿。
+    val preserveCompletion = mappedTaskType == todo.taskType && targetCount == todo.targetCount &&
+        completedDates == todo.completedDates && subtasks == todo.subtasks &&
+        parentCompleted == todo.completed && parentCompletedAt == todo.completedAt
     return todo.copy(
         content = finalContent.takeIf { it.isNotBlank() } ?: todo.content,
         date = finalDate,
@@ -150,8 +152,8 @@ internal fun buildUpdatedTodo(
         taskType = mappedTaskType,
         targetCount = targetCount,
         completedDates = completedDates,
-        completed = isCompletedNow,
-        completedAt = if (isCompletedNow) {
+        completed = if (preserveCompletion) todo.completed else isCompletedNow,
+        completedAt = if (preserveCompletion) todo.completedAt else if (isCompletedNow) {
             if (mappedTaskType == TaskType.WEEKLY_CHECKIN || mappedTaskType == TaskType.MONTHLY_CHECKIN) {
                 todo.completedAt ?: nowIso()
             } else {
@@ -262,9 +264,7 @@ fun EditTodoDialog(
         )
         if (!saving) saveScope.launch {
             saving = true
-            try { onConfirm(updated.copy(label = com.todo.app.data.model.Learning.label(learningLabel),
-                completed = if (updated.taskType == todo.taskType && targetCount == todo.targetCount && completedDates == todo.completedDates && subtasks == todo.subtasks) todo.completed else updated.completed,
-                completedAt = if (updated.taskType == todo.taskType && targetCount == todo.targetCount && completedDates == todo.completedDates && subtasks == todo.subtasks) todo.completedAt else updated.completedAt), baselineData); onDismiss() }
+            try { onConfirm(updated.copy(label = com.todo.app.data.model.Learning.label(learningLabel)), baselineData); onDismiss() }
             catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Toast.makeText(saveContext, "保存失败：" + e.message, Toast.LENGTH_LONG).show()
@@ -719,7 +719,7 @@ private fun EditTodoSubtasksSection(
                             Text(
                                 text = sub.content,
                                 modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-                                color = if (sub.completed) Color.Gray else MaterialTheme.colorScheme.onSurface,
+                                color = if (sub.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                                 textDecoration = if (sub.completed) TextDecoration.LineThrough else null
                             )
                             IconButton(onClick = { onEditingSubtaskIdChange(sub.id) }) {
@@ -816,7 +816,7 @@ fun BasicTextFieldWithHint(
             modifier = Modifier.fillMaxWidth()
         )
         if (value.isEmpty()) {
-            Text(text = hint, color = Color.Gray, style = textStyle)
+            Text(text = hint, color = MaterialTheme.colorScheme.onSurfaceVariant, style = textStyle)
         }
     }
 }
@@ -931,7 +931,7 @@ fun EditMonthCheckinGrid(
                 ) {
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )
                 }

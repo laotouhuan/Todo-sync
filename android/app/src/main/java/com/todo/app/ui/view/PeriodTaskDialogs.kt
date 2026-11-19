@@ -1,5 +1,7 @@
 package com.todo.app.ui.view
 
+import com.todo.app.ui.theme.SupportingText
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -46,7 +48,7 @@ fun PeriodImportDialog(type: String, viewModel: TodoViewModel, onDismiss: () -> 
     val visibleCandidates = candidates.filter { (showEarlier || it.choices.any { todo -> todo.date == previous }) && it.content.contains(search.trim()) }
     PeriodDialog("从往期导入 ${if (type == "week") "周任务" else "月任务"}", onDismiss) {
         OutlinedTextField(search, { search = it }, label = { Text("搜索任务") })
-        if (visibleCandidates.isEmpty()) Text(when {
+        if (visibleCandidates.isEmpty()) SupportingText(when {
             search.isNotBlank() -> "没有匹配的任务"
             showEarlier -> "暂无可导入的往期任务"
             else -> "上一期暂无可导入的任务"
@@ -57,7 +59,7 @@ fun PeriodImportDialog(type: String, viewModel: TodoViewModel, onDismiss: () -> 
                 Text(candidate.content + if (candidate.exists) " · 本期已存在" else "")
             }
             if (TaskSeriesLogic.series(data, candidate.choices.first().id) != null) {
-                Text("长期任务 · 导入后自动关联", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SupportingText("长期任务 · 导入后自动关联")
             }
             val referenceOptions = candidate.choices.filter { showEarlier || it.date == previous }.map { todo ->
                 val duplicate = candidate.choices.count { it.date == todo.date } > 1
@@ -67,7 +69,7 @@ fun PeriodImportDialog(type: String, viewModel: TodoViewModel, onDismiss: () -> 
                 references[candidate.key] = candidate.choices.first { it.id == id }
                 selected[candidate.key] = true
             }
-            if (data.todos.any { !it.deleted && it.date == target && TaskSeriesLogic.series(data, it.id) == null && TaskSeriesLogic.name(it.content) == TaskSeriesLogic.name(candidate.content) }) Text("本期已有同名独立任务，可通过周期关联核对；仍可导入不同任务。")
+            if (data.todos.any { !it.deleted && it.date == target && TaskSeriesLogic.series(data, it.id) == null && TaskSeriesLogic.name(it.content) == TaskSeriesLogic.name(candidate.content) }) SupportingText("本期已有同名独立任务，可通过周期关联核对；仍可导入不同任务。")
             HorizontalDivider()
         }
         if (!showEarlier && candidates.any { it.choices.any { todo -> todo.date.orEmpty() < previous } }) {
@@ -137,7 +139,7 @@ fun PeriodAssociationDialog(todoId: String, viewModel: TodoViewModel, onSaved: (
                 && TaskSeriesLogic.range(it.date.orEmpty()) != null && TaskSeriesLogic.series(data, it.id)?.deleted != true
                 && (summary.series == null || TaskSeriesLogic.series(data, it.id)?.id != summary.series.id) }.sortedByDescending { it.date }
             val visible = candidates.filter { (showEarlier || search.isNotBlank() || it.date.orEmpty() >= previous) && TaskSeriesLogic.display(data, it.id).contains(search.trim()) }
-            if (visible.isEmpty()) Text("没有可选任务", style = MaterialTheme.typography.bodySmall)
+            if (visible.isEmpty()) SupportingText("没有可选任务")
             visible.forEach { candidate ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(selected[candidate.id] == true, { selected[candidate.id] = it }, enabled = !busy)
@@ -160,7 +162,7 @@ fun PeriodAssociationDialog(todoId: String, viewModel: TodoViewModel, onSaved: (
                 Column(Modifier.weight(1f)) {
                     Text(range.first.toString(), style = numberStyle)
                     Text("至 ${range.second.minusDays(1)}", style = numberStyle)
-                    if (!available) Text("任务已删除或不可用", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (!available) SupportingText("任务已删除或不可用")
                 }
                 Text(if (period == todo.date) "本期" else "", modifier = Modifier.width(32.dp), style = numberStyle)
             }
@@ -177,7 +179,7 @@ fun PeriodAssociationDialog(todoId: String, viewModel: TodoViewModel, onSaved: (
             val historic = p.links.filter { l -> p.members.none { it.id == l.todo_id } }
             if (historic.isNotEmpty()) Text("另有 ${historic.size} 条历史关联将迁移：${historic.joinToString { it.period }}")
             if (p.duplicates.isNotEmpty()) Text("同一周期存在重复任务，暂不能合并")
-            else if (noChange || p.members.size < 2) Text("没有需要新增的关联")
+            else if (noChange || p.members.size < 2) SupportingText("没有需要新增的关联")
             else Button(enabled = !busy, onClick = { scope.launch {
                 busy = true; val result = viewModel.changePeriods { TaskSeriesLogic.associate(it, p, selection, generate = { reservedId }) }; busy = false
                 if (result.isSuccess) { onSaved(); preview = null; onDismiss() } else error = result.exceptionOrNull()?.message
@@ -246,7 +248,7 @@ fun PeriodComparisonDialog(todoId: String, viewModel: TodoViewModel, onDismiss: 
     val days = listOf(first, second).mapIndexed { index, p -> PeriodComparisonChart.days(results[index], p, ends[index], now) }
     val options = periods.map { PeriodSelectOption(it, TaskSeriesLogic.description(it)) }
     PeriodDialog("${series.content} · 往期对比", onDismiss) {
-        Text("按已保存记录比较；编辑页未保存修改不计入。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        SupportingText("按已保存记录比较；编辑页未保存修改不计入。")
         PeriodPicker("查看周期", first, options) { first = it }
         PeriodPicker("对比周期", second, options) { second = it }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

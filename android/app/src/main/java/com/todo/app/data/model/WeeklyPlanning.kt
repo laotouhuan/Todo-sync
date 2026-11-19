@@ -16,6 +16,7 @@ object WeeklyPlanning {
     private val defaults = listOf(
         buildJsonObject {
             put("base_version_id", JsonNull)
+            put("focus", "")
             put("days", JsonArray(List(7) { JsonPrimitive("") }))
             put("change_reason", "")
             put("deleted", false)
@@ -72,6 +73,10 @@ object WeeklyPlanning {
             val calendar = List(7) { monday.plusDays(it.toLong()) }
             if (calendar.none { it >= start && it < end }) continue
             val plan = state(normalized, week)
+            val focus = plan.current?.text("focus").orEmpty()
+            if (options.includePlans && focus.isNotBlank()) {
+                append(calendar.first { it >= start && it < end }, "### 本周重点", "", escape(focus), "")
+            }
             if (options.includePlans) calendar.forEachIndexed { index, day ->
                 if (day >= start && day < end) {
                     val text = when (plan.status) {
@@ -87,6 +92,9 @@ object WeeklyPlanning {
                 for (version in plan.history) {
                     history.addAll(listOf("#### ${version.text("created_at")}", "", "版本：${version.id()}", "",
                         "修订原因：${escape(version.text("change_reason")).ifEmpty { "未填写" }}", ""))
+                    if (version.text("focus").isNotBlank()) {
+                        history.addAll(listOf("**本周重点**", "", escape(version.text("focus")), ""))
+                    }
                     calendar.forEachIndexed { index, day -> history.addAll(listOf("**$day**", "",
                         escape(version.getValue("days").jsonArray[index].jsonPrimitive.content).ifEmpty { "未安排" }, "")) }
                 }
@@ -102,6 +110,11 @@ object WeeklyPlanning {
         it.jsonPrimitive.also { value -> require(value.isString && uuid.matches(value.content)) }.content
     }
     private fun canonical(row: JsonObject) = render(parse(row.toString().encodeToByteArray(), strict = false))
+    // 默认值仅用于业务校验，原始记录仍用于摘要和父引用。
+    private fun comparableOperation(operation: JsonObject): JsonObject {
+        val version = operation["version"]?.jsonObject ?: return operation
+        return JsonObject(operation + ("version" to JsonObject(mapOf("focus" to JsonPrimitive("")) + version)))
+    }
     private fun clock(value: String) = NormalTodoConflict.timestampMillis(value)
 
     private fun date(value: String): LocalDate {
@@ -131,6 +144,7 @@ object WeeklyPlanning {
             require(row.getValue("base_version_id") == JsonNull || uuid.matches(row.text("base_version_id")))
             val days = row.getValue("days").jsonArray
             require(days.size == 7 && days.all { it.jsonPrimitive.isString })
+            row.text("focus")
             row.text("change_reason")
             if (row.getValue("deleted_at") != JsonNull) {
                 require(row.flag("deleted"))
@@ -283,7 +297,8 @@ object WeeklyPlanning {
             require(current.candidates.none { it.id() == versionId }) { "WEEKLY_PLAN_STALE" }
             return buildJsonObject {
                 put("type", "planning.version.delete")
-                put("version", JsonObject(target + mapOf("deleted" to JsonPrimitive(true),
+                val version = if (target.text("focus").isEmpty()) target - "focus" else target
+                put("version", JsonObject(version + mapOf("deleted" to JsonPrimitive(true),
                     "updated_at" to JsonPrimitive(at), "deleted_at" to JsonPrimitive(at))))
             }
         }
@@ -301,14 +316,16 @@ object WeeklyPlanning {
             return buildJsonObject { put("type", "planning.selection.resolve"); put("selection", selection) }
         }
         val days = action.getValue("days").jsonArray
+        val focus = if ("focus" in action) action.text("focus") else current.current?.text("focus").orEmpty()
         require(kind == "save" && current.status in listOf("empty", "current", "restart") &&
             days.size == 7 && days.all { it.jsonPrimitive.isString } &&
-            (current.status == "current" || days.any { it.jsonPrimitive.content.isNotBlank() }))
+            (current.status == "current" || focus.isNotBlank() || days.any { it.jsonPrimitive.content.isNotBlank() }))
         require(merge(data).rows(keys[0]).none { it.id() == versionId }) { "WEEKLY_PLAN_ID_CONFLICT" }
         val version = buildJsonObject {
             put("id", versionId)
             put("week_start", week)
             put("base_version_id", current.current?.id()?.let(::JsonPrimitive) ?: JsonNull)
+            if (focus.isNotEmpty() || "focus" in action) put("focus", focus)
             put("days", days)
             put("change_reason", action.text("reason"))
             put("created_at", at)
@@ -370,6 +387,7 @@ object WeeklyPlanning {
                         put("week", row.text("week_start"))
                         put("versionId", row.id())
                         put("days", row.getValue("days"))
+                        row["focus"]?.let { put("focus", it) }
                         put("reason", row.text("change_reason"))
                         put("tips", requireNotNull(selection).getValue("parent_selection_ids"))
                     }
@@ -398,7 +416,9 @@ object WeeklyPlanning {
                 }
             }
             val expected = change(view, action, record.id, record.created_at)
-            require(expected != null && canonical(expected) == canonical(operation)) { "INVALID_PLANNING_OPERATION" }
+            require(expected != null && canonical(comparableOperation(expected)) == canonical(comparableOperation(operation))) {
+                "INVALID_PLANNING_OPERATION"
+            }
             changes[record.id] = operation
         }
     }

@@ -323,9 +323,13 @@ class TodoViewModel(private val repository: TodoRepository, val configManager: C
         if (target is ActiveSource.Collaboration) return Result.failure(IllegalStateException("协作清单仅允许查看和新增任务"))
         return personalWrite(target) { repository.saveTimeEntry(entry, expected) }
     }
-    suspend fun saveDailyReview(review: com.todo.app.data.model.DailyReview, target: ActiveSource = activeSource.value): Result<Unit> {
+    internal suspend fun saveDailyReview(review: com.todo.app.data.model.DailyReview, target: ActiveSource,
+        expected: com.todo.app.data.model.DailyReview?, settings: com.todo.app.data.repository.PlanningSettings?): Result<com.todo.app.data.model.DailyReview> {
         if (target is ActiveSource.Collaboration) return Result.failure(IllegalStateException("协作清单仅允许查看和新增任务"))
-        return personalWrite(target) { repository.saveDailyReview(review) }
+        return personalWrite(target) {
+            if (activeSource.value != target) Result.failure(IllegalStateException("清单已切换，请重新打开"))
+            else repository.saveDailyReview(review, expected, settings)
+        }
     }
     suspend fun changePeriods(change: (TodoData) -> TodoData): Result<Unit> {
         personalTarget(activeSource.value)

@@ -21,7 +21,8 @@ export function editTimelineSubtask(todo, subtask, save) {
     const initialValue = completed.value;
     const error = element('p'); error.className = 'learning-error'; dialog.append(error);
     const confirm = element('button', '保存'), close = element('button', '取消');
-    confirm.className = close.className = 'learning-button';
+    confirm.className = 'ui-button primary';
+    close.className = 'ui-button';
     confirm.onclick = async () => {
         confirm.disabled = close.disabled = true;
         try {
@@ -48,8 +49,9 @@ export function selectTimelineRecord(entries, open) {
     dialog.append(element('h3', '选择计时记录'));
     unique.forEach(entry => {
         const button = element('button', `${entry.display_content || entry.task_content_snapshot} · ${new Date(entry.started_at).toLocaleString()} — ${entry.ended_at ? new Date(entry.ended_at).toLocaleString() : '进行中'}`);
-        button.className = 'learning-button'; button.onclick = () => { dialog.close(); open(entry); }; dialog.append(button);
+        button.className = 'ui-button'; button.onclick = () => { dialog.close(); open(entry); }; dialog.append(button);
     });
-    const close = element('button', '关闭'); close.onclick = () => dialog.close(); dialog.append(close);
+    const close = element('button', '关闭'); close.className = 'ui-button';
+    close.onclick = () => dialog.close(); dialog.append(close);
     dialog.addEventListener('close', () => dialog.remove()); document.body.append(dialog); dialog.showModal();
 }

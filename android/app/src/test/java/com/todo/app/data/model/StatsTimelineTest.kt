@@ -112,15 +112,40 @@ class StatsTimelineTest {
             assertTrue(StatsTimeline.arcs(listOf(it), ref, "day", day, zone).isEmpty())
         }
     }
+    @Test fun checkinDurationSplitsAtSlotAndPeriodBoundariesAndUsesVisibleCheckinTasks() {
+        val weekly = Todo.create("周打卡").copy(id = "task", taskType = TaskType.WEEKLY_CHECKIN)
+        val monthly = Todo.create("月打卡").copy(id = "month", taskType = TaskType.MONTHLY_CHECKIN,
+            completedDates = listOf("2026-09-10T20:00:00+08:00"))
+        val normal = Todo.create("普通").copy(id = "normal")
+        val records = listOf(
+            entry("weekly", "2026-09-10T05:30:00+08:00", "2026-09-10T07:00:00+08:00"),
+            entry("monthly", "2026-09-10T11:59:59.999+08:00", "2026-09-10T12:30:00+08:00")
+                .copy(task_ref = TaskReference(monthly.id)),
+            entry("normal").copy(task_ref = TaskReference(normal.id)),
+            entry("cross", "2026-09-09T23:00:00+08:00", "2026-09-10T00:30:00+08:00"),
+            entry("deleted", "2026-09-10T18:00:00+08:00", "2026-09-10T19:00:00+08:00").copy(deleted = true),
+            entry("running", "2026-09-10T23:00:00+08:00", null),
+            entry("conflict", "2026-09-10T16:00:00+08:00", "2026-09-10T17:00:00+08:00"),
+            entry("other", "2026-09-10T20:00:00+08:00", "2026-09-10T21:00:00+08:00")
+                .copy(task_ref = TaskReference(weekly.id, "collaboration", "x"))
+        )
+        val arcs = StatsTimeline.arcs(records, ref, "day", day, zone, conflicts = setOf("conflict"))
+        assertEquals(listOf(3600000L, 3600001L, 1800000L, 0L), StatsTimeline.checkinDurationBySlot(arcs, listOf(weekly, monthly, normal)))
+        assertEquals(listOf(0L, 1L, 1800000L, 0L), StatsTimeline.checkinDurationBySlot(arcs, listOf(monthly, normal)))
+    }
+
     @Test fun daylightSavingSegmentsKeepRealDuration() {
         val ny = ZoneId.of("America/New_York")
+        val checkins = listOf(Todo.create("周打卡").copy(id = "task", taskType = TaskType.WEEKLY_CHECKIN))
         val spring = entry("a", "2026-03-08T00:00:00-05:00", "2026-03-09T00:00:00-04:00")
         val s = StatsTimeline.arcs(listOf(spring), ref, "day", LocalDate.parse("2026-03-08"), ny)
         assertEquals(listOf(0f to 120f, 180f to 1440f), s.map { it.startMinute to it.endMinute })
+        assertEquals(listOf(5, 6, 6, 6).map { it * 3600000L }, StatsTimeline.checkinDurationBySlot(s, checkins))
         assertEquals(23 * 3600000L, s.first().part.duration)
         val fall = entry("b", "2026-11-01T00:00:00-04:00", "2026-11-02T00:00:00-05:00")
         val f = StatsTimeline.arcs(listOf(fall), ref, "day", LocalDate.parse("2026-11-01"), ny)
         assertEquals(listOf(0f to 120f, 60f to 1440f), f.map { it.startMinute to it.endMinute })
+        assertEquals(listOf(7, 6, 6, 6).map { it * 3600000L }, StatsTimeline.checkinDurationBySlot(f, checkins))
         assertEquals(25 * 3600000L, f.first().part.duration)
     }
 }

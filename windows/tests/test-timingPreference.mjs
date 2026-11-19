@@ -70,6 +70,22 @@ const entry = { id: 'e', task_content_snapshot: '测试计时', task_ref: { todo
 
 describe('统一计时入口实际交互', () => {
     const candidates = dialog => dialog.querySelector('.learning-timer-candidates').children.filter(child => child.tag === 'button');
+    it('开始计时仍须等待云端核对结束，再保存并关闭选择面板', async () => {
+        const h = harness();
+        h.state.todoData.todos = [{ id: 't', content: '本地任务', completed: false }];
+        h.api.refresh(); await h.choose('开始计时'); await h.choose('选择其他任务');
+        const dialog = h.dialogs.at(-1);
+        let release;
+        h.sync(() => new Promise(resolve => { release = resolve; }));
+        const pending = candidates(dialog)[0].action();
+        await new Promise(resolve => setImmediate(resolve));
+        try {
+            assert.equal(dialog.open, true, '云端核对未完成时保留选择面板');
+            assert.equal(h.state.todoData.time_entries.length, 0);
+        } finally { release?.(); await pending; }
+        assert.equal(dialog.open, false);
+        assert.equal(h.state.todoData.time_entries.length, 1);
+    });
     it('任务行仅显示运行标记，顶部入口提供最近列表及全部任务搜索', async () => {
         const h = harness();
         h.state.todoData.todos = Array.from({ length: 7 }, (_, i) => ({ id: String(i), content: `任务 ${i}`, completed: false, order: i }));

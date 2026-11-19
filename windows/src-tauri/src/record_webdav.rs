@@ -171,6 +171,14 @@ async fn execute(
             "records/".into(),
             None,
         ),
+        ("read_capabilities" | "create_capabilities", None, None) => (
+            capability_method(action), "capabilities".into(), None,
+        ),
+        ("read_focus" | "create_focus", None, None) => (
+            capability_method(action),
+            format!("capabilities/weekly-plan-focus-v1.{}", binding.pin.descriptor_sha256),
+            None,
+        ),
         ("read", Some(name), None) if valid_record_name(&name) => (Method::GET, name, None),
         ("write" | "write_planning", Some(name), Some(content)) if valid_record_name(&name) => {
             let raw = bytes(&content)?;
@@ -207,7 +215,10 @@ async fn execute(
         .send()
         .await
         .map_err(|_| "RECORD_DAV_NETWORK")?;
-        if response.status() != 200 || digest(&bounded(response).await?) != *hash {
+        if response.status() != 200 {
+            return Err(format!("RECORD_DAV_HTTP_{}", response.status().as_u16()));
+        }
+        if digest(&bounded(response).await?) != *hash {
             return Err("RECORD_DAV_TARGET_MISMATCH".into());
         }
     }
@@ -215,9 +226,9 @@ async fn execute(
         .join(&relative)
         .map_err(|_| "RECORD_DAV_INVALID_TARGET")?;
     let mut builder = request(method, url);
-    if action == "list" {
+    if matches!(action, "list" | "read_capabilities" | "read_focus") {
         builder = builder
-            .header("Depth", "1")
+            .header("Depth", if action == "list" { "1" } else { "0" })
             .header("Content-Type", "application/xml")
             .body(PROPFIND);
     } else if let Some(raw) = raw {
@@ -229,14 +240,19 @@ async fn execute(
     let response = builder.send().await.map_err(|_| "RECORD_DAV_NETWORK")?;
     let status = response.status().as_u16();
     match (action, status) {
-        ("list", 207) => String::from_utf8(bounded(response).await?)
+        ("list" | "read_capabilities" | "read_focus", 207) => String::from_utf8(bounded(response).await?)
             .map(Some)
             .map_err(|_| "RECORD_DAV_INVALID_LIST".into()),
         ("read", 200) => Ok(Some(STANDARD.encode(bounded(response).await?))),
         ("read", 404) | ("write", 201 | 412) | ("write_planning", 201 | 204 | 412) => Ok(None),
+        ("read_capabilities" | "read_focus", 404) | ("create_capabilities" | "create_focus", 201 | 405) => Ok(None),
         ("write", 204) => Err("RECORD_DAV_CREATE_UNVERIFIED".into()),
         _ => Err(format!("RECORD_DAV_HTTP_{status}")),
     }
+}
+
+fn capability_method(action: &str) -> Method {
+    Method::from_bytes(if action.starts_with("read_") { b"PROPFIND" } else { b"MKCOL" }).unwrap()
 }
 
 #[cfg(test)]
@@ -248,6 +264,62 @@ mod tests {
         net::TcpListener,
         thread,
     };
+
+    #[test]
+    fn target_verification_distinguishes_http_failure_from_changed_bytes() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/native-record-journal/series-causal-replay.json")).unwrap();
+        let binding: WebDavBinding = serde_json::from_value(json!({
+            "endpoint": "https://example.test/dav/", "directory": ["synthetic"],
+            "username": "fake", "password": "fake", "pin": fixture["pin"]
+        })).unwrap();
+        for status in [429, 503, 404, 401, 200] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = Url::parse(&format!("http://{}/dataset/", listener.local_addr().unwrap())).unwrap();
+            let server = thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                let mut reader = BufReader::new(&mut socket);
+                loop {
+                    let mut line = String::new();
+                    assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+                    if line == "\r\n" { break; }
+                }
+                write!(socket, "HTTP/1.1 {status} Test\r\nConnection: close\r\nContent-Length: 0\r\n\r\n").unwrap();
+            });
+            let result = tauri::async_runtime::block_on(async {
+                let client = Client::builder().no_proxy().timeout(Duration::from_secs(3)).build().unwrap();
+                execute(&client, &binding, url, "list", None, None).await
+            });
+            server.join().unwrap();
+            let expected = if status == 200 { "RECORD_DAV_TARGET_MISMATCH".to_owned() }
+                else { format!("RECORD_DAV_HTTP_{status}") };
+            assert_eq!(result.unwrap_err(), expected);
+        }
+    }
+
+    #[test]
+    #[ignore = "使用临时隔离目录进行真实 WebDAV 验收"]
+    fn planning_focus_real_webdav() {
+        let fixture: Value = serde_json::from_str(
+            &std::env::var("TODO_PLANNING_FOCUS_PROBE").expect("需要隔离测试配置"),
+        ).expect("隔离测试配置格式错误");
+        let binding: WebDavBinding = serde_json::from_value(fixture["binding"].clone()).expect("隔离目标无效");
+        let descriptor = fixture["descriptor"].as_str().unwrap().to_owned();
+        let baseline = fixture["baseline"].as_str().unwrap().to_owned();
+        tauri::async_runtime::block_on(async {
+            let dataset = binding.dataset_url().unwrap();
+            initialize_planning_webdav(binding, descriptor, baseline).await.unwrap();
+            let binding: WebDavBinding = serde_json::from_value(fixture["binding"].clone()).unwrap();
+            let client = dav_client().unwrap();
+            for (read, create) in [("read_capabilities", "create_capabilities"), ("read_focus", "create_focus")] {
+                assert!(execute(client, &binding, dataset.clone(), read, None, None).await.unwrap().is_none());
+                execute(client, &binding, dataset.clone(), create, None, None).await.unwrap();
+                let xml = execute(client, &binding, dataset.clone(), read, None, None).await.unwrap().unwrap();
+                assert!(xml.contains("collection"));
+            }
+        });
+    }
 
     #[test]
     fn planning_initialization_creates_only_pinned_objects_and_reads_back_204() {

@@ -1,5 +1,7 @@
 package com.todo.app.ui.view
 
+import com.todo.app.ui.theme.SupportingText
+
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -20,10 +22,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
@@ -34,6 +37,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonElement
 import java.time.*
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -63,7 +67,7 @@ fun CollaborationSubmissionBanner(viewModel: TodoViewModel) {
     submissions.forEach { submission ->
         Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-                Text("${submission.name}：新增结果待确认", fontSize = 12.sp)
+                Text("${submission.name}：新增结果待确认", style = MaterialTheme.typography.bodySmall)
                 Row {
                     TextButton(enabled = !submission.sending, onClick = { viewModel.retryCollaborationSubmission(submission.sourceId) }) {
                         Text(if (submission.sending) "提交中…" else "重试此次提交")
@@ -89,7 +93,7 @@ private fun LearningClock(entry: TimeEntry) {
         }
     }
     Text(Learning.duration(now - (Learning.instant(entry.started_at)?.toEpochMilli() ?: now), true),
-        fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
+        fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall, maxLines = 1)
 }
 
 @Composable
@@ -106,7 +110,7 @@ fun LearningTimer(todo: Todo, viewModel: TodoViewModel) {
         if (entry != null) LearningClock(entry)
         return
     }
-    if (!todo.deleted && entry != null) Text("计时中", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
+    if (!todo.deleted && entry != null) Text("计时中", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
 }
 
 @Composable
@@ -140,9 +144,9 @@ fun LearningBanner(viewModel: TodoViewModel) {
         Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(if (active.size > 1) "${active.size} 条计时待处理" else learning.display(active.first()),
-                    Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
+                    Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
                 if (active.size == 1) {
-                    if (learning.pending(active.first()) == null) LearningClock(active.first()) else Text(learning.pending(active.first()).orEmpty(), fontSize = 11.sp)
+                    if (learning.pending(active.first()) == null) LearningClock(active.first()) else Text(learning.pending(active.first()).orEmpty(), style = MaterialTheme.typography.labelSmall)
                     if (!learning.readOnly && learning.pending(active.first()) == null) TextButton(enabled = !busy, onClick = click@ {
                         if (viewModel.activeSource.value != source) return@click
                         val id = active.first().id
@@ -194,7 +198,7 @@ private fun LearningTaskPicker(viewModel: TodoViewModel, onDismiss: () -> Unit) 
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp)) }
             TaskSeriesLogic.duplicateTimingSeries(data).forEach { Text("${it.content}：本期存在重复任务，请到周期关联中核对") }
-            if (candidates.isEmpty()) Text(if (other) "暂无匹配的可计时任务" else "暂无可继续计时的最近任务，请选择其他任务",
+            if (candidates.isEmpty()) SupportingText(if (other) "暂无匹配的可计时任务" else "暂无可继续计时的最近任务，请选择其他任务",
                 modifier = Modifier.padding(vertical = 16.dp))
             LazyColumn(Modifier.weight(1f, fill = false)) {
                 items(candidates, key = { it.id }) { todo ->
@@ -234,7 +238,7 @@ fun LearningRecordsDialog(viewModel: TodoViewModel, ids: List<String>, onDismiss
     if (!timingEnabled) return
     AlertDialog(onDismissRequest = onDismiss, title = { Text("计时记录") }, text = {
         Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
-            if (!currentLearningData(viewModel).readOnly) Text("有多条运行记录时，请补上真实结束时间或删除误开记录。", fontSize = 12.sp)
+            if (!currentLearningData(viewModel).readOnly) SupportingText("有多条运行记录时，请补上真实结束时间或删除误开记录。")
             LearningRecords(viewModel, ids = ids)
         }
     }, confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } })
@@ -296,7 +300,7 @@ fun LearningRecords(viewModel: TodoViewModel, todo: Todo? = null, ids: List<Stri
             Text("${learning.display(entry)} · ${resolved[entry.id]?.label_snapshot ?: "未分类"}${if (entry.task_ref !in tasks) " · 原任务不可用" else if (tasks[entry.task_ref]?.deleted == true || (entry.task_ref.source_type == "personal" && entry.task_ref.source_id == null && TaskSeriesLogic.isDeleted(data, entry.task_ref.todo_id))) " · 原任务已删除" else ""}", style = MaterialTheme.typography.bodyLarge)
             Text("开始：${displayLearningTime(entry.started_at)}", style = MaterialTheme.typography.bodyMedium)
             Text("结束：${entry.ended_at?.let(::displayLearningTime) ?: learning.pending(entry) ?: "进行中"}", style = MaterialTheme.typography.bodyMedium)
-            if (entry.ended_at != null) Text(Learning.duration((Learning.instant(entry.ended_at)?.toEpochMilli() ?: 0) - (Learning.instant(entry.started_at)?.toEpochMilli() ?: 0)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (entry.ended_at != null) SupportingText(Learning.duration((Learning.instant(entry.ended_at)?.toEpochMilli() ?: 0) - (Learning.instant(entry.started_at)?.toEpochMilli() ?: 0)))
             if (entry.id in learning.conflicts) Text("待核对：与其他计时重叠，未计入统计")
             if (!learning.readOnly) Row {
                 TextButton(onClick = { editing = entry }) { Text("编辑记录") }
@@ -339,7 +343,7 @@ internal fun TimeEntryEditor(entry: TimeEntry, viewModel: TodoViewModel, onDismi
     AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("编辑计时记录") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("所属任务：${learning.display(entry)}")
-            Text("日期和时间格式：2026-09-10 09:30:00", fontSize = 12.sp)
+            SupportingText("日期和时间格式：2026-09-10 09:30:00")
             OutlinedTextField(start, { start = it }, label = { Text("开始日期和时间") }, enabled = !busy)
             OutlinedTextField(end, { end = it }, label = { Text("结束日期和时间（运行中可留空）") }, enabled = !busy)
             Text("所属任务标签：$currentLabel（在任务编辑页修改）", style = MaterialTheme.typography.bodyMedium)
@@ -359,79 +363,129 @@ internal fun TimeEntryEditor(entry: TimeEntry, viewModel: TodoViewModel, onDismi
 }
 
 @Composable
+internal fun CollapsibleInsightText(text: String, lines: Int, hasMore: Boolean = false, full: (@Composable () -> Unit)? = null) {
+    var expanded by remember(text) { mutableStateOf(false) }
+    var overflow by remember(text) { mutableStateOf(false) }
+    if (expanded && full != null) full()
+    else Text(text, maxLines = if (expanded) Int.MAX_VALUE else lines, overflow = TextOverflow.Ellipsis,
+        onTextLayout = { if (!expanded) overflow = it.hasVisualOverflow })
+    if (hasMore || overflow) TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起" else "展开") }
+}
+
+@Composable
+internal fun LearningInsightsSummary(viewModel: TodoViewModel, period: String, targetDate: LocalDate) {
+    val learning = currentLearningData(viewModel)
+    val personalTimingEnabled by viewModel.timeTrackingEnabled.collectAsState()
+    val timingEnabled = personalTimingEnabled || learning.readOnly
+    if (!timingEnabled) return
+    val data = learning.data
+    val tasks = learning.tasks
+    val resolved = remember(data.timeEntries, tasks, data.taskSeries, data.taskSeriesLinks) { Learning.resolveEntries(data.timeEntries, tasks, data, learning.sourceId) }
+    val (start, end) = Learning.range(period, targetDate)
+    var selectedLabel by remember(learning.sourceId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(resolved, selectedLabel) {
+        if (selectedLabel != null && resolved.none { !it.deleted && (it.label_snapshot ?: "未分类") == selectedLabel }) selectedLabel = null
+    }
+    var showLabels by remember { mutableStateOf(false) }
+    var details by remember(learning.sourceId, period, targetDate) { mutableStateOf(false) }
+    var recordIds by remember { mutableStateOf<List<String>?>(null) }
+    val summary = remember(resolved, learning.conflicts, start, end) { Learning.summary(resolved, start, end, conflicts = learning.conflicts) }
+    SupportingText(if (summary.count == 0) "暂无学习记录" else "学习：已记录 ${Learning.duration(summary.duration)}")
+    TextButton(onClick = { details = true }) { Text("查看投入详情") }
+    if (summary.running > 0) TextButton(onClick = {
+        val endTime = end.atStartOfDay(ZoneId.systemDefault()).toInstant()
+        recordIds = resolved.filter { !it.deleted && it.ended_at == null && it.pending_reason == null &&
+            Learning.instant(it.started_at)?.isBefore(endTime) == true }.map { it.id }
+    }) { Text("${summary.running} 条进行中，尚未计入汇总") }
+    if (summary.pending > 0) TextButton(onClick = { recordIds = learning.pendingIds(start, end) }) { Text("${summary.pending} 条待核对记录未计入 · 查看") }
+    if (details) {
+        val filtered = remember(summary, resolved, selectedLabel) {
+            if (selectedLabel == null) summary else Learning.summary(resolved, start, end, selectedLabel = selectedLabel, conflicts = learning.conflicts)
+        }
+        AlertDialog(onDismissRequest = { details = false }, title = { Text("学习投入详情") }, text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Box {
+                    TextButton(onClick = { showLabels = true }) { Text(selectedLabel ?: "全部标签") }
+                    DropdownMenu(showLabels, { showLabels = false }) {
+                        (listOf<String?>(null) + resolved.filterNot { it.deleted }.map { it.label_snapshot ?: "未分类" }.distinct().sorted()).forEach { label ->
+                            DropdownMenuItem(text = { Text(label ?: "全部标签") }, onClick = { selectedLabel = label; showLabels = false })
+                        }
+                    }
+                }
+                Text("${Learning.duration(filtered.duration)} · ${filtered.count} 次")
+                filtered.groups.forEach { group ->
+                    TextButton(onClick = { recordIds = filtered.parts.filter { (it.entry.label_snapshot ?: "未分类") == group.label }.map { it.entry.id }.distinct() }) {
+                        Text("${group.label} · ${Learning.duration(group.duration)} · ${group.count} 次")
+                    }
+                }
+            }
+        }, confirmButton = { TextButton(onClick = { details = false }) { Text("关闭") } })
+    }
+    recordIds?.let { LearningRecordsDialog(viewModel, it) { recordIds = null } }
+}
+
+@Composable
 internal fun LearningInsights(
     viewModel: TodoViewModel, period: String, targetDate: LocalDate,
     planning: PersonalPlanningState?, navigation: InsightsNavigation, openWeek: (LocalDate) -> Unit
 ) {
     val learning = currentLearningData(viewModel)
-    val personalTimingEnabled by viewModel.timeTrackingEnabled.collectAsState()
-    val timingEnabled = personalTimingEnabled || learning.readOnly
     val data = learning.data
-    val tasks = learning.tasks
-    val resolved = remember(data.timeEntries, tasks, data.taskSeries, data.taskSeriesLinks) { Learning.resolveEntries(data.timeEntries, tasks, data, learning.sourceId) }
     val (start, end) = Learning.range(period, targetDate)
-    var selectedLabel by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(resolved, selectedLabel) {
-        if (selectedLabel != null && resolved.none { !it.deleted && (it.label_snapshot ?: "未分类") == selectedLabel }) selectedLabel = null
-    }
-    var showLabels by remember { mutableStateOf(false) }
-    var recordIds by remember { mutableStateOf<List<String>?>(null) }
     var reviewDate by rememberSaveable { mutableStateOf<String?>(null) }
     var showExport by remember { mutableStateOf(false) }
-    val summary = remember(resolved, learning.conflicts, start, end, selectedLabel) { Learning.summary(resolved, start, end, selectedLabel = selectedLabel, conflicts = learning.conflicts) }
-    if (timingEnabled) Card(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
-        Column(Modifier.padding(14.dp)) {
-            Text(if (learning.readOnly) "学习投入" else "我的学习投入", style = MaterialTheme.typography.titleMedium)
-            Box {
-                TextButton(onClick = { showLabels = true }) { Text(selectedLabel ?: "全部标签") }
-                DropdownMenu(showLabels, { showLabels = false }) {
-                    (listOf<String?>(null) + resolved.filterNot { it.deleted }.map { it.label_snapshot ?: "未分类" }.distinct().sorted()).forEach { label ->
-                        DropdownMenuItem(text = { Text(label ?: "全部标签") }, onClick = { selectedLabel = label; showLabels = false })
-                    }
-                }
-            }
-            Text("${Learning.duration(summary.duration)} · ${summary.count} 次")
-            summary.groups.forEach { group -> TextButton(onClick = { recordIds = summary.parts.filter { (it.entry.label_snapshot ?: "未分类") == group.label }.map { it.entry.id }.distinct() }) {
-                Text("${group.label} · ${Learning.duration(group.duration)} · ${group.count} 次")
-            } }
-            if (summary.running > 0) Text("${summary.running} 条进行中，尚未计入汇总", fontSize = 12.sp)
-            if (summary.pending > 0) TextButton(onClick = { recordIds = learning.pendingIds(start, end) }) { Text("${summary.pending} 条待核对记录未计入 · 查看") }
-        }
-    }
     Card(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
         Column(Modifier.padding(14.dp)) {
-            val daily = period == "day" && planning != null && !learning.readOnly
-            Text(if (daily) "每日回顾" else if (learning.readOnly) "每日复盘" else "我的复盘", style = MaterialTheme.typography.titleMedium)
-            TextButton(onClick = { showExport = true }) { Text("导出 Markdown") }
+            val daily = period == "day" && !learning.readOnly
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (daily) "计划与回顾" else if (learning.readOnly) "每日复盘" else "我的复盘",
+                    style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (daily) TextButton(onClick = { reviewDate = start.toString() }) { Text("编辑") }
+                else TextButton(onClick = { showExport = true }) { Text("导出 Markdown") }
+            }
             if (period == "day" && planning != null && !learning.readOnly) {
-                DailyPlanReference(planning, targetDate) { openWeek(targetDate) }
+                key(targetDate) { DailyPlanReference(planning, targetDate) }
                 DailyRating(planning, targetDate)
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Text("复盘", style = MaterialTheme.typography.labelLarge)
             }
             val reviews = data.dailyReviews.filter { !it.deleted && it.date >= start.toString() && it.date < end.toString() }.sortedByDescending { it.date }
             if (period == "day") {
-                reviews.firstOrNull()?.let { review -> Learning.fields(review).forEach { (name, value) ->
-                    Text(name, style = MaterialTheme.typography.labelLarge); Text(value.ifBlank { "未填写" }, Modifier.padding(bottom = 8.dp))
-                } }
-                if (!learning.readOnly || reviews.isNotEmpty()) TextButton(onClick = { reviewDate = start.toString() }) { Text(if (learning.readOnly) "查看复盘" else if (reviews.isEmpty()) "写复盘" else "查看 / 编辑") }
-                else Text("暂无复盘")
+                val review = reviews.firstOrNull()
+                if (review == null) SupportingText(if (daily) "尚未填写，可通过编辑记录" else "暂无复盘")
+                else {
+                    val fields = Learning.fields(review)
+                    val filled = fields.filter { it.second.isNotBlank() }
+                    if (daily) CollapsibleInsightText(Learning.preview(review), 2,
+                        hasMore = filled.size > 1 || filled.firstOrNull()?.second?.lines()?.size?.let { it > 2 } == true) {
+                        fields.forEach { (name, value) ->
+                            Text(name, style = MaterialTheme.typography.labelLarge)
+                            Text(value.ifBlank { "未填写" }, Modifier.padding(bottom = 8.dp))
+                        }
+                    } else fields.forEach { (name, value) ->
+                        Text(name, style = MaterialTheme.typography.labelLarge)
+                        Text(value.ifBlank { "未填写" }, Modifier.padding(bottom = 8.dp))
+                    }
+                }
             } else {
-                if (reviews.isEmpty()) Text("这个时间范围还没有复盘")
+                if (reviews.isEmpty()) SupportingText("这个时间范围还没有复盘")
                 reviews.forEach { review -> TextButton(onClick = { reviewDate = review.date }) {
                     Column(Modifier.fillMaxWidth()) { Text(review.date); Text(Learning.preview(review), maxLines = 2, overflow = TextOverflow.Ellipsis) }
                 } }
             }
         }
     }
-    recordIds?.let { LearningRecordsDialog(viewModel, it) { recordIds = null } }
-    reviewDate?.let { date -> DailyReviewDialog(viewModel, date, planning, navigation) { reviewDate = null } }
+    reviewDate?.let { date ->
+        DailyReviewDialog(viewModel, date, planning, navigation, openWeek, period == "day" && !learning.readOnly) { reviewDate = null }
+    }
     if (showExport) ReviewExportDialog(viewModel, data, period, targetDate, planning) { showExport = false }
 }
 
 @Composable
 private fun DailyReviewDialog(
     viewModel: TodoViewModel, date: String, planning: PersonalPlanningState?, navigation: InsightsNavigation,
+    openWeek: (LocalDate) -> Unit,
+    initialEdit: Boolean,
     onDismiss: () -> Unit
 ) {
     val source = remember { viewModel.activeSource.value }
@@ -442,8 +496,14 @@ private fun DailyReviewDialog(
     LaunchedEffect(currentSource) { if (currentSource != source) onDismiss() }
     val learning = currentLearningData(viewModel)
     val data = learning.data
-    val saved = data.dailyReviews.find { it.date == date && !it.deleted }
-    var editing by rememberSaveable(date) { mutableStateOf(saved == null && !learning.readOnly) }
+    val latestReview = data.dailyReviews.find { it.date == date }
+    val saved = latestReview?.takeUnless { it.deleted }
+    val latestRating = planning?.rating(date)
+    var reviewBaseline by remember(date) { mutableStateOf(latestReview) }
+    var ratingBaseline by remember(date) { mutableStateOf(latestRating) }
+    var score by remember(date) { mutableStateOf(ratingBaseline.ratingScore()) }
+    var retryingRating by remember(date) { mutableStateOf(false) }
+    var editing by rememberSaveable(date) { mutableStateOf(initialEdit) }
     var fact by rememberSaveable(date) { mutableStateOf(saved?.fact ?: "") }
     var obstacle by rememberSaveable(date) { mutableStateOf(saved?.obstacle ?: "") }
     var action by rememberSaveable(date) { mutableStateOf(saved?.effective_action ?: "") }
@@ -453,64 +513,155 @@ private fun DailyReviewDialog(
     var error by remember { mutableStateOf("") }; var exporting by remember { mutableStateOf(false) }
     var exportChoice by remember { mutableStateOf(false) }
     var nextNavigation by remember { mutableStateOf<(() -> Unit)?>(null) }
-    val dirty = editing && listOf(fact, obstacle, action, next) != baseline
+    var goingToWeek by remember { mutableStateOf(false) }
+    var rebase by remember { mutableStateOf(false) }
+    val reviewDirty = editing && listOf(fact, obstacle, action, next) != baseline
+    val ratingDirty = editing && ratingBaseline != null && score != ratingBaseline.ratingScore()
+    val dirty = reviewDirty || ratingDirty || retryingRating
     val scope = rememberCoroutineScope()
-    fun reset() { fact = saved?.fact ?: ""; obstacle = saved?.obstacle ?: ""; action = saved?.effective_action ?: ""; next = saved?.next_step ?: ""; baseline = listOf(fact, obstacle, action, next) }
+    LaunchedEffect(latestRating) {
+        if (ratingBaseline == null && !targetChanged) {
+            ratingBaseline = latestRating
+            score = latestRating.ratingScore()
+        }
+    }
     fun dismiss() {
         onDismiss()
         nextNavigation?.invoke()
         nextNavigation = null
     }
-    fun requestLeave(next: (() -> Unit)? = null) {
-        if (busy || leave) return
+    fun requestLeave(next: (() -> Unit)? = null, week: Boolean = false) {
+        if (busy || leave || rebase || exportChoice) return
         nextNavigation = next
+        goingToWeek = week
         if (dirty) leave = true else dismiss()
     }
     RegisterInsightsGuard(navigation, true) { requestLeave(it) }
     fun save(close: Boolean, exportAfter: Boolean = false) {
         if (viewModel.activeSource.value != source) { error = "清单已切换，请重新打开"; return }
         if (targetChanged || planning?.target != target) { error = "个人清单已切换，请重新打开复盘"; return }
+        val fields = listOf(fact, obstacle, action, next)
+        if (reviewDirty && fields.none { it.isNotBlank() }) { error = "请至少填写一项复盘内容"; return }
         busy = true
         scope.launch {
             try {
-                val now = nowIso()
-                val result = viewModel.saveDailyReview(DailyReview(saved?.id ?: UUID.randomUUID().toString(), date, saved?.created_at ?: now, now, fact, obstacle, action, next), source)
-                if (result.isSuccess) { baseline = listOf(fact, obstacle, action, next); editing = false; leave = false; exportChoice = false; if (exportAfter) exporting = true; if (close) dismiss() }
-                else error = result.exceptionOrNull()?.message ?: "保存失败"
+                val successes = mutableListOf<String>()
+                val failures = mutableListOf<String>()
+                val expectedRating = ratingBaseline
+                if ((ratingDirty || retryingRating) && planning != null && expectedRating != null) {
+                    val result = planning.saveRating(date, score, expectedRating, retryingRating)
+                    retryingRating = result.pending
+                    if (result.error.isEmpty()) {
+                        ratingBaseline = result.record
+                        score = result.record.ratingScore()
+                        successes.add("评分已保存")
+                    } else failures.add("评分未保存 · ${result.error}")
+                }
+                if (reviewDirty) {
+                    val now = nowIso()
+                    val draft = DailyReview(reviewBaseline?.id ?: UUID.randomUUID().toString(), date,
+                        reviewBaseline?.created_at ?: now, now, fields[0], fields[1], fields[2], fields[3])
+                    viewModel.saveDailyReview(draft, source, reviewBaseline, target).fold(
+                        onSuccess = {
+                            reviewBaseline = it
+                            baseline = fields
+                            successes.add("复盘已保存")
+                        },
+                        onFailure = { failures.add("复盘未保存 · ${it.message ?: "请重试"}") }
+                    )
+                }
+                error = if (failures.isEmpty()) "" else (successes + failures).joinToString("。")
+                if (failures.isEmpty()) {
+                    leave = false
+                    exportChoice = false
+                    if (exportAfter) exporting = true
+                    if (close) dismiss()
+                }
             } finally { busy = false }
         }
     }
     Dialog(onDismissRequest = { requestLeave() }) {
         Surface(shape = MaterialTheme.shapes.large) {
             Column(Modifier.padding(16.dp).heightIn(max = 620.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("$date · 每日复盘", style = MaterialTheme.typography.titleMedium)
+                Text("$date · ${if (editing) "编辑当日回顾" else "每日复盘"}", style = MaterialTheme.typography.titleMedium)
                 if (targetChanged) Text("个人清单已切换，请重新打开复盘", color = MaterialTheme.colorScheme.error)
-                else if (!learning.readOnly && planning != null) DailyPlanReference(planning, LocalDate.parse(date))
+                else if (!learning.readOnly && planning != null) {
+                    val navigateToWeek: (() -> Unit)? = if (editing) {
+                        { requestLeave({ openWeek(LocalDate.parse(date)) }, week = true) }
+                    } else null
+                    DailyPlanReference(planning, LocalDate.parse(date), navigateToWeek)
+                }
                 if (editing) {
+                    Text("当日评分", style = MaterialTheme.typography.labelLarge)
+                    if (ratingBaseline == null) SupportingText("评分暂不可用")
+                    else {
+                        Row(Modifier.fillMaxWidth()) {
+                            for (value in 1..5) FilterChip(
+                                selected = score == value, enabled = !busy && !retryingRating && planning?.pendingRating != true,
+                                onClick = { score = value }, label = { Text(value.toString()) },
+                                modifier = Modifier.weight(1f).padding(horizontal = 2.dp).semantics { contentDescription = "$value 分" }
+                            )
+                        }
+                        TextButton(enabled = !busy && !retryingRating && score != null && planning?.pendingRating != true,
+                            onClick = { score = null }) { Text("清除评分") }
+                    }
                     OutlinedTextField(fact, { fact = it }, label = { Text("事实") }, placeholder = { Text("今天推进了什么？理解、推导、例子、明确卡点都算。") }, enabled = !busy, minLines = 2)
                     OutlinedTextField(obstacle, { obstacle = it }, label = { Text("卡点") }, placeholder = { Text("拖延或中断发生在哪里？当时发生了什么？") }, enabled = !busy, minLines = 2)
                     OutlinedTextField(action, { action = it }, label = { Text("有效动作") }, placeholder = { Text("什么帮助你开始或回到任务？") }, enabled = !busy, minLines = 2)
                     OutlinedTextField(next, { next = it }, label = { Text("下一步") }, placeholder = { Text("明天想保留什么，或只调整什么？") }, enabled = !busy, minLines = 2)
                     if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
-                    Row { TextButton(enabled = !busy && !targetChanged, onClick = { save(false) }) { Text("保存") }
+                    if ("已更新" in error && !retryingRating) TextButton(enabled = !busy, onClick = { rebase = true }) { Text("核对最新内容") }
+                    Row { TextButton(enabled = !busy && !targetChanged, onClick = { save(true) }) { Text("保存") }
                         TextButton(enabled = !busy, onClick = { requestLeave() }) { Text("取消") }
                         TextButton(enabled = !busy, onClick = { if (dirty) exportChoice = true else exporting = true }) { Text("导出") } }
                 } else {
                     saved?.let { Learning.fields(it).forEach { (title, value) -> Text(title, style = MaterialTheme.typography.labelLarge); Text(value.ifBlank { "未填写" }) } }
-                    Row { if (!learning.readOnly) TextButton(onClick = { reset(); editing = true }) { Text("编辑") }; TextButton(onClick = { exporting = true }) { Text("导出") } }
+                    Row {
+                        if (!learning.readOnly) TextButton(onClick = {
+                            reviewBaseline = latestReview
+                            ratingBaseline = latestRating
+                            score = latestRating.ratingScore()
+                            fact = saved?.fact.orEmpty(); obstacle = saved?.obstacle.orEmpty()
+                            action = saved?.effective_action.orEmpty(); next = saved?.next_step.orEmpty()
+                            baseline = listOf(fact, obstacle, action, next)
+                            editing = true
+                        }) { Text("编辑") }
+                        TextButton(onClick = { exporting = true }) { Text("导出") }
+                    }
                 }
                 TextButton(enabled = !busy, onClick = { requestLeave() }) { Text("关闭") }
             }
         }
     }
-    if (leave) AlertDialog(onDismissRequest = { if (!busy) { leave = false; nextNavigation = null } }, title = { Text("复盘有未保存的修改") }, text = {
+    if (leave) AlertDialog(onDismissRequest = { if (!busy) { leave = false; nextNavigation = null } }, title = { Text("当日回顾有未保存的修改") }, text = {
         Column {
-            TextButton(enabled = !busy && !targetChanged, onClick = { save(true) }) { Text("保存并离开") }
-            TextButton(enabled = !busy, onClick = { dismiss() }) { Text("放弃修改") }
+            TextButton(enabled = !busy && !targetChanged, onClick = { save(true) }) { Text(if (goingToWeek) "保存并前往" else "保存并离开") }
+            TextButton(enabled = !busy, onClick = { dismiss() }) { Text(if (goingToWeek) "放弃修改并前往" else "放弃修改") }
             if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
         }
     }, confirmButton = { TextButton(enabled = !busy, onClick = { leave = false; nextNavigation = null }) { Text("继续编辑") } })
-    if (exportChoice) AlertDialog(onDismissRequest = { if (!busy) exportChoice = false }, title = { Text("有未保存的复盘修改") }, text = {
+    if (rebase) {
+        val currentFields = listOf(saved?.fact.orEmpty(), saved?.obstacle.orEmpty(), saved?.effective_action.orEmpty(), saved?.next_step.orEmpty())
+        AlertDialog(onDismissRequest = { rebase = false }, title = { Text("核对最新内容") }, text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("最新评分：${latestRating.ratingScore() ?: "未评分"}")
+                listOf("事实", "卡点", "有效动作", "下一步").zip(currentFields).forEach { (name, value) ->
+                    Text("$name：${value.ifBlank { "未填写" }}")
+                }
+            }
+        }, confirmButton = { TextButton(onClick = {
+            if (!ratingDirty) score = latestRating.ratingScore()
+            if (!reviewDirty) {
+                fact = currentFields[0]; obstacle = currentFields[1]; action = currentFields[2]; next = currentFields[3]
+            }
+            ratingBaseline = latestRating
+            reviewBaseline = latestReview
+            baseline = currentFields
+            rebase = false
+            error = ""
+        }) { Text("保留草稿并采用最新基线") } }, dismissButton = { TextButton(onClick = { rebase = false }) { Text("继续编辑") } })
+    }
+    if (exportChoice) AlertDialog(onDismissRequest = { if (!busy) exportChoice = false }, title = { Text("有未保存的当日回顾修改") }, text = {
         Column {
             TextButton(enabled = !busy, onClick = { save(false, exportAfter = true) }) { Text("保存后导出") }
             TextButton(enabled = !busy, onClick = { exportChoice = false; exporting = true }) { Text("仅导出已保存内容") }
@@ -521,7 +672,7 @@ private fun DailyReviewDialog(
 }
 
 @Composable
-private fun ReviewExportDialog(
+internal fun ReviewExportDialog(
     viewModel: TodoViewModel, data: TodoData, period: String, date: LocalDate,
     planning: PersonalPlanningState?, onDismiss: () -> Unit
 ) {
@@ -565,7 +716,7 @@ private fun ReviewExportDialog(
             }
             if (timingEnabled) {
                 Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(include, { include = it }); Text("附带当日学习时长统计" + if (range == "day") "" else "（逐日）") }
-                Text("进行中和待核对记录不计入统计。", fontSize = 12.sp)
+                SupportingText("进行中和待核对记录不计入统计。")
             }
             if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
             savedUri?.let { uri -> TextButton(onClick = {

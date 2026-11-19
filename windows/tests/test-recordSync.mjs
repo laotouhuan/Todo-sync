@@ -13,6 +13,85 @@ const [child, parent] = sample.journal.records;
 const base = JSON.stringify({ data: fixture.baseline });
 const raw = item => Buffer.from(item.content, 'base64').toString('utf8');
 
+test('增量轮询跳过已同步历史，完整复核仍逐条读取', async () => {
+    let reads = 0;
+    const invoke = async () => ({ receipt: {}, preview: {
+        operation_set: 'lab-collaboration/2', baseline: base,
+        journal: { ...sample.journal, records: [parent, child], pending: [], unread: [] },
+        dependencies: { missing: [] }, records: [raw(parent), raw(child)]
+    } });
+    const transport = { namespace: binding.pin.namespace, list: async () => [],
+        read: async name => { reads++; return name === parent.name ? parent.content : child.content; } };
+    await syncRecordJournal(invoke, binding, transport, { verifyKnown: false });
+    assert.equal(reads, 0);
+    await syncRecordJournal(invoke, binding, transport);
+    assert.equal(reads, 2);
+});
+
+test('目录限流后本轮停止请求并保留错误码', async () => {
+    const invoke = async () => ({ receipt: {}, preview: {
+        operation_set: 'lab-collaboration/2', baseline: base,
+        journal: { ...sample.journal, records: [parent], pending: [parent.name], unread: [] },
+        dependencies: { missing: [] }, records: [raw(parent)]
+    } });
+    const result = await syncRecordJournal(invoke, binding, { namespace: binding.pin.namespace,
+        list: async () => { throw new Error('RECORD_DAV_HTTP_429'); },
+        read: assert.fail, write: assert.fail });
+    assert.equal(result.listFailed, true);
+    assert.equal(result.transportError, 'RECORD_DAV_HTTP_429');
+    assert.deepEqual(result.journal.pending, [parent.name]);
+});
+
+test('后台临时失败退避，成功后恢复正常轮询', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let runs = 0;
+    const stop = startRecordSync({ intervalMs: 100,
+        sync: async () => {
+            runs++;
+            if (runs === 1) throw new Error('RECORD_DAV_HTTP_503');
+            return { listFailed: runs === 2, readFailures: [], uploadFailures: [] };
+        }, onResult() {}, onError() {} });
+    const flush = () => new Promise(resolve => setImmediate(resolve));
+    try {
+        await flush();
+        t.mock.timers.tick(199); await flush(); assert.equal(runs, 1);
+        t.mock.timers.tick(1); await flush(); assert.equal(runs, 2);
+        t.mock.timers.tick(399); await flush(); assert.equal(runs, 2);
+        t.mock.timers.tick(1); await flush(); assert.equal(runs, 3);
+        t.mock.timers.tick(100); await flush(); assert.equal(runs, 4);
+    } finally { await stop(); }
+});
+
+test('历史记录核对有限并行，慢请求不会串行阻塞全部读取', async () => {
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const artifacts = Array.from({ length: 9 }, (_, index) => ({ ...parent, name: `records/test-${index}.json` }));
+    let active = 0, peak = 0, reads = 0;
+    const invoke = async command => {
+        assert.equal(command, 'prepare_record_recovery_commit');
+        return { receipt: {}, preview: {
+            operation_set: 'lab-collaboration/2', baseline: base,
+            journal: { ...sample.journal, records: artifacts, pending: [], unread: [] },
+            dependencies: { missing: [] }, records: [raw(parent), raw(child)]
+        } };
+    };
+    const pending = syncRecordJournal(invoke, binding, {
+        namespace: binding.pin.namespace,
+        async list() { return []; },
+        async read() {
+            reads++; active++; peak = Math.max(peak, active);
+            await gate; active--; return parent.content;
+        },
+        async write() { assert.fail('没有待上传项'); }
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    try {
+        assert.equal(active, 4, '每批最多四个读取同时等待网络');
+    } finally { release(); await pending; }
+    assert.equal(reads, 9);
+    assert.equal(peak, 4);
+});
+
 test('计划云端绑定跨端使用同一组固定文件，账户或数据路径变化采用新身份', async () => {
     const config = { sync_mode: 'webdav', webdav_url: 'https://example.test/dav/', webdav_username: 'example',
         webdav_password: 'fake', webdav_filepath: '合成/todo_data.json' };
@@ -44,6 +123,35 @@ test('计划云端绑定跨端使用同一组固定文件，账户或数据路�
     await transport.write('test', 'bytes');
 });
 
+test('能力集合创建只接受目标集合，丢失创建响应可读回确认', async () => {
+    const endpoint = 'https://example.test/dav/';
+    const parentPath = '/dav/synthetic/' + binding.pin.namespace + 'capabilities/';
+    const marker = parentPath + 'weekly-plan-focus-v1.' + binding.pin.descriptor_sha256 + '/';
+    const xml = (href, collection) => `<d:multistatus xmlns:d="DAV:"><d:response><d:href>${href}</d:href><d:propstat><d:prop>
+        <d:resourcetype>${collection ? '<d:collection/>' : ''}</d:resourcetype></d:prop>
+        <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>`;
+    let created = false, occupied = false, createCalls = 0;
+    const transport = createRecordWebDavTransport(async (command, { action, name, content }) => {
+        assert.equal(command, 'request_record_webdav');
+        assert.equal(name, null);
+        assert.equal(content, null);
+        if (action === 'read_capabilities') return xml(parentPath, true);
+        if (action === 'read_focus') return occupied ? xml(marker, false) : created ? xml(marker, true) : null;
+        assert.equal(action, 'create_focus');
+        createCalls++;
+        created = true;
+        throw new Error('RECORD_DAV_NETWORK');
+    }, { endpoint, directory: ['synthetic'], pin: binding.pin });
+    assert.equal(await transport.readFocus(), false);
+    await transport.enableFocus();
+    await transport.enableFocus();
+    assert.equal(await transport.readFocus(), true);
+    assert.equal(createCalls, 1);
+    occupied = true;
+    await assert.rejects(transport.enableFocus(), /INVALID_DIRECTORY_TYPE/);
+    assert.equal(createCalls, 1);
+});
+
 test('已同步对象字节变化时先落盘证据，重开后不请求传输', async () => {
     let journal = { ...sample.journal, records: [parent, child], pending: [child.name] };
     let prepared, reads = 0, lists = 0;
@@ -64,7 +172,7 @@ test('已同步对象字节变化时先落盘证据，重开后不请求传输',
         async read(name) { reads++; assert.equal(name, parent.name); return observed.content; },
         async write() { assert.fail('异常后不得上传'); }
     };
-    for (let i = 0; i < 2; i++) await assert.rejects(syncRecordJournal(invoke, binding, transport), /RECORD_REMOTE_BYTES_CHANGED/);
+    for (let i = 0; i < 2; i++) await assert.rejects(syncRecordJournal(invoke, binding, transport, { verifyKnown: false }), /RECORD_REMOTE_BYTES_CHANGED/);
     assert.equal(lists, 1);
     assert.equal(reads, 1);
     assert.deepEqual(journal.records, [parent, child]);

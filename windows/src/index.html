@@ -136,15 +136,15 @@
             <div id="stats-filter-dropdown" class="stats-filter-dropdown hidden">
               <label class="stats-filter-item">
                 <input type="checkbox" id="filter-normal" checked>
-                <span class="dot normal-dot"></span>普通待办
+                <svg data-stats-mark="normal" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"></svg>普通待办
               </label>
               <label class="stats-filter-item">
                 <input type="checkbox" id="filter-weekly" checked>
-                <span class="dot weekly-dot"></span>每周打卡
+                <svg data-stats-mark="weekly_checkin" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"></svg>每周打卡
               </label>
               <label class="stats-filter-item">
                 <input type="checkbox" id="filter-monthly" checked>
-                <span class="dot monthly-dot"></span>每月打卡
+                <svg data-stats-mark="monthly_checkin" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"></svg>每月打卡
               </label>
             </div>
           </div>
@@ -159,42 +159,40 @@
           </div>
         </div>
 
-        <section id="stats-planning" class="learning-card stats-planning" aria-labelledby="stats-planning-title" hidden>
+        <div class="ui-card stats-summary-bar">
+          <h3>完成与投入</h3>
+          <div class="stats-summary-text" id="stats-summary-text">共 0 项任务，已完成 0 项，进度 0%</div>
+          <div class="stats-progress-track">
+            <div class="stats-progress-fill" id="stats-progress-fill" style="width: 0%;"></div>
+          </div>
+          <div id="stats-learning-summary"></div>
+        </div>
+
+        <!-- 时段分布卡片 -->
+        <div class="ui-card time-distribution-card" id="time-distribution" style="position: relative;">
+          <div class="time-insight-text" id="time-insight-text" hidden></div>
+          <!-- 替换为环形时钟 -->
+          <div class="efficiency-clock-container" style="display: flex; justify-content: center; align-items: center; margin: 12px 0; width: 100%;">
+            <svg id="efficiency-clock-svg" width="340" height="260" viewBox="0 0 340 260"></svg>
+          </div>
+          <!-- 悬浮提示框 -->
+          <div id="clock-tooltip" class="ui-popup-surface clock-tooltip"></div>
+        </div>
+
+        <section id="stats-planning" class="ui-card learning-card stats-planning" aria-labelledby="stats-planning-title" hidden>
           <input type="hidden" data-date>
           <div class="planning-header">
-            <h3 id="stats-planning-title">周计划与评分</h3>
+            <h3 id="stats-planning-title">本周计划与回顾</h3>
           </div>
           <fieldset data-content hidden>
             <div data-planning></div>
           </fieldset>
           <p data-status class="planning-status" role="status" hidden></p>
-          <button type="button" data-retry class="learning-button" hidden>重试上次保存</button>
+          <button type="button" class="ui-button" data-retry hidden>重试上次保存</button>
         </section>
-        <div class="stats-summary-bar">
-          <div class="stats-summary-text" id="stats-summary-text">共 0 项任务，已完成 0 项，进度 0%</div>
-          <div class="stats-progress-track">
-            <div class="stats-progress-fill" id="stats-progress-fill" style="width: 0%;"></div>
-          </div>
-        </div>
-
-        <!-- 时段分布卡片 -->
-        <div class="time-distribution-card" id="time-distribution" style="position: relative;">
-          <div class="time-insight-text" id="time-insight-text">☀️ 暂无已完成的任务数据</div>
-          <!-- 替换为环形时钟 -->
-          <div class="efficiency-clock-container" style="display: flex; justify-content: center; align-items: center; margin: 12px 0; width: 100%;">
-            <svg id="efficiency-clock-svg" width="340" height="260" viewBox="0 0 340 260"></svg>
-          </div>
-          <!-- 左侧和右侧的补打卡列 -->
-          <div id="makeup-checkins-left" style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; z-index: 5;"></div>
-          <div id="makeup-checkins-right" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; z-index: 5;"></div>
-          
-          <div id="time-distribution-tip" class="time-distribution-tip hidden" style="font-size: 0.72rem; color: var(--text-secondary); opacity: 0.65; margin-top: 8px; text-align: center; width: 100%;"></div>
-          <!-- 悬浮提示框 -->
-          <div id="clock-tooltip" class="clock-tooltip"></div>
-        </div>
 
         <div class="stats-list-toggle-container" style="text-align: center; margin: 12px 0 6px 0;">
-          <button id="toggle-stats-list-btn" style="font-size: 0.8rem; padding: 6px 14px; border-radius: 6px; background: rgba(255,255,255,0.04); border: 1px solid var(--glass-border); cursor: pointer; color: var(--text-primary); transition: all 0.2s;">
+          <button id="toggle-stats-list-btn" class="ui-button">
             显示详细任务列表 (共 0 项)
           </button>
         </div>
@@ -204,16 +202,16 @@
 
       <!-- 清单健康容器 -->
       <div id="stats-health" class="hidden">
-        <div style="font-size: 0.72rem; color: var(--text-secondary); opacity: 0.65; margin-bottom: 12px; text-align: center; width: 100%;">* 清单健康及相关指标仅统计普通单次任务，不含重复任务与周/月打卡</div>
+        <div class="ui-note" style="margin-bottom: 12px; text-align: center; width: 100%;">* 清单健康及相关指标仅统计普通单次任务，不含重复任务与周/月打卡</div>
         <!-- 清单健康度评分 -->
-        <div class="health-grade-card">
+        <div class="ui-card health-grade-card">
           <div class="health-grade-title">清单健康度</div>
           <div class="health-grade-letter" id="health-grade-letter">A</div>
           <div class="health-grade-text" id="health-grade-text">“你的清单代谢非常健康！”</div>
         </div>
 
         <!-- 新陈代谢 (吞吐量卡片) -->
-        <div class="throughput-card">
+        <div class="ui-card throughput-card">
           <div class="throughput-header">
             <span class="throughput-title">新陈代谢</span>
             <select id="throughput-period-select" class="throughput-select">
@@ -225,8 +223,8 @@
             </select>
           </div>
           <div class="throughput-numbers">
-            <span style="font-size: 0.75rem; color: var(--text-secondary);">新增 <strong id="throughput-added" style="color: var(--text-primary);">0</strong> 项</span>
-            <span style="font-size: 0.75rem; color: var(--text-secondary);">消灭 <strong id="throughput-completed" style="color: var(--text-primary);">0</strong> 项</span>
+            <span class="ui-note">新增 <strong id="throughput-added" style="color: var(--text-primary);">0</strong> 项</span>
+            <span class="ui-note">消灭 <strong id="throughput-completed" style="color: var(--text-primary);">0</strong> 项</span>
           </div>
           <div class="throughput-bar">
             <div id="throughput-bar-added" class="throughput-bar-added" style="flex: 1;"></div>
@@ -237,19 +235,19 @@
 
         <!-- 平均寿命 + 积压时长 + 沉睡数量 -->
         <div class="metrics-row">
-          <div class="metric-card">
+          <div class="ui-card metric-card">
             <div class="metric-icon">⏱️</div>
             <div class="metric-value" id="metric-avg-age">0.0 天</div>
             <div class="metric-trend" id="metric-avg-age-trend"></div>
             <div class="metric-label">平均任务寿命</div>
           </div>
-          <div class="metric-card">
+          <div class="ui-card metric-card">
             <div class="metric-icon">⏳</div>
             <div class="metric-value" id="metric-backlog-age">0.0 天</div>
             <div class="metric-trend" id="metric-backlog-age-trend"></div>
             <div class="metric-label">积压任务时长</div>
           </div>
-          <div class="metric-card">
+          <div class="ui-card metric-card">
             <div class="metric-icon">💤</div>
             <div class="metric-value" id="metric-sleeping-count">0 项</div>
             <div class="metric-trend" id="metric-sleeping-count-trend"></div>
@@ -260,7 +258,7 @@
         <!-- 沉睡待办清理 -->
         <div class="sleeping-section">
           <div class="sleeping-title">💤 沉睡待办清理 (超过7天未完成)</div>
-          <div class="sleeping-empty" id="sleeping-empty" style="display: none;">
+          <div class="ui-card sleeping-empty" id="sleeping-empty" style="display: none;">
             所有任务都在健康流转中，继续保持！
           </div>
           <div id="sleeping-list"></div>
@@ -291,9 +289,9 @@
       <div class="edit-fixed-header">
         <h3 id="edit-modal-title">编辑待办</h3>
         <div class="edit-fixed-actions">
-          <button type="button" id="modal-back-btn" class="modal-btn secondary">返回</button>
-          <button type="button" id="modal-delete-btn" class="modal-btn delete">删除</button>
-          <button type="button" id="modal-save-btn" class="modal-btn primary">保存</button>
+          <button type="button" id="modal-back-btn" class="ui-button">返回</button>
+          <button type="button" id="modal-delete-btn" class="ui-button danger">删除</button>
+          <button type="button" id="modal-save-btn" class="ui-button primary">保存</button>
         </div>
       </div>
       <div class="modal-body">
@@ -342,7 +340,7 @@
                 <input type="time" id="edit-reminder-time" style="flex: 1;" />
               </div>
               <div id="edit-reminder-repeat-row" style="display: none; margin-top: 6px;">
-                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--text-secondary); cursor: pointer; user-select: none;">
+                <label style="display: flex; align-items: center; gap: 6px; color: var(--text-secondary); cursor: pointer; user-select: none;">
                   <input type="checkbox" id="edit-reminder-repeat-daily" />
                   <span>每日重复此提醒</span>
                 </label>
@@ -376,10 +374,10 @@
 
         <!-- 子任务区域 -->
         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; margin-bottom: 4px;">
-          <label style="margin: 0; font-weight: 600;">子步骤/备注</label>
+          <label style="margin: 0; font: var(--ui-heading);">子步骤/备注</label>
           <div style="display: flex; gap: 8px;">
-            <button type="button" id="sort-subtasks-btn" class="icon-btn-small copy-btn" aria-label="整理排序子步骤">整理排序</button>
-            <button type="button" id="copy-subtasks-btn" class="icon-btn-small copy-btn" aria-label="复制子步骤内容">复制内容</button>
+            <button type="button" id="sort-subtasks-btn" class="ui-button compact" aria-label="整理排序子步骤">整理排序</button>
+            <button type="button" id="copy-subtasks-btn" class="ui-button compact" aria-label="复制子步骤内容">复制内容</button>
           </div>
         </div>
         <div class="subtasks-container" style="margin-top: 0; padding: 0; background: transparent;">
@@ -403,14 +401,14 @@
     <div class="modal-content glass-panel settings-dialog" style="max-width: 400px;">
       <h3 id="backup-modal-title">选择要恢复的本地备份</h3>
       <div class="modal-body">
-        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 12px;">如果由于误操作同步导致数据丢失，可以从本地快照恢复。</p>
+        <p class="setting-hint" style="margin-bottom: 12px;">如果由于误操作同步导致数据丢失，可以从本地快照恢复。</p>
         <ul id="backup-list" class="subtasks-list" style="max-height: 200px; overflow-y: auto;">
           <!-- Rendered via JS -->
         </ul>
       </div>
       <div class="modal-footer">
         <div class="footer-right" style="width: 100%; justify-content: flex-end;">
-          <button id="backup-close-btn" class="modal-btn secondary">关闭</button>
+          <button id="backup-close-btn" class="ui-button">关闭</button>
         </div>
       </div>
     </div>
@@ -426,15 +424,15 @@
             <line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
         </div>
-        <h3 id="delete-confirm-title" style="margin: 0; font-size: 1.05rem; font-weight: 600; color: #ffffff;">确认删除</h3>
+        <h3 id="delete-confirm-title" style="margin: 0;">确认删除</h3>
       </div>
       <div class="modal-body" style="padding: 0; gap: 0;">
-        <p style="font-size: 0.88rem; color: rgba(255, 255, 255, 0.7); line-height: 1.5; margin: 0;">确定要彻底删除该待办事项吗？此操作无法撤销。</p>
+        <p class="ui-note" style="margin: 0;">确定要彻底删除该待办事项吗？此操作无法撤销。</p>
       </div>
       <div class="modal-footer">
         <div class="footer-right" style="width: 100%; justify-content: flex-end; gap: 8px;">
-          <button id="delete-cancel-btn" class="modal-btn secondary" style="margin: 0; padding: 8px 16px; border-radius: 8px; font-size: 0.82rem;">取消</button>
-          <button id="delete-confirm-btn" class="modal-btn btn-danger-filled" style="margin: 0; padding: 8px 16px; border-radius: 8px; font-size: 0.82rem; font-weight: 600;">确认删除</button>
+          <button id="delete-cancel-btn" class="ui-button">取消</button>
+          <button id="delete-confirm-btn" class="ui-button danger">确认删除</button>
         </div>
       </div>
     </div>
@@ -461,17 +459,17 @@
           <div id="panel-about" class="settings-panel active">
             <div class="input-group" style="display: flex; flex-direction: column; gap: 8px;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <label style="margin: 0;">软件信息</label>
-                <span id="current-version-text" style="font-size: 0.75rem; color: var(--text-secondary); font-weight: normal;">当前版本: v...</span>
+                <span class="setting-heading">软件信息</span>
+                <span id="current-version-text" class="setting-hint">当前版本: v...</span>
               </div>
-              <button type="button" id="check-update-btn" class="modal-btn secondary" style="width: 100%;">手动检查更新</button>
+              <button type="button" id="check-update-btn" class="ui-button" style="width: 100%;">手动检查更新</button>
             </div>
           </div>
 
           <!-- 2. 提醒 -->
           <div id="panel-reminder" class="settings-panel">
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0 10px 0; border-bottom: 1px solid var(--border-color); margin-bottom: 12px;">
-              <span style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary);">开启提醒功能</span>
+              <span class="setting-heading">开启提醒功能</span>
               <button type="button" id="reminder-toggle-btn" style="background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0;" role="switch" aria-checked="true" aria-label="切换提醒功能">
                 <span id="reminder-toggle-track" style="display: inline-block; width: 36px; height: 20px; border-radius: 20px; position: relative; transition: background 0.3s; background: var(--accent-color); border: 1px solid var(--accent-color);">
                   <span id="reminder-toggle-knob" style="display: block; width: 14px; height: 14px; border-radius: 50%; background: white; position: absolute; top: 2px; left: 18px; transition: left 0.3s;"></span>
@@ -491,8 +489,8 @@
 
               <div class="divider-with-text" style="margin-top: 12px;">全局定时提醒</div>
               <div class="settings-inline-row settings-rule-actions">
-                <button type="button" id="add-global-rule-btn" class="modal-btn secondary" style="flex: 1;">+ 新增规则</button>
-                <button type="button" id="import-preset-btn" class="modal-btn secondary" style="flex: 1;">导入预设</button>
+                <button type="button" id="add-global-rule-btn" class="ui-button" style="flex: 1;">+ 新增规则</button>
+                <button type="button" id="import-preset-btn" class="ui-button" style="flex: 1;">导入预设</button>
               </div>
               <div id="global-rules-list" style="display: flex; flex-direction: column; gap: 8px;">
                 <!-- 动态渲染全局规则卡片 -->
@@ -553,7 +551,7 @@
               <input type="text" id="import-key-input" aria-label="提取密钥" placeholder="输入 12 位提取密钥" style="display: none;" />
               <div class="settings-inline-row">
                 <input type="text" id="import-name-input" aria-label="协作清单名字" placeholder="设置协作清单名字" />
-                <button id="import-share-btn" class="modal-btn secondary">导入</button>
+                <button id="import-share-btn" class="ui-button">导入</button>
               </div>
             </div>
 
@@ -567,16 +565,16 @@
                   <option value="30">30 天</option>
                   <option value="">永久</option>
                 </select>
-                <button id="generate-share-btn" class="modal-btn secondary">生成</button>
+                <button id="generate-share-btn" class="ui-button">生成</button>
               </div>
               <div id="share-output-container" style="display: none; margin-top: 8px; flex-direction: column; gap: 6px;">
-                <div style="font-size: 0.75rem; color: var(--text-secondary); text-align: left;">加密授权码（双击可复制）：</div>
+                <div class="setting-hint">加密授权码（双击可复制）：</div>
                 <div id="share-code-output" class="share-code-box settings-code-output"></div>
                 <div class="settings-inline-row setting-hint">
                   <span>12 位提取密钥：</span>
-                  <button id="copy-share-key-btn" class="modal-btn secondary settings-compact-btn">复制密钥</button>
+                  <button id="copy-share-key-btn" class="ui-button settings-compact-btn">复制密钥</button>
                 </div>
-                <div id="share-key-output" style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 6px; font-size: 13px; font-family: monospace; font-weight: bold; text-align: center; color: var(--accent-color); user-select: all;"></div>
+                <div id="share-key-output" class="settings-code-output"></div>
               </div>
             </div>
           </div>
@@ -594,7 +592,7 @@
               <label for="setting-sync-path">本地同步目录</label>
               <div class="settings-inline-row">
                 <input type="text" id="setting-sync-path" readonly placeholder="未选择" style="flex: 1;" />
-                <button id="setting-choose-dir-btn" class="modal-btn secondary">选择</button>
+                <button id="setting-choose-dir-btn" class="ui-button">选择</button>
               </div>
             </div>
             <div id="setting-webdav-group" style="display: none;">
@@ -616,41 +614,46 @@
               </div>
             </div>
 
+            <div class="setting-group" hidden>
+              <button type="button" id="enable-planning-focus" class="ui-button">启用本周重点</button>
+              <button type="button" id="retry-planning-focus" class="ui-button" hidden>重试读取</button>
+              <p id="planning-focus-status" class="setting-hint" role="status"></p>
+            </div>
             <!-- 数据维护 (整合至同步面板) -->
             <div class="divider-with-text" style="margin-top: 16px;">数据维护</div>
             <div class="input-group">
               <label>数据恢复</label>
               <p class="setting-hint">系统会自动保留最近几次写入的数据备份，您可以随时恢复到历史版本。</p>
-              <button type="button" id="backup-btn" class="modal-btn secondary" style="width: 100%;">从历史备份恢复</button>
+              <button type="button" id="backup-btn" class="ui-button" style="width: 100%;">从历史备份恢复</button>
             </div>
             <div class="input-group">
               <label>旧版缓存</label>
               <p class="setting-hint">查看升级前保留的数据。选择过不再提醒的旧缓存仍可在这里查看与导入。</p>
-              <button type="button" id="legacy-cache-btn" class="modal-btn secondary" style="width: 100%;">查看旧版缓存</button>
+              <button type="button" id="legacy-cache-btn" class="ui-button" style="width: 100%;">查看旧版缓存</button>
             </div>
             <div class="input-group">
               <label for="record-recovery-file">独立记录恢复预览</label>
               <p class="setting-hint">选择数据集恢复材料，核对任务、待上传记录和缺失依赖。</p>
               <input type="file" id="record-recovery-file" accept=".json,application/json" />
               <p id="record-recovery-status" class="setting-hint" role="status"></p>
-              <button type="button" id="record-recovery-export" class="modal-btn secondary" hidden>导出本机故障证据</button>
-              <button type="button" id="record-recovery-recheck" class="modal-btn secondary" hidden>用已保存的 WebDAV 设置复核</button>
+              <button type="button" id="record-recovery-export" class="ui-button" hidden>导出本机故障证据</button>
+              <button type="button" id="record-recovery-recheck" class="ui-button" hidden>用已保存的 WebDAV 设置复核</button>
               <details id="record-sandbox">
                 <summary>独立记录试用（本机隔离）</summary>
                 <label>试用目标
                   <select data-target><option value="1">清单一</option><option value="2">清单二</option></select>
                 </label>
-                <button type="button" data-start>打开试用清单</button>
-                <button type="button" data-stop hidden>关闭试用清单</button>
-                <p data-status role="status"></p>
+                <button type="button" class="ui-button" data-start>打开试用清单</button>
+                <button type="button" class="ui-button" data-stop hidden>关闭试用清单</button>
+                <p data-status class="setting-hint" role="status"></p>
                 <fieldset data-content hidden>
                   <legend>试用待办、周计划和评分</legend>
                   <label>任务名称 <input data-task></label>
-                  <button type="button" data-add>新增任务</button>
+                  <button type="button" class="ui-button" data-add>新增任务</button>
                   <ul data-tasks></ul>
                   <label>日期 <input data-date type="date"></label>
                   <div data-planning></div>
-                  <button type="button" data-retry>重试上次保存</button>
+                  <button type="button" class="ui-button" data-retry>重试上次保存</button>
                 </fieldset>
               </details>
             </div>
@@ -658,72 +661,72 @@
         </div>
       </div>
       <div class="modal-footer settings-footer">
-        <button id="settings-cancel-btn" class="modal-btn secondary">取消</button>
-        <button id="settings-save-btn" class="modal-btn primary">保存</button>
+        <button id="settings-cancel-btn" class="ui-button">取消</button>
+        <button id="settings-save-btn" class="ui-button primary">保存</button>
       </div>
     </div>
   </div>
 
   <!-- Global Reminder Presets Modal -->
   <div id="preset-modal" class="modal-overlay" role="dialog" aria-modal="true" style="display: none; z-index: var(--z-modal-confirm);">
-    <div class="modal-content glass-panel settings-dialog" style="max-width: 420px; padding: 20px;">
+    <div class="modal-content glass-panel settings-dialog" style="max-width: 420px;">
       <h3 style="margin-top: 0; margin-bottom: 12px; text-align: center; user-select: none;">导入系统预设提醒</h3>
       <div style="display: flex; justify-content: space-between; align-items: center; padding: 0 4px 10px 4px; border-bottom: 1px solid var(--border-color); margin-bottom: 10px;">
-        <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-primary); cursor: pointer; user-select: none;">
+        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
           <input type="checkbox" id="preset-select-all" checked style="width: 16px; height: 16px; cursor: pointer;" />
-          <span style="font-weight: 600;">全选</span>
+          <span>全选</span>
         </label>
-        <span style="font-size: 0.75rem; color: var(--text-secondary);">勾选需要的预设（可多选）</span>
+        <span class="setting-hint">勾选需要的预设（可多选）</span>
       </div>
       <div style="display: flex; flex-direction: column; gap: 10px; max-height: 280px; overflow-y: auto;">
-        <label class="global-rule-card preset-select-card" style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+        <label class="ui-card global-rule-card preset-select-card" style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
           <input type="checkbox" class="preset-item-checkbox" data-preset="1" checked style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;" />
           <div style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
             <span class="preset-time-header">12:00</span>
-            <span style="font-size: 0.75rem; color: var(--text-secondary);">尚未完成 | 全部任务</span>
-            <span style="font-size: 0.7rem; color: var(--accent-color); margin-top: 2px;">"每一个不曾起舞的日子..."</span>
+            <span class="setting-hint">尚未完成 | 全部任务</span>
+            <span>"每一个不曾起舞的日子..."</span>
           </div>
         </label>
-        <label class="global-rule-card preset-select-card" style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+        <label class="ui-card global-rule-card preset-select-card" style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
           <input type="checkbox" class="preset-item-checkbox" data-preset="2" checked style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;" />
           <div style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
             <span class="preset-time-header">16:00</span>
-            <span style="font-size: 0.75rem; color: var(--text-secondary);">无条件提醒 | 全部任务</span>
-            <span style="font-size: 0.7rem; color: var(--accent-color); margin-top: 2px;">"Do not go gentle into that good night"</span>
+            <span class="setting-hint">无条件提醒 | 全部任务</span>
+            <span>"Do not go gentle into that good night"</span>
           </div>
         </label>
-        <label class="global-rule-card preset-select-card" style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+        <label class="ui-card global-rule-card preset-select-card" style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
           <input type="checkbox" class="preset-item-checkbox" data-preset="3" checked style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;" />
           <div style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
             <span class="preset-time-header">20:00</span>
-            <span style="font-size: 0.75rem; color: var(--text-secondary);">存在未完成 | 仅今日任务</span>
-            <span style="font-size: 0.7rem; color: var(--accent-color); margin-top: 2px;">"截至{time}，仅今日任务还有..."</span>
+            <span class="setting-hint">存在未完成 | 仅今日任务</span>
+            <span>"截至{time}，仅今日任务还有..."</span>
           </div>
         </label>
       </div>
       <div class="modal-footer" style="margin-top: 14px; border-top: 1px solid var(--border-color); padding-top: 10px; display: flex; justify-content: flex-end; gap: 8px;">
-        <button type="button" id="close-preset-modal-btn" class="modal-btn secondary">取消</button>
-        <button type="button" id="confirm-import-presets-btn" class="modal-btn primary">导入选中项</button>
+        <button type="button" id="close-preset-modal-btn" class="ui-button">取消</button>
+        <button type="button" id="confirm-import-presets-btn" class="ui-button primary">导入选中项</button>
       </div>
     </div>
   </div>
 
   <!-- Copy Options Modal -->
   <div id="copy-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="copy-modal-title" style="display: none; z-index: var(--z-modal-confirm);">
-    <div class="modal-content glass-panel" style="max-width: 300px; padding: 20px;">
+    <div class="modal-content glass-panel" style="max-width: 300px;">
       <h3 id="copy-modal-title" style="margin-top: 0; margin-bottom: 16px; text-align: center; color: var(--accent-color); user-select: none; -webkit-user-select: none;">选择复制格式</h3>
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 0 4px;">
-        <label for="copy-only-uncompleted-switch" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">仅复制未完成项</label>
+        <label for="copy-only-uncompleted-switch" style="color: var(--text-secondary);">仅复制未完成项</label>
         <label class="switch">
           <input type="checkbox" id="copy-only-uncompleted-switch" checked>
           <span class="slider"></span>
         </label>
       </div>
       <div style="display: flex; flex-direction: column; gap: 10px;">
-        <button id="copy-opt-1" class="modal-btn primary" style="width: 100%;">纯文本</button>
-        <button id="copy-opt-2" class="modal-btn primary" style="width: 100%;">无序列表 (-)</button>
-        <button id="copy-opt-3" class="modal-btn primary" style="width: 100%;">有序列表 (1.)</button>
-        <button id="copy-opt-cancel" class="modal-btn secondary" style="width: 100%; margin-top: 8px;">取消</button>
+        <button id="copy-opt-1" class="ui-button primary" style="width: 100%;">纯文本</button>
+        <button id="copy-opt-2" class="ui-button primary" style="width: 100%;">无序列表 (-)</button>
+        <button id="copy-opt-3" class="ui-button primary" style="width: 100%;">有序列表 (1.)</button>
+        <button id="copy-opt-cancel" class="ui-button" style="width: 100%; margin-top: 8px;">取消</button>
       </div>
     </div>
   </div>

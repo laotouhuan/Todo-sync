@@ -1,10 +1,64 @@
 package com.todo.app.ui.view
 
 import com.todo.app.data.model.*
+import com.todo.app.data.repository.PersonalDataStore
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 class EditTodoDialogTest {
+    @get:Rule val folder = TemporaryFolder()
+
+    @Test fun completionDateAndTimeEditsReachSavedTask() = runBlocking {
+        val original = Todo.create("已完成任务").copy(completed = true,
+            completedAt = "2026-11-14T09:15:00+08:00", updatedAt = "2026-11-14T01:15:00Z")
+        for (changed in listOf("2026-11-13T09:15:00+08:00", "2026-11-14T11:45:00+08:00", "2026-11-13T11:45:00+08:00")) {
+            val saved = buildUpdatedTodo(original, original.content, "", "", TaskType.NORMAL,
+                original.targetCount, true, changed, original.completedDates, original.subtasks)
+            assertEquals(changed, saved.completedAt)
+            assertTrue(saved.completed)
+            assertNotEquals(original.updatedAt, saved.updatedAt)
+            val baseline = TodoData(1, original.updatedAt, listOf(original))
+            val committed = TaskSeriesLogic.edit(baseline, baseline, saved)
+            assertEquals(changed, committed.todos.single().completedAt)
+            val file = folder.newFile()
+            PersonalDataStore(file).commitLocked(committed)
+            assertEquals(changed, PersonalDataStore(file).ensureLoaded().todos.single().completedAt)
+        }
+    }
+
+    @Test fun unrelatedEditsPreserveExistingCompletionIncludingMissingTime() {
+        for (timestamp in listOf(null, "2026-11-14T09:15:27.123+08:00")) {
+            val original = Todo.create("旧名称").copy(completed = true, completedAt = timestamp)
+            val saved = save(original)
+            assertEquals("改正文", saved.content)
+            assertTrue(saved.completed)
+            assertEquals(timestamp, saved.completedAt)
+        }
+    }
+
+    @Test fun explicitCompletionStateChangeIsNotRestoredToOriginal() {
+        val original = Todo.create("普通任务").copy(completed = true, completedAt = "2026-11-14T09:15:00+08:00")
+        val saved = buildUpdatedTodo(original, original.content, "", "", TaskType.NORMAL,
+            null, false, null, emptyList(), emptyList())
+        assertFalse(saved.completed)
+        assertNull(saved.completedAt)
+    }
+
+    @Test fun checkinCompletionIsRecomputedOnlyWhenProgressChanges() {
+        for ((type, period) in listOf(TaskType.WEEKLY_CHECKIN to "2026-W46", TaskType.MONTHLY_CHECKIN to "2026-11")) {
+            val original = Todo.create("打卡任务", period).copy(taskType = type, targetCount = 2,
+                completed = false, completedDates = listOf("2026-11-14"))
+            assertFalse(save(original).completed)
+            val saved = buildUpdatedTodo(original, original.content, period, "", type, 2,
+                false, null, original.completedDates + "2026-11-15", emptyList())
+            assertTrue(saved.completed)
+            assertNotNull(saved.completedAt)
+        }
+    }
+
     private fun legacy() = Todo.create("旧任务", "2026-10-01").copy(
         recurring = RecurringType.DAILY_REPEAT, updatedAt = "2026-01-01T00:00:00Z",
         reminder = Reminder("2026-10-01", "09:00", true), label = "学习",

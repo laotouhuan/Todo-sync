@@ -1,3 +1,4 @@
+import { createStatsTaskMark, statsTaskStyle } from './statsTaskMark.js';
 import { createDataCoordinator } from './dataCoordinator.js';
 import { bindRecordRecoverySettings } from './recordRecoverySettings.js';
 import { bindRecordSandbox } from './recordSandboxSettings.js';
@@ -5,17 +6,17 @@ import { createPeriodTaskView } from './periodTaskView.js';
 import { seriesFor, savePeriodEdit, displayTaskName, periodType, isSeriesDeleted, periodMembers, visibleSeriesTodos } from './taskSeries.js';
 import { learningSnapshot, requirePersonalTarget, createCollaborationSubmissions } from './collaborationView.js';
 import { renderTimeline, bindClockTooltip } from './statsTimelineView.js';
-import { clockMinute, clockTooltipDateTime } from './statsTimeline.js';
+import { checkinDurationBySlot, collectTaskTimelineEvents, clockMinute, clockTooltipDateTime, collectTimerArcs, timeSlotColors } from './statsTimeline.js';
 import { prepareClockEntry, playClockEntry } from './clockAnimation.js';
 import {
-    formatDate, getISOWeekString,
+    formatDate, getISOWeekString, statsPeriodKey,
     getTodayString, getTomorrowString, getThisWeekString, getLastWeekString,
     getThisMonthString, getLastMonthString,
     isWeekDate, isMonthDate, isOverdue, getDateLabel, getCompletionStatusLabel,
     getLocalDateStringFromISO, validateAndNormalizeTime, formatLocalTime,
     parseIsoToLocalDateTime, combineLocalDateAndTimeToISO, formatCheckinDateTimeTooltip,
     sortFunc, parseInputSyntax, createTodo, groupTodosByDate,
-    categorizeByTimeSlot, calcTaskAgeDays, getHealthGrade, calculateStatsPeriodProgress, generateUUID
+    calcTaskAgeDays, getHealthGrade, calculateStatsPeriodProgress, generateUUID
 } from './dateUtils.js';
 
 import { normalizeLearningData, mergeLearningRecords, normalizeLabel } from './timeTracking.js';
@@ -81,9 +82,11 @@ const dataStore = createDataCoordinator({ getData: () => appState.todoData, pers
     install: data => { appState.todoData = data; appState.dataRevision++; } });
 
 const learningUI = createLearningView({ state: appState, commit: commitLearning,
-    redraw: () => render(), sync: async () => { await dataStore.idle; await loadData(); }, toast: message => showToast(message),
+    redraw: () => render(), sync: syncBeforeTiming, toast: message => showToast(message),
     periods: () => periodUI, planning: () => statsPlanningController,
-    openWeek: day => navigateStats('week', new Date(day + 'T12:00:00')),
+    openWeek: async day => {
+        if (await navigateStats('week', new Date(day + 'T12:00:00'))) statsPlanningController?.openWeek();
+    },
     exportFile: ({ filename, content }) => invoke('export_review_markdown', { filename, content }) });
 
 const periodUI = createPeriodTaskView({ state: appState, commit: commitPeriodData, toast: showToast, relationSaved: refreshEditRelations });
@@ -100,7 +103,7 @@ async function beforeStatsLeave() {
 }
 
 async function navigateStats(period, date, scrollToReview = false) {
-    if (!await beforeStatsLeave()) return;
+    if (!await beforeStatsLeave()) return false;
     appState.statsPeriod = period;
     appState.statsTargetDate = date;
     document.querySelectorAll('.stats-period-tabs .tab-btn[data-period]').forEach(button =>
@@ -108,6 +111,7 @@ async function navigateStats(period, date, scrollToReview = false) {
     render();
     if (scrollToReview) document.getElementById('daily-review-card')?.scrollIntoView({ block: 'start' });
     if (period === 'week') document.getElementById('stats-planning')?.scrollIntoView({ block: 'nearest' });
+    return true;
 }
 
 function commitPeriodData(change) {
@@ -131,14 +135,14 @@ async function commitAction(change) {
         showToast('保存失败：' + (error.message || error));
         const banner = document.createElement('div'); banner.className = 'learning-banner';
         banner.append(document.createTextNode('此操作未保存。'));
-        const retry = document.createElement('button'); retry.textContent = '重试';
+        const retry = document.createElement('button'); retry.className = 'ui-button'; retry.textContent = '重试';
         retry.onclick = async () => {
             retry.disabled = true;
             try { await commitPersonal(change, { ticket }); banner.remove(); }
             catch (failure) { showToast(failure.message || String(failure)); }
             finally { retry.disabled = false; }
         };
-        const discard = document.createElement('button'); discard.textContent = '放弃'; discard.onclick = () => banner.remove();
+        const discard = document.createElement('button'); discard.className = 'ui-button'; discard.textContent = '放弃'; discard.onclick = () => banner.remove();
         banner.append(retry, discard); document.querySelector('main')?.before(banner);
         render(); return false;
     }
@@ -200,14 +204,14 @@ function renderPendingSubmissions() {
         const row = document.createElement('div');
         const title = document.createElement('span'); title.textContent = `${submission.name}：新增结果待确认`;
         const retry = document.createElement('button'); retry.textContent = submission.status === 'sending' ? '提交中…' : '重试此次提交';
-        retry.className = 'learning-button'; retry.disabled = submission.status === 'sending';
+        retry.className = 'ui-button'; retry.disabled = submission.status === 'sending';
         retry.onclick = async () => {
             const operation = collaborationSubmissions.send(submission.sourceId); renderPendingSubmissions();
             try { await operation; } catch (e) { showToast(e.message || String(e)); }
             finally { renderPendingSubmissions(); }
         };
         const discard = document.createElement('button'); discard.textContent = '放弃此次提交';
-        discard.className = 'learning-button'; discard.disabled = submission.status === 'sending';
+        discard.className = 'ui-button danger'; discard.disabled = submission.status === 'sending';
         discard.onclick = () => {
             if (window.confirm('此任务可能已经保存。放弃后重新新增可能产生重复任务，确定放弃此次提交？')) {
                 collaborationSubmissions.discard(submission.sourceId); renderPendingSubmissions();
@@ -231,9 +235,9 @@ function showReadOnlyTask(todo) {
     for (const subtask of todo.subtasks || []) text('p', `${subtask.completed ? '✓' : '○'} ${subtask.content}${subtask.completed_at ? ' · ' + new Date(subtask.completed_at).toLocaleString() : ''}`);
     const ref = learningSnapshot(appState).tasks.find(t => t.todo.id === todo.id)?.ref;
     const records = learningUI.resolvedEntries().filter(e => !e.deleted && e.task_ref.todo_id === todo.id);
-    const view = document.createElement('button'); view.textContent = `查看计时记录（${records.length}）`; view.className = 'learning-button';
+    const view = document.createElement('button'); view.textContent = `查看计时记录（${records.length}）`; view.className = 'ui-button';
     view.onclick = () => learningUI.showRecords(records, '计时记录', todo, ref);
-    const close = document.createElement('button'); close.textContent = '关闭'; close.className = 'learning-button'; close.onclick = () => dialog.close();
+    const close = document.createElement('button'); close.textContent = '关闭'; close.className = 'ui-button'; close.onclick = () => dialog.close();
     dialog.append(view, close); dialog.addEventListener('keydown', e => e.stopPropagation());
     dialog.addEventListener('close', () => dialog.remove()); document.body.append(dialog); dialog.showModal();
 }
@@ -486,7 +490,7 @@ async function showLegacyCache(legacy, { openDialog = false } = {}) {
         catch { showToast('本次已关闭提示，但无法保存“不再提醒”的设置'); }
         banner.remove();
     }
-    const review = document.createElement('button'); review.textContent = '查看与导入';
+    const review = document.createElement('button'); review.className = 'ui-button'; review.textContent = '查看与导入';
     review.onclick = () => {
         const dialog = document.createElement('dialog'); dialog.className = 'learning-dialog legacy-cache-dialog';
         const description = document.createElement('p');
@@ -494,7 +498,7 @@ async function showLegacyCache(legacy, { openDialog = false } = {}) {
         const preview = document.createElement('pre'); preview.textContent = data.todos.slice(0, 20).map(t => t.content).join('\n');
         const error = document.createElement('p'), confirm = document.createElement('button'), cancel = document.createElement('button');
         confirm.textContent = '确认合并到当前清单'; cancel.textContent = '保留旧缓存，不再提醒';
-        confirm.className = 'modal-btn primary'; cancel.className = 'modal-btn secondary';
+        confirm.className = 'ui-button primary'; cancel.className = 'ui-button';
         error.className = 'learning-error';
         confirm.onclick = async () => {
             confirm.disabled = true;
@@ -507,7 +511,7 @@ async function showLegacyCache(legacy, { openDialog = false } = {}) {
         actions.append(confirm, cancel); dialog.append(description, preview, error, actions);
         dialog.addEventListener('close', () => dialog.remove()); document.body.append(dialog); dialog.showModal();
     };
-    const ignore = document.createElement('button'); ignore.textContent = '不再提醒';
+    const ignore = document.createElement('button'); ignore.className = 'ui-button'; ignore.textContent = '不再提醒';
     ignore.title = '保留旧缓存，不再提醒'; ignore.onclick = dismiss;
     banner.append(review, ignore);
     if (openDialog) review.click();
@@ -567,8 +571,14 @@ async function saveSettings(config, reminder, ticket) {
     });
 }
 
-async function loadData() {
+async function syncBeforeTiming() {
+    await dataStore.idle;
+    return loadData({ includeCollaborations: false });
+}
+
+async function loadData({ includeCollaborations = true, notifyErrors = true } = {}) {
     const request = ++personalLoadRequest;
+    let personalSyncError = '';
     let stamp = dataStore.ticket();
     const isCurrent = () => request === personalLoadRequest && dataStore.current(stamp);
     try {
@@ -611,11 +621,11 @@ async function loadData() {
                     await dataStore.commit(data => data, { ticket: stamp, force: true });
                 } else {
                     console.error("WebDAV pull failed, using local cache:", e);
-                    setSyncStatus(SyncState.ERROR, '待办云端读取失败，请检查网络或同步配置');
-                    if (typeof e === 'string' && e.includes("云端同步目录不存在")) {
-                        showToast(e);
-                    } else {
-                        showToast("云端同步失败，请检查网络或配置");
+                    personalSyncError = '待办云端读取失败，请检查网络或同步配置';
+                    setSyncStatus(SyncState.ERROR, personalSyncError);
+                    if (notifyErrors) {
+                        showToast(typeof e === 'string' && e.includes("云端同步目录不存在")
+                            ? e : "云端同步失败，请检查网络或配置");
                     }
                 }
             }
@@ -626,8 +636,8 @@ async function loadData() {
         if (appState.personalTarget && local.legacy_data) await showLegacyCache(local.legacy_data);
         if (!isCurrent()) return;
 
-        // 同步协作源数据
-        await dataStore.enqueue(async () => {
+        // 计时前只核对个人数据，完整刷新仍同步协作源配置。
+        if (includeCollaborations) await dataStore.enqueue(async () => {
             if (!isCurrent()) return;
             let localCollabsStr = await invoke("read_collaborations_data");
             let localCollabs = null;
@@ -652,8 +662,8 @@ async function loadData() {
                         await invoke("sync_collaborations_to_cloud", { data: JSON.stringify(localCollabs) });
                     } else {
                         console.error("Fetch collaborations from cloud failed:", e);
-                        setSyncStatus(SyncState.ERROR, '协作配置同步失败，请重试');
-                        showToast("协作配置同步失败，云端旧凭据可能尚未清理，请重试");
+                        setSyncStatus(SyncState.ERROR, [personalSyncError, '协作配置同步失败，请重试'].filter(Boolean).join('；'));
+                        if (notifyErrors) showToast("协作配置同步失败，云端旧凭据可能尚未清理，请重试");
                     }
                 }
             }
@@ -665,14 +675,14 @@ async function loadData() {
         });
 
         if (todoSyncState !== SyncState.ERROR) {
-            setTimeout(() => setSyncStatus(SyncState.IDLE), 500);
+            setTimeout(() => { if (isCurrent() && todoSyncState === SyncState.SYNCING) setSyncStatus(SyncState.IDLE); }, 500);
         }
         return todoSyncState !== SyncState.ERROR;
     } catch (e) {
         if (!isCurrent()) return;
         console.error("Failed to load data:", e);
         setSyncStatus(SyncState.ERROR, '本机数据或凭据读取失败，请检查后重试');
-        showToast("数据加载失败，请检查本机数据或凭据存储后重试");
+        if (notifyErrors) showToast("数据加载失败，请检查本机数据或凭据存储后重试");
     }
 }
 
@@ -755,7 +765,7 @@ function applyReadOnlyRestrictions() {
         cb.style.pointerEvents = 'none';
     });
 
-    const interactiveElements = document.querySelectorAll('#todo-list .delete-btn, #todo-list .drag-handle, #todo-list .makeup-col');
+    const interactiveElements = document.querySelectorAll('#todo-list .delete-btn, #todo-list .drag-handle');
     interactiveElements.forEach(el => {
         el.style.display = 'none';
     });
@@ -774,13 +784,13 @@ function renderCollabListInSettings() {
     
     const collabs = appState.collaborations || [];
     if (collabs.length === 0) {
-        listContainer.innerHTML = '<div style="font-size: 0.75rem; color: var(--text-secondary); text-align: center; padding: 10px;">暂无绑定的协作清单</div>';
+        listContainer.innerHTML = '<div class="setting-hint" style="text-align: center; padding: 10px;">暂无绑定的协作清单</div>';
         return;
     }
     
     collabs.forEach(collab => {
         const item = document.createElement('div');
-        item.className = 'collab-item';
+        item.className = 'ui-card collab-item';
         
         let expireText = '永久';
         if (collab.expire_at) {
@@ -793,7 +803,7 @@ function renderCollabListInSettings() {
                 <strong>${escapeHtml(collab.name)}</strong>
                 <span class="collab-expire-time">${expireText}</span>
             </div>
-            <button class="collab-delete-btn">解绑</button>
+            <button class="ui-button compact danger collab-delete-btn">解绑</button>
         `;
         
         const deleteButton = item.querySelector('.collab-delete-btn');
@@ -910,7 +920,7 @@ function renderGlobalRules(rules = []) {
 
     sortedRules.forEach((rule) => {
         const card = document.createElement('div');
-        card.className = 'global-rule-card';
+        card.className = 'ui-card global-rule-card';
         card.dataset.ruleId = rule.id || generateUUID();
 
         card.innerHTML = `
@@ -919,7 +929,7 @@ function renderGlobalRules(rules = []) {
                     <input type="checkbox" class="rule-enabled-switch" ${rule.enabled !== false ? 'checked' : ''}>
                     <span class="slider"></span>
                 </label>
-                <span class="rule-time-label" style="font-weight: 600; font-size: 0.9rem;">${escapeHtml(rule.time || '12:00')}</span>
+                <span class="rule-time-label">${escapeHtml(rule.time || '12:00')}</span>
                 <div style="flex: 1;"></div>
                 <button type="button" class="rule-expand-btn icon-btn-small" style="background: none; border: none; color: var(--text-secondary); cursor: pointer;">▼</button>
                 <button type="button" class="rule-delete-btn icon-btn-small" style="background: none; border: none; color: var(--danger-color); cursor: pointer;" onclick="event.stopPropagation();">✕</button>
@@ -944,7 +954,7 @@ function renderGlobalRules(rules = []) {
                         <option value="today_only" ${rule.task_scope === 'today_only' ? 'selected' : ''}>仅今日任务（含逾期）</option>
                         <option value="recurring_only" ${rule.task_scope === 'recurring_only' ? 'selected' : ''}>仅打卡/重复任务</option>
                     </select>
-                    <div class="rule-scope-hint" style="font-size: 0.72rem; color: #10B981; margin-top: 4px; line-height: 1.3;">💡 说明：所有统计均基于【今日视角】，计算今日的任务情况</div>
+                    <div class="rule-scope-hint setting-hint" style="margin-top: 4px;">💡 说明：所有统计均基于【今日视角】，计算今日的任务情况</div>
                 </div>
                 <div class="input-group" style="margin-bottom: 8px;">
                     <label>通知标题（留空默认 Todo）</label>
@@ -952,8 +962,8 @@ function renderGlobalRules(rules = []) {
                 </div>
                 <div class="input-group">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                        <label style="margin: 0; font-size: 0.8rem; font-weight: 500;">通知正文</label>
-                        <span style="font-size: 0.68rem; color: var(--text-secondary);">输入 <code style="color: var(--accent-color); background: rgba(255,255,255,0.1); padding: 0 3px; border-radius: 3px;">{</code> 可快捷插入变量</span>
+                        <label style="margin: 0;">通知正文</label>
+                        <span class="setting-hint">输入 <code style="color: var(--accent-color); background: rgba(255,255,255,0.1); padding: 0 3px; border-radius: 3px;">{</code> 可快捷插入变量</span>
                     </div>
                     <div style="position: relative;">
                         <textarea class="rule-body-input" rows="2" style="resize: none; overflow-y: auto;" placeholder="自定义或使用预设内容，输入 { 可选择变量">${escapeHtml(rule.body || '')}</textarea>
@@ -1301,7 +1311,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
         const labelText = targetCount
             ? `进度：${count}/${targetCount}次`
             : `打卡：${count}次`;
-        infoRow.innerHTML = `<span style="font-size: 0.75rem; color: var(--text-secondary);">${labelText}</span>`;
+        infoRow.innerHTML = `<span class="ui-note">${labelText}</span>`;
         checkinContainer.appendChild(infoRow);
 
         const grid = document.createElement('div');
@@ -1347,11 +1357,11 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
                 <div style="flex-grow: 1; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; position: relative;">
                     <div style="width: ${pct}%; height: 100%; background: var(--accent-color); border-radius: 3px; transition: width 0.3s;"></div>
                 </div>
-                <span style="font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; margin-left: 8px;">进度：${count}/${target}天</span>
+                <span class="ui-note" style="white-space: nowrap; margin-left: 8px;">进度：${count}/${target}天</span>
             `;
         } else {
             const progressText = document.createElement('span');
-            progressText.style.cssText = 'font-size: 0.75rem; color: var(--text-secondary);';
+            progressText.className = 'ui-note';
             progressText.textContent = `打卡：${count}次`;
             barRow.appendChild(progressText);
         }
@@ -1374,7 +1384,7 @@ function createTodoItemElement(todo, todayStr, tomorrowStr, checkinDate = null) 
         todo.subtasks.forEach((sub, idx) => {
             const subLi = document.createElement('li');
             subLi.className = `subtask-item ${sub.completed ? 'completed' : ''}`;
-            subLi.style.cssText = "display: flex; align-items: center; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 4px; padding: 4px 0; transition: all 0.2s;";
+            subLi.style.cssText = "display: flex; align-items: center; font: var(--ui-body); color: var(--text-secondary); margin-bottom: 4px; padding: 4px 0; transition: all 0.2s;";
             subLi.innerHTML = `
                 <div class="subtask-checkbox" style="width: 14px; height: 14px; margin-right: 8px; flex-shrink: 0; cursor: pointer; border: 1.5px solid ${sub.completed ? 'var(--accent-color)' : 'var(--text-secondary)'}; background: ${sub.completed ? 'var(--accent-color)' : 'transparent'}; border-radius: 4px; display: flex; justify-content: center; align-items: center; transition: all 0.2s;">
                     <svg viewBox="0 0 24 24" fill="none" width="10" height="10" style="opacity: ${sub.completed ? '1' : '0'}; transition: opacity 0.2s;">
@@ -1558,7 +1568,7 @@ function showCheckinDropdown(cellEl, todo, dateStr, onCustomUpdate = null) {
 
     // Create dropdown element
     const dropdown = document.createElement('div');
-    dropdown.className = 'checkin-dropdown';
+    dropdown.className = 'ui-popup-surface checkin-dropdown';
     dropdown.dataset.cellId = dateStr;
 
     const initialDateTime = isChecked
@@ -1568,7 +1578,7 @@ function showCheckinDropdown(cellEl, todo, dateStr, onCustomUpdate = null) {
     const initialTime = initialDateTime.time;
 
     dropdown.innerHTML = `
-        <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 4px; color: var(--accent-color);">
+        <div style="font: var(--ui-heading); margin-bottom: 4px; color: var(--accent-color);">
             ${isChecked ? '修改打卡时间' : '补打卡'}
         </div>
         <div>
@@ -1581,11 +1591,11 @@ function showCheckinDropdown(cellEl, todo, dateStr, onCustomUpdate = null) {
         </div>
         <div class="checkin-dropdown-buttons">
             ${isChecked ? `
-                <button type="button" class="checkin-dropdown-btn primary" id="dropdown-save">保存</button>
-                <button type="button" class="checkin-dropdown-btn danger" id="dropdown-cancel-check">销卡</button>
+                <button type="button" class="ui-button checkin-dropdown-btn primary" id="dropdown-save">保存</button>
+                <button type="button" class="ui-button checkin-dropdown-btn danger" id="dropdown-cancel-check">销卡</button>
             ` : `
-                <button type="button" class="checkin-dropdown-btn primary" id="dropdown-save">打卡</button>
-                <button type="button" class="checkin-dropdown-btn secondary" id="dropdown-close">取消</button>
+                <button type="button" class="ui-button checkin-dropdown-btn primary" id="dropdown-save">打卡</button>
+                <button type="button" class="ui-button checkin-dropdown-btn" id="dropdown-close">取消</button>
             `}
         </div>
     `;
@@ -1714,7 +1724,7 @@ function renderMonthCalendar(container, todo, isInteractive, todayStr, onCustomU
     weekLabels.forEach(label => {
         const headerCell = document.createElement('div');
         headerCell.className = 'checkin-grid-header';
-        headerCell.style.cssText = "text-align: center; font-size: 0.7rem; color: var(--text-secondary); font-weight: 600; padding-bottom: 4px; user-select: none;";
+        headerCell.style.cssText = "text-align: center; font: var(--ui-note); color: var(--text-secondary); padding-bottom: 4px; user-select: none;";
         headerCell.textContent = label;
         container.appendChild(headerCell);
     });
@@ -1868,8 +1878,8 @@ function renderEditSubtasks() {
                 </svg>
             </div>
             <div class="subtask-text-container" style="flex: 1; display: flex; align-items: center; overflow: hidden; min-height: 20px;">
-                <span class="subtask-content-span" style="color: ${sub.completed ? 'var(--text-secondary)' : 'var(--text-primary)'}; text-decoration: ${sub.completed ? 'line-through' : 'none'}; font-size: 0.95rem; white-space: pre-wrap; word-break: break-word; transition: color 0.2s;"></span>
-                <textarea class="subtask-inline-edit" rows="1" style="flex: 1; background: transparent; border: none; outline: none; color: var(--text-primary); font-family: inherit; font-size: 0.95rem; margin: 0; padding: 0; resize: none; overflow: hidden; word-break: break-word; display: none;"></textarea>
+                <span class="subtask-content-span" style="color: ${sub.completed ? 'var(--text-secondary)' : 'var(--text-primary)'}; text-decoration: ${sub.completed ? 'line-through' : 'none'}; font: var(--ui-body); white-space: pre-wrap; word-break: break-word; transition: color 0.2s;"></span>
+                <textarea class="subtask-inline-edit" rows="1" style="flex: 1; background: transparent; border: none; outline: none; color: var(--text-primary); font: var(--ui-body); margin: 0; padding: 0; resize: none; overflow: hidden; word-break: break-word; display: none;"></textarea>
             </div>
             <div class="subtask-actions" style="display: flex; flex-direction: column; gap: 4px; opacity: 0; transition: all 0.2s; margin-left: 8px;">
                 <button type="button" class="icon-btn-small edit-subtask">
@@ -2336,86 +2346,27 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     const labelEl = document.getElementById('stats-date-label');
 
     const activeTodos = getActiveTodos().filter(t => !t.deleted).map(t => ({ ...t, content: displayTaskName(appState.activeSource.type === "personal" ? appState.todoData : appState.collabData, t.id, t.content) }));
-    let periodTodos = [];
-    if (appState.statsPeriod === 'day') {
-        labelEl.textContent = `${targetDayStr} · 周${'日一二三四五六'[appState.statsTargetDate.getDay()]}`;
-        periodTodos = activeTodos.filter(t => {
-            if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
-                return (t.completed_dates || []).some(dStr => dStr.startsWith(targetDayStr));
-            } else {
-                if (t.completed && t.completed_at) {
-                    return getLocalDateStringFromISO(t.completed_at) === targetDayStr;
-                } else {
-                    return t.date === targetDayStr;
-                }
-            }
-        });
-    } else if (appState.statsPeriod === 'week') {
-        const parts = targetWeekStr.split('-W');
-        labelEl.textContent = `${parts[0]}年 第${parts[1]}周`;
-        periodTodos = activeTodos.filter(t => {
-            if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
-                const hasCheckin = (t.completed_dates || []).some(dStr => {
-                    const checkDate = new Date(dStr);
-                    return !isNaN(checkDate.getTime()) && getISOWeekString(checkDate) === targetWeekStr;
-                });
-                if (t.task_type === 'weekly_checkin' && t.date === targetWeekStr) {
-                    return t.target_count !== null ? true : hasCheckin;
-                }
-                return hasCheckin;
-            } else {
-                if (t.completed && t.completed_at) {
-                    const compDate = new Date(t.completed_at);
-                    if (!isNaN(compDate.getTime())) {
-                        return getISOWeekString(compDate) === targetWeekStr;
-                    }
-                    return false;
-                } else {
-                    if (!t.date) return false;
-                    if (t.date === targetWeekStr) return true;
-                    if (t.date.length === 10) {
-                        const checkDate = new Date(t.date);
-                        if (isNaN(checkDate.getTime())) return false;
-                        return getISOWeekString(checkDate) === targetWeekStr;
-                    }
-                    return false;
-                }
-            }
-        });
-    } else {
-        const parts = targetMonthStr.split('-');
-        labelEl.textContent = `${parts[0]}年 ${parts[1]}月`;
-        periodTodos = activeTodos.filter(t => {
-            if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
-                const hasCheckin = (t.completed_dates || []).some(dStr => dStr.startsWith(targetMonthStr));
-                if (t.task_type === 'monthly_checkin' && t.date === targetMonthStr) {
-                    return t.target_count !== null ? true : hasCheckin;
-                }
-                return hasCheckin;
-            } else {
-                if (t.completed && t.completed_at) {
-                    return getLocalDateStringFromISO(t.completed_at).substring(0, 7) === targetMonthStr;
-                } else {
-                    if (!t.date) return false;
-                    if (t.date === targetMonthStr) return true;
-                    if (t.date.length === 10) return t.date.startsWith(targetMonthStr);
-                    return false;
-                }
-            }
-        });
+    const period = appState.statsPeriod;
+    const targetPeriod = { day: targetDayStr, week: targetWeekStr, month: targetMonthStr }[period];
+    if (period === 'day') labelEl.textContent = targetDayStr + ' · 周' + '日一二三四五六'[appState.statsTargetDate.getDay()];
+    else if (period === 'week') labelEl.textContent = targetWeekStr.replace('-W', '年 第') + '周';
+    else labelEl.textContent = targetMonthStr.replace('-', '年 ') + '月';
+
+    const filteredTodos = activeTodos.filter(t => appState.statsFilters[statsTaskStyle(t.task_type).key] !== false);
+    const completionEvents = collectTaskTimelineEvents(filteredTodos, period, appState.statsTargetDate);
+    const eventsByTodo = new Map();
+    for (const event of completionEvents) {
+        if (!eventsByTodo.has(event.todo)) eventsByTodo.set(event.todo, []);
+        eventsByTodo.get(event.todo).push(event);
     }
-
-    // Apply global category filter
-    periodTodos = periodTodos.filter(t => {
-        const filters = appState.statsFilters;
-        if (t.task_type === 'weekly_checkin') return filters.weekly;
-        if (t.task_type === 'monthly_checkin') return filters.monthly;
-        return filters.normal;
+    const periodTodos = filteredTodos.filter(todo => {
+        if (eventsByTodo.has(todo)) return true;
+        if (todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin') {
+            return todo.target_count != null && todo.date === targetPeriod &&
+                ((period === 'week' && todo.task_type === 'weekly_checkin') || (period === 'month' && todo.task_type === 'monthly_checkin'));
+        }
+        return !(todo.completed && todo.completed_at) && (todo.date === targetPeriod || statsPeriodKey(todo.date, period) === targetPeriod);
     });
-
-    let targetPeriod = targetMonthStr;
-    if (appState.statsPeriod === 'day') targetPeriod = targetDayStr;
-    else if (appState.statsPeriod === 'week') targetPeriod = targetWeekStr;
     const { totalCount: totalCountSum, completedCount: completedCountSum, progress } =
         calculateStatsPeriodProgress(periodTodos, appState.statsPeriod, targetPeriod);
     const formatVal = val => val % 1 === 0 ? val : val.toFixed(1);
@@ -2423,228 +2374,24 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
     document.getElementById('stats-summary-text').textContent = `共 ${formatVal(totalCountSum)} 项，已完成 ${formatVal(completedCountSum)} 项，进度 ${progress}%`;
     document.getElementById('stats-progress-fill').style.width = `${progress}%`;
 
-    // 时段分布渲染 (打卡任务包含有时间戳记录的正常打卡，排除无时分秒的补打卡)
-    let morningCount = 0, afternoonCount = 0, eveningCount = 0, nightCount = 0;
-    let makeupCheckins = [];
-
-    periodTodos.forEach(t => {
-        if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
-            const completedDates = t.completed_dates || [];
-            completedDates.forEach(dStr => {
-                let inPeriod = false;
-                if (appState.statsPeriod === 'day') {
-                    inPeriod = dStr.startsWith(targetDayStr);
-                } else if (appState.statsPeriod === 'week') {
-                    const checkDate = new Date(dStr);
-                    inPeriod = !isNaN(checkDate.getTime()) && getISOWeekString(checkDate) === targetWeekStr;
-                } else {
-                    inPeriod = dStr.startsWith(targetMonthStr);
-                }
-
-                if (inPeriod) {
-                    if (dStr.length > 10) {
-                        // 正常打卡计入时段分布
-                        const slot = categorizeByTimeSlot(dStr);
-                        if (slot === 'morning') morningCount++;
-                        else if (slot === 'afternoon') afternoonCount++;
-                        else if (slot === 'evening') eveningCount++;
-                        else if (slot === 'night') nightCount++;
-                    } else {
-                        // 补打卡（长度为10，如 YYYY-MM-DD）不计入时段，计为补打卡数
-                        makeupCheckins.push({ date: dStr, content: t.content, todo: t });
-                    }
-                }
-            });
-        } else {
-            if (t.completed && t.completed_at) {
-                if (t.completed_at.length > 10 && t.completed_at.includes('T')) {
-                    const slot = categorizeByTimeSlot(t.completed_at);
-                    if (slot === 'morning') morningCount++;
-                    else if (slot === 'afternoon') afternoonCount++;
-                    else if (slot === 'evening') eveningCount++;
-                    else if (slot === 'night') nightCount++;
-                } else {
-                    makeupCheckins.push({ date: t.completed_at.substring(0, 10), content: t.content, todo: t });
-                }
-            }
-        }
-    });
-
-    const totalSlots = morningCount + afternoonCount + eveningCount + nightCount;
-    
-    const morningPct = totalSlots === 0 ? 0 : Math.round((morningCount / totalSlots) * 100);
-    const afternoonPct = totalSlots === 0 ? 0 : Math.round((afternoonCount / totalSlots) * 100);
-    const eveningPct = totalSlots === 0 ? 0 : Math.round((eveningCount / totalSlots) * 100);
-    const nightPct = totalSlots === 0 ? 0 : Math.round((nightCount / totalSlots) * 100);
-
-    const tipEl = document.getElementById('time-distribution-tip');
-    const leftCol = document.getElementById('makeup-checkins-left');
-    const rightCol = document.getElementById('makeup-checkins-right');
-    
-    if (leftCol) leftCol.innerHTML = '';
-    if (rightCol) rightCol.innerHTML = '';
-
-    if (tipEl) {
-        if (makeupCheckins.length > 0) {
-            let periodText = '本日';
-            if (appState.statsPeriod === 'week') periodText = '本周';
-            else if (appState.statsPeriod === 'month') periodText = '本月';
-            tipEl.textContent = `* ${periodText}包含 ${makeupCheckins.length} 项补打卡，已列在左右两侧，不计入时段统计`;
-            tipEl.classList.remove('hidden');
-
-            // Render makeup checkins to left and right columns
-            makeupCheckins.forEach((item, index) => {
-                const t = item.todo;
-                
-                let color = '#10B981';
-                let shape = 'circle';
-                if (t.task_type === 'weekly_checkin') {
-                    color = '#6366F1';
-                    shape = 'diamond';
-                } else if (t.task_type === 'monthly_checkin') {
-                    color = '#F43F5E';
-                    shape = 'star';
-                }
-
-                let dotSize = 8;
-                let strokeWidth = 1.5;
-                let opacityVal = 0.95;
-                if (appState.statsPeriod === 'week') {
-                    dotSize = 6;
-                    strokeWidth = 1.0;
-                    opacityVal = 0.8;
-                } else if (appState.statsPeriod === 'month') {
-                    dotSize = 4.5;
-                    strokeWidth = 0.7;
-                    opacityVal = 0.6;
-                }
-
-                const x = 11, y = 11; // center of 22x22 SVG
-                let innerSvg = '';
-
-                if (shape === 'circle') {
-                    innerSvg = `<circle cx="${x}" cy="${y}" r="${dotSize}" fill="${color}" stroke="#ffffff" stroke-width="${strokeWidth}" opacity="${opacityVal}" />`;
-                } else if (shape === 'diamond') {
-                    const p1 = `${x},${y - dotSize * 1.1}`;
-                    const p2 = `${x + dotSize * 1.1},${y}`;
-                    const p3 = `${x},${y + dotSize * 1.1}`;
-                    const p4 = `${x - dotSize * 1.1},${y}`;
-                    innerSvg = `<polygon points="${p1} ${p2} ${p3} ${p4}" fill="${color}" stroke="#ffffff" stroke-width="${strokeWidth}" opacity="${opacityVal}" />`;
-                } else if (shape === 'star') {
-                    const spikes = 5;
-                    const outerRadius = dotSize * 1.25;
-                    const innerRadius = dotSize * 0.6;
-                    let rot = Math.PI / 2 * 3;
-                    let px, py;
-                    let step = Math.PI / spikes;
-                    let points = [];
-                    for (let i = 0; i < spikes; i++) {
-                        px = x + Math.cos(rot) * outerRadius;
-                        py = y + Math.sin(rot) * outerRadius;
-                        points.push(`${px},${py}`);
-                        rot += step;
-                        px = x + Math.cos(rot) * innerRadius;
-                        py = y + Math.sin(rot) * innerRadius;
-                        points.push(`${px},${py}`);
-                        rot += step;
-                    }
-                    innerSvg = `<polygon points="${points.join(' ')}" fill="${color}" stroke="#ffffff" stroke-width="${strokeWidth}" opacity="${opacityVal}" />`;
-                }
-
-                const dot = document.createElement('div');
-                dot.className = 'makeup-dot-item';
-                dot.innerHTML = `<svg width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">${innerSvg}</svg>`;
-                
-                const tooltipEl = document.getElementById('clock-tooltip');
-                dot.addEventListener('mouseover', (e) => {
-                    const childShape = dot.querySelector('circle, polygon');
-                    if (childShape) {
-                        childShape.style.stroke = color;
-                        childShape.style.strokeWidth = `${(strokeWidth + 2.5).toFixed(1)}px`;
-                        childShape.style.filter = `drop-shadow(0 0 3px rgba(0,0,0,0.9)) drop-shadow(0 0 6px ${color})`;
-                        childShape.style.opacity = '1';
-                    }
-                    if (tooltipEl) {
-                        tooltipEl.style.display = 'block';
-                        tooltipEl.innerHTML = `<strong>${escapeHtml(item.content)}</strong><br/>完成日期: ${clockTooltipDateTime(item.date).date}`;
-                        const cardRect = document.getElementById('time-distribution').getBoundingClientRect();
-                        let tooltipX = e.clientX - cardRect.left + 12;
-                        if (index % 2 === 1) {
-                            tooltipX = e.clientX - cardRect.left - tooltipEl.offsetWidth - 12;
-                        }
-                        const tooltipY = e.clientY - cardRect.top + 12;
-                        tooltipEl.style.left = `${Math.max(8, tooltipX)}px`;
-                        tooltipEl.style.top = `${Math.max(8, tooltipY)}px`;
-                    }
-                });
-                
-                dot.addEventListener('mousemove', (e) => {
-                    if (tooltipEl && tooltipEl.style.display === 'block') {
-                        const cardRect = document.getElementById('time-distribution').getBoundingClientRect();
-                        let tooltipX = e.clientX - cardRect.left + 12;
-                        if (index % 2 === 1) {
-                            tooltipX = e.clientX - cardRect.left - tooltipEl.offsetWidth - 12;
-                        }
-                        const tooltipY = e.clientY - cardRect.top + 12;
-                        tooltipEl.style.left = `${Math.max(8, tooltipX)}px`;
-                        tooltipEl.style.top = `${Math.max(8, tooltipY)}px`;
-                    }
-                });
-                
-                dot.addEventListener('mouseout', () => {
-                    const childShape = dot.querySelector('circle, polygon');
-                    if (childShape) {
-                        childShape.style.stroke = '#ffffff';
-                        childShape.style.strokeWidth = `${strokeWidth}px`;
-                        childShape.style.filter = 'none';
-                        childShape.style.opacity = opacityVal;
-                    }
-                    if (tooltipEl) tooltipEl.style.display = 'none';
-                });
-                
-                dot.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    if (tooltipEl) tooltipEl.style.display = 'none';
-                    openEditModal(t);
-                });
-                
-                if (index % 2 === 0 && leftCol) {
-                    leftCol.appendChild(dot);
-                } else if (rightCol) {
-                    rightCol.appendChild(dot);
-                }
-            });
-        } else {
-            tipEl.textContent = '';
-            tipEl.classList.add('hidden');
-        }
-    }
+    const timingEnabled = learningUI.enabled();
+    const entries = timingEnabled ? learningUI.resolvedEntries() : [];
+    const conflicts = timingEnabled ? learningUI.conflicts() : new Set();
+    const arcs = timingEnabled
+        ? collectTimerArcs(entries, appState.activeSource, appState.statsPeriod, appState.statsTargetDate, conflicts)
+        : [];
+    const slotDurations = checkinDurationBySlot(arcs, filteredTodos);
+    const totalDuration = Object.values(slotDurations).reduce((total, duration) => total + duration, 0);
+    const slotPercent = slot => totalDuration ? Math.round(slotDurations[slot] / totalDuration * 100) : 0;
 
     const insightTextEl = document.getElementById('time-insight-text');
-    if (totalSlots === 0) {
-        insightTextEl.textContent = '☀️ 暂无已完成的任务数据';
-    } else {
-        let maxCount = morningCount;
-        let maxSlotLabel = '上午';
-        let maxPct = morningPct;
-
-        if (afternoonCount > maxCount) {
-            maxCount = afternoonCount;
-            maxSlotLabel = '下午';
-            maxPct = afternoonPct;
-        }
-        if (eveningCount > maxCount) {
-            maxCount = eveningCount;
-            maxSlotLabel = '晚上';
-            maxPct = eveningPct;
-        }
-        if (nightCount > maxCount) {
-            maxCount = nightCount;
-            maxSlotLabel = '深夜';
-            maxPct = nightPct;
-        }
-        
-        insightTextEl.textContent = `☀️ 当前周期内你的高效时段在 ${maxSlotLabel}，占已完成任务的 ${maxPct}%`;
+    insightTextEl.hidden = !timingEnabled;
+    insightTextEl.textContent = '本周期暂无打卡任务计时';
+    if (totalDuration > 0) {
+        const slotNames = { night: '深夜', morning: '上午', afternoon: '下午', evening: '晚上' };
+        const maxDuration = Math.max(...Object.values(slotDurations));
+        const maxSlot = Object.keys(slotDurations).find(slot => slotDurations[slot] === maxDuration);
+        insightTextEl.textContent = `${slotNames[maxSlot]}投入最多，占打卡任务总计时的 ${slotPercent(maxSlot)}%`;
     }
 
     // ====== CUSTOM SVG CLOCK RENDERING ======
@@ -2675,9 +2422,9 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         const q1Path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         q1Path.setAttribute('d', `M ${cx},${cy - r} A ${r},${r} 0 0 1 ${cx + r},${cy}`);
         q1Path.setAttribute('fill', 'none');
-        q1Path.setAttribute('stroke', '#3b82f6');
+        q1Path.setAttribute('stroke', timeSlotColors.night);
         q1Path.setAttribute('stroke-width', strokeW);
-        q1Path.setAttribute('opacity', totalSlots > 0 ? (nightCount > 0 ? 0.95 : 0.2) : 0.2);
+        q1Path.setAttribute('opacity', slotDurations.night > 0 ? 0.95 : 0.2);
         q1Path.setAttribute('class', 'clock-quadrant q1');
         clockGroup.appendChild(q1Path);
         
@@ -2685,9 +2432,9 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         const q2Path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         q2Path.setAttribute('d', `M ${cx + r},${cy} A ${r},${r} 0 0 1 ${cx},${cy + r}`);
         q2Path.setAttribute('fill', 'none');
-        q2Path.setAttribute('stroke', '#f59e0b');
+        q2Path.setAttribute('stroke', timeSlotColors.morning);
         q2Path.setAttribute('stroke-width', strokeW);
-        q2Path.setAttribute('opacity', totalSlots > 0 ? (morningCount > 0 ? 0.95 : 0.2) : 0.2);
+        q2Path.setAttribute('opacity', slotDurations.morning > 0 ? 0.95 : 0.2);
         q2Path.setAttribute('class', 'clock-quadrant q2');
         clockGroup.appendChild(q2Path);
         
@@ -2695,9 +2442,9 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         const q3Path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         q3Path.setAttribute('d', `M ${cx},${cy + r} A ${r},${r} 0 0 1 ${cx - r},${cy}`);
         q3Path.setAttribute('fill', 'none');
-        q3Path.setAttribute('stroke', '#7b61ff');
+        q3Path.setAttribute('stroke', timeSlotColors.afternoon);
         q3Path.setAttribute('stroke-width', strokeW);
-        q3Path.setAttribute('opacity', totalSlots > 0 ? (afternoonCount > 0 ? 0.95 : 0.2) : 0.2);
+        q3Path.setAttribute('opacity', slotDurations.afternoon > 0 ? 0.95 : 0.2);
         q3Path.setAttribute('class', 'clock-quadrant q3');
         clockGroup.appendChild(q3Path);
         
@@ -2705,9 +2452,9 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         const q4Path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         q4Path.setAttribute('d', `M ${cx - r},${cy} A ${r},${r} 0 0 1 ${cx},${cy - r}`);
         q4Path.setAttribute('fill', 'none');
-        q4Path.setAttribute('stroke', '#6366f1');
+        q4Path.setAttribute('stroke', timeSlotColors.evening);
         q4Path.setAttribute('stroke-width', strokeW);
-        q4Path.setAttribute('opacity', totalSlots > 0 ? (eveningCount > 0 ? 0.95 : 0.2) : 0.2);
+        q4Path.setAttribute('opacity', slotDurations.evening > 0 ? 0.95 : 0.2);
         q4Path.setAttribute('class', 'clock-quadrant q4');
         clockGroup.appendChild(q4Path);
 
@@ -2743,55 +2490,22 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         clockGroup.appendChild(centerGroup);
 
         // Text Labels
-        const drawLabel = (textStr, x, y, anchor, color) => {
+        const drawLabel = (slot, label, x, y, anchor) => {
             const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
             txt.setAttribute('x', x);
             txt.setAttribute('y', y);
             txt.setAttribute('text-anchor', anchor);
-            txt.setAttribute('fill', color);
+            txt.setAttribute('fill', timeSlotColors[slot]);
             txt.setAttribute('font-size', '11.5px');
             txt.setAttribute('font-weight', '600');
-            txt.textContent = textStr;
+            txt.textContent = timingEnabled ? `${label}: ${slotPercent(slot)}%` : label;
             clockGroup.appendChild(txt);
         };
         
-        drawLabel(`深夜 (0-6): ${nightPct}%`, 325, 25, 'end', '#3b82f6');
-        drawLabel(`上午 (6-12): ${morningPct}%`, 325, 245, 'end', '#f59e0b');
-        drawLabel(`下午 (12-18): ${afternoonPct}%`, 15, 245, 'start', '#7b61ff');
-        drawLabel(`晚上 (18-24): ${eveningPct}%`, 15, 25, 'start', '#6366f1');
-
-        // Draw dots representing task completions
-        const completionEvents = [];
-        periodTodos.forEach(t => {
-            if (t.task_type === 'weekly_checkin' || t.task_type === 'monthly_checkin') {
-                const completedDates = t.completed_dates || [];
-                completedDates.forEach(dStr => {
-                    let inPeriod = false;
-                    if (appState.statsPeriod === 'day') {
-                        inPeriod = dStr.startsWith(targetDayStr);
-                    } else if (appState.statsPeriod === 'week') {
-                        const checkDate = new Date(dStr);
-                        inPeriod = !isNaN(checkDate.getTime()) && getISOWeekString(checkDate) === targetWeekStr;
-                    } else {
-                        inPeriod = dStr.startsWith(targetMonthStr);
-                    }
-
-                    if (inPeriod && dStr.length > 10) {
-                        completionEvents.push({
-                            todo: t,
-                            completed_at: dStr
-                        });
-                    }
-                });
-            } else {
-                if (t.completed && t.completed_at && t.completed_at.length > 10 && t.completed_at.includes('T')) {
-                    completionEvents.push({
-                        todo: t,
-                        completed_at: t.completed_at
-                    });
-                }
-            }
-        });
+        drawLabel('night', '深夜 (0-6)', 325, 25, 'end');
+        drawLabel('morning', '上午 (6-12)', 325, 245, 'end');
+        drawLabel('afternoon', '下午 (12-18)', 15, 245, 'start');
+        drawLabel('evening', '晚上 (18-24)', 15, 25, 'start');
 
         let dotSize = 8;
         let strokeWidth = 1.5;
@@ -2808,7 +2522,7 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
 
         const tooltipEl = document.getElementById('clock-tooltip');
 
-        completionEvents.forEach((ev, index) => {
+        completionEvents.filter(event => event.explicit).forEach((ev, index) => {
             const t = ev.todo;
             const timeStr = ev.completed_at;
             const dateObj = new Date(timeStr);
@@ -2827,53 +2541,8 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
             const x = cx + activeR * Math.sin(thetaRad);
             const y = cy - activeR * Math.cos(thetaRad);
             
-            let color = '#10B981';
-            let shape = 'circle';
-            if (t.task_type === 'weekly_checkin') {
-                color = '#6366F1';
-                shape = 'diamond';
-            } else if (t.task_type === 'monthly_checkin') {
-                color = '#F43F5E';
-                shape = 'star';
-            }
-
-            let shapeEl;
-            if (shape === 'circle') {
-                shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                shapeEl.setAttribute('cx', x);
-                shapeEl.setAttribute('cy', y);
-                shapeEl.setAttribute('r', dotSize);
-            } else if (shape === 'diamond') {
-                shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-                const p1 = `${x},${y - dotSize * 1.1}`;
-                const p2 = `${x + dotSize * 1.1},${y}`;
-                const p3 = `${x},${y + dotSize * 1.1}`;
-                const p4 = `${x - dotSize * 1.1},${y}`;
-                shapeEl.setAttribute('points', `${p1} ${p2} ${p3} ${p4}`);
-            } else if (shape === 'star') {
-                shapeEl = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-                const spikes = 5;
-                const outerRadius = dotSize * 1.25;
-                const innerRadius = dotSize * 0.6;
-                let rot = Math.PI / 2 * 3;
-                let px, py;
-                let step = Math.PI / spikes;
-                let points = [];
-                for (let i = 0; i < spikes; i++) {
-                    px = x + Math.cos(rot) * outerRadius;
-                    py = y + Math.sin(rot) * outerRadius;
-                    points.push(`${px},${py}`);
-                    rot += step;
-                    px = x + Math.cos(rot) * innerRadius;
-                    py = y + Math.sin(rot) * innerRadius;
-                    points.push(`${px},${py}`);
-                    rot += step;
-                }
-                shapeEl.setAttribute('points', points.join(' '));
-            }
-            
-            shapeEl.setAttribute('fill', color);
-            shapeEl.setAttribute('stroke', '#ffffff');
+            const { color } = statsTaskStyle(t.task_type);
+            const shapeEl = createStatsTaskMark(t.task_type, x, y, dotSize);
             shapeEl.setAttribute('stroke-width', strokeWidth);
             shapeEl.setAttribute('opacity', opacityVal);
             shapeEl.setAttribute('class', 'task-dot efficiency-dot');
@@ -2897,10 +2566,9 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
         playClockEntry(clockGroup);
     }
 
-    renderTimeline({ svgEl: document.getElementById('efficiency-clock-svg'), todos: activeTodos,
-        timingEnabled: learningUI.enabled(), conflicts: learningUI.conflicts(),
-        entries: learningUI.resolvedEntries(), source: appState.activeSource, period: appState.statsPeriod,
-        target: appState.statsTargetDate, filters: appState.statsFilters, openTodo: openEditModal,
+    renderTimeline({ svgEl: document.getElementById('efficiency-clock-svg'), todos: filteredTodos, completionEvents,
+        timingEnabled, conflicts, entries, arcs, source: appState.activeSource, period: appState.statsPeriod,
+        target: appState.statsTargetDate, openTodo: openEditModal,
         openRecord: learningUI.editRecord, openSubtask: openTimelineSubtask });
 
     let displayTodos = periodTodos;
@@ -2922,33 +2590,15 @@ function renderInsights(todayStr, tomorrowStr, thisWeekStr, thisMonthStr) {
 
     if (displayTodos.length === 0) {
         const emptyTip = document.createElement('div');
-        emptyTip.style.cssText = 'text-align: center; color: var(--text-secondary); padding: 20px; font-size: 0.85rem; font-style: italic;';
+        emptyTip.className = 'ui-note';
+        emptyTip.style.cssText = 'text-align: center; padding: 20px;';
         emptyTip.textContent = '没有符合条件的任务';
         statsList.appendChild(emptyTip);
     } else {
         displayTodos.forEach(todo => {
-            let checkinDateForTodo = null;
-            if (todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin') {
-                if (appState.statsPeriod === 'day') {
-                    const match = (todo.completed_dates || []).find(d => d.startsWith(targetDayStr));
-                    if (match) checkinDateForTodo = match;
-                } else if (appState.statsPeriod === 'week') {
-                    const matches = (todo.completed_dates || []).filter(d => {
-                        const checkDate = new Date(d);
-                        return !isNaN(checkDate.getTime()) && getISOWeekString(checkDate) === targetWeekStr;
-                    });
-                    if (matches.length > 0) {
-                        matches.sort();
-                        checkinDateForTodo = matches[matches.length - 1];
-                    }
-                } else if (appState.statsPeriod === 'month') {
-                    const matches = (todo.completed_dates || []).filter(d => d.startsWith(targetMonthStr));
-                    if (matches.length > 0) {
-                        matches.sort();
-                        checkinDateForTodo = matches[matches.length - 1];
-                    }
-                }
-            }
+            const checks = eventsByTodo.get(todo);
+            const checkinDateForTodo = todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin'
+                ? checks?.map(event => event.completed_at).sort().at(-1) : null;
             statsList.appendChild(createTodoItemElement(todo, todayStr, tomorrowStr, checkinDateForTodo));
         });
     }
@@ -3148,15 +2798,15 @@ function renderHealth(todayStr, tomorrowStr) {
         sleepingTodos.forEach(todo => {
             const age = calcTaskAgeDays(todo.created_at, now);
             const item = document.createElement('div');
-            item.className = 'sleeping-item';
+            item.className = 'ui-card sleeping-item';
             item.innerHTML = `
                 <div class="sleeping-item-info">
                     <span>${escapeHtml(todo.content)}</span>
                     <span>已存活 ${age} 天</span>
                 </div>
                 <div class="sleeping-item-actions">
-                    <button class="sleeping-action-btn btn-postpone">延期</button>
-                    <button class="sleeping-action-btn btn-delete">删除</button>
+                    <button class="ui-button compact sleeping-action-btn btn-postpone">延期</button>
+                    <button class="ui-button compact danger sleeping-action-btn btn-delete">删除</button>
                 </div>
             `;
             item.querySelectorAll('.sleeping-action-btn').forEach(button => {
@@ -3233,7 +2883,7 @@ function renderCollapsibleGroup(group, label, isCollapsed, type, themeColor, tod
     });
 
     if (!isCollapsed && ['weekly', 'monthly', 'weekly_uncompleted', 'monthly_uncompleted'].includes(type) && appState.activeSource.type === 'personal') {
-        const button = document.createElement('button'); button.className = 'learning-button period-import-button'; button.textContent = '导入';
+        const button = document.createElement('button'); button.className = 'ui-button period-import-button'; button.textContent = '导入';
         button.onclick = e => { e.stopPropagation(); openImportModal(type.startsWith('weekly') ? 'weekly' : 'monthly'); };
         header.insertBefore(button, header.querySelector('.badge'));
     }
@@ -3257,7 +2907,8 @@ function renderCollapsibleGroup(group, label, isCollapsed, type, themeColor, tod
         } else {
             if (group.length === 0 && (type === 'weekly' || type === 'monthly')) {
                 const emptyTip = document.createElement('div');
-                emptyTip.style.cssText = 'text-align: center; color: var(--text-secondary); padding: 16px; font-size: 0.85rem;';
+                emptyTip.className = 'ui-note';
+                emptyTip.style.cssText = 'text-align: center; padding: 16px;';
                 emptyTip.textContent = '当前周期无打卡计划，可从往期导入';
                 content.appendChild(emptyTip);
             } else {
@@ -3364,28 +3015,6 @@ function render() {
     const thisWeekStr = getThisWeekString();
     const thisMonthStr = getThisMonthString();
 
-    // 根据 appState.dateFilter 过滤数据
-    let filteredTodos = [...getActiveTodos()].filter(t => !t.deleted);
-
-    if (appState.searchQuery) {
-        const queryLower = appState.searchQuery.toLowerCase();
-        filteredTodos = filteredTodos.filter(t => displayTaskName(appState.activeSource.type === "personal" ? appState.todoData : appState.collabData, t.id, t.content).toLowerCase().includes(queryLower));
-    }
-
-    if (appState.dateFilter === 'today') {
-        filteredTodos = filteredTodos.filter(t => {
-            const completedToday = t.completed && t.completed_at && getLocalDateStringFromISO(t.completed_at) === todayStr;
-            const wasOverdue = t.date && t.date < todayStr && !isWeekDate(t.date) && !isMonthDate(t.date);
-            const isOverdueCompletedToday = completedToday && wasOverdue;
-
-            return t.date === todayStr 
-                || isOverdue(t, todayStr) 
-                || t.date === thisWeekStr 
-                || t.date === thisMonthStr
-                || isOverdueCompletedToday;
-        });
-    }
-
     if (appState.currentView === 'stats') {
         renderStats(todayStr, tomorrowStr, thisWeekStr, thisMonthStr);
         return;
@@ -3393,22 +3022,31 @@ function render() {
 
     if (appState.currentView === 'list') {
         listEl.innerHTML = '';
+        const activeTodos = getActiveTodos().filter(t => !t.deleted);
+        const queryLower = appState.searchQuery.toLowerCase();
+        const matchesSearch = t => !queryLower || displayTaskName(activeData, t.id, t.content).toLowerCase().includes(queryLower);
 
         if (appState.dateFilter === 'today') {
-            const monthGroup = filteredTodos.filter(t => t.date === thisMonthStr).sort(sortFunc);
-            const weekGroup = filteredTodos.filter(t => t.date === thisWeekStr && !monthGroup.includes(t)).sort(sortFunc);
-            const todayGroup = filteredTodos.filter(t => !monthGroup.includes(t) && !weekGroup.includes(t)).sort(sortFunc);
+            const todayGroup = activeTodos.filter(t => {
+                const completedToday = t.completed && t.completed_at && getLocalDateStringFromISO(t.completed_at) === todayStr;
+                const wasOverdue = t.date && t.date < todayStr && !isWeekDate(t.date) && !isMonthDate(t.date);
+                return t.date === todayStr || isOverdue(t, todayStr) || (completedToday && wasOverdue);
+            });
+            const weekGroup = activeTodos.filter(t => t.date === thisWeekStr);
+            const monthGroup = activeTodos.filter(t => t.date === thisMonthStr);
 
-            renderCollapsibleGroup(todayGroup, '今日任务', appState.todayCollapsed, 'today', 'var(--accent-color)', todayStr, tomorrowStr);
-            // 按实际设置的本周任务判断顺序，不受搜索或完成状态影响。
-            const hasWeekTasks = getActiveTodos().some(t => !t.deleted && t.date === thisWeekStr);
-            const periodGroups = [
+            const focusGroups = [
+                [todayGroup, '今日任务', appState.todayCollapsed, 'today', 'var(--accent-color)'],
                 [weekGroup, '本周任务', appState.weekCollapsed, 'weekly', '#fadb14'],
                 [monthGroup, '本月任务', appState.monthCollapsed, 'monthly', '#ff7a45'],
             ];
-            if (!hasWeekTasks) periodGroups.reverse();
-            periodGroups.forEach(args => renderCollapsibleGroup(...args, todayStr, tomorrowStr));
+            // 搜索只筛选区块内的任务，区块顺序取决于实际分组是否为空。
+            focusGroups.sort(([left], [right]) => Number(left.length === 0) - Number(right.length === 0));
+            focusGroups.forEach(([tasks, ...args]) => {
+                renderCollapsibleGroup(tasks.filter(matchesSearch).sort(sortFunc), ...args, todayStr, tomorrowStr);
+            });
         } else {
+            const filteredTodos = activeTodos.filter(matchesSearch);
             if (appState.allTabMode === 'uncompleted') {
                 // 1. 过滤未完成任务（未达标的打卡任务 + 未完成的普通任务）
                 const uncompletedTodos = filteredTodos.filter(t => !t.completed);
@@ -3478,7 +3116,7 @@ function render() {
                     const wrapper = document.createElement('div');
                     wrapper.className = 'archive-toggle-wrapper';
                     const btn = document.createElement('button');
-                    btn.className = 'archive-btn';
+                    btn.className = 'ui-button';
                     btn.id = 'toggle-archive-btn';
                     btn.textContent = appState.showAllHistory ? '收起历史归档' : `展开历史归档 (共 ${sortedCompletionDates.length} 天)`;
                     btn.addEventListener('click', () => {
@@ -3799,7 +3437,7 @@ function initApp() {
             if (svg) svg.classList.add('sync-spin');
             manualSyncBtn.disabled = true;
             try {
-                const loaded = await loadData();
+                const loaded = await loadData({ notifyErrors: false });
                 const planningReady = appState.activeSource.type !== 'personal' ||
                     !statsPlanningController || await statsPlanningController.sync();
                 if (!loaded || !planningReady || statusEl?.classList.contains('error')) {
@@ -3830,9 +3468,17 @@ function initApp() {
     bindRecordSandbox(document, invoke);
     const statsPlanning = document.getElementById('stats-planning');
     if (statsPlanning?.querySelector) {
-        statsPlanningController = bindRecordSandbox(document, invoke, statsPlanning, setPlanningSyncStatus);
+        statsPlanningController = bindRecordSandbox(document, invoke, statsPlanning, setPlanningSyncStatus,
+            () => learningUI.chooseLeave('周计划'));
         statsPlanning.addEventListener('planning-day', event => {
             void navigateStats('day', new Date(event.detail + 'T12:00:00'), true);
+        });
+        statsPlanning.addEventListener('planning-export', event => {
+            learningUI.exportDialog('week', new Date(event.detail + 'T12:00:00'));
+        });
+        statsPlanning.addEventListener('planning-reviews', event => {
+            learningUI.renderWeekReviews(event.detail.host, event.detail.cells, day =>
+                navigateStats('day', new Date(day + 'T12:00:00'), true));
         });
     }
     const settingsModal = document.getElementById('settings-modal');
@@ -3865,6 +3511,7 @@ function initApp() {
             if (targetPanel) {
                 targetPanel.classList.add('active');
             }
+            if (targetId === 'panel-sync') void statsPlanningController?.prepareFocusSetting();
             document.getElementById('settings-tabs-content').scrollTop = 0;
         });
     });
@@ -4448,13 +4095,13 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
 
     if (backupBtn) {
         backupBtn.addEventListener('click', async () => {
-            backupList.innerHTML = '<li>加载中...</li>';
+            backupList.innerHTML = '<li class="setting-hint">加载中...</li>';
             backupModal.classList.add('active');
             try {
                 const backups = await invoke('list_backups');
                 backupList.innerHTML = '';
                 if (backups.length === 0) {
-                    backupList.innerHTML = '<li style="text-align:center;color:var(--text-secondary);padding:10px;">暂无本地备份记录。</li>';
+                    backupList.innerHTML = '<li class="setting-hint" style="text-align:center;padding:10px;">暂无本地备份记录。</li>';
                 } else {
                     backups.forEach(b => {
                         const li = document.createElement('li');
@@ -4644,6 +4291,9 @@ function initCollaborationSharing({ settingSyncMode, settingWebdavUrl, settingWe
 
     // 统计筛选下拉菜单事件绑定
     const filterToggleBtn = document.getElementById('stats-filter-toggle-btn');
+    document.querySelectorAll('svg[data-stats-mark]').forEach(icon => {
+        icon.replaceChildren(createStatsTaskMark(icon.dataset.statsMark, 8, 8, 5));
+    });
     const filterDropdown = document.getElementById('stats-filter-dropdown');
     if (filterToggleBtn && filterDropdown) {
         filterToggleBtn.addEventListener('click', (e) => {
@@ -5174,7 +4824,7 @@ function scheduleMidnightRefresh() {
 
 function showToast(msg) {
     const toast = document.createElement('div');
-    toast.className = 'toast-notification';
+    toast.className = 'ui-popup-surface toast-notification';
     toast.textContent = msg;
     document.body.appendChild(toast);
     setTimeout(() => {

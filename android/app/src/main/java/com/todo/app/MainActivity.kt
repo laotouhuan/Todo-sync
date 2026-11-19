@@ -15,9 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -232,8 +230,7 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?, requestNavigation
             if (currentRoute == "settings") {
                 Text(
                     text = "系统设置",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
             } else {
@@ -247,8 +244,7 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?, requestNavigation
                     }
                     Text(
                         text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(Modifier.width(4.dp))
@@ -266,7 +262,7 @@ fun AppTopBar(viewModel: TodoViewModel, currentRoute: String?, requestNavigation
                         ) {
                             Text(
                                 text = "只读清单",
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                                style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )

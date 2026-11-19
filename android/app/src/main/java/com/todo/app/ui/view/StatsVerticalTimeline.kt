@@ -11,10 +11,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
@@ -42,6 +38,7 @@ fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: S
     val ref = if (source is TodoViewModel.ActiveSource.Collaboration) TaskReference("", "collaboration", (source as TodoViewModel.ActiveSource.Collaboration).collab.id) else TaskReference("")
     val resolved = remember(data.timeEntries, tasks, data.taskSeries, data.taskSeriesLinks) { Learning.resolveEntries(data.timeEntries, tasks, data, learning.sourceId) }
     val parts = remember(resolved, learning.conflicts, ref, period, target) { StatsTimeline.arcs(resolved, ref, period, target, conflicts = learning.conflicts) }
+    val labelColors = remember(resolved, ref, learning.conflicts) { timerLabelColors(resolved, ref, learning.conflicts) }
     val days = remember(period, target) { StatsTimeline.days(period, target) }
     val completed = remember(todos, period, target) { StatsTimeline.completions(todos, period, target) }
     val steps = remember(todos, period, target) { StatsTimeline.subtasks(todos, period, target) }
@@ -107,21 +104,23 @@ fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: S
                             val label = if (month) "${date.dayOfMonth}日" else listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")[index]
                             drawContext.canvas.nativeCanvas.drawText(label, x, 17.dp.toPx(), paint)
                             if (!month) drawContext.canvas.nativeCanvas.drawText(date.toString().drop(5), x, 32.dp.toPx(), paint)
-                            listOf(Color(0xFF3B82F6), Color(0xFFF59E0B), Color(0xFF7B61FF), Color(0xFF6366F1)).forEachIndexed { slot, color ->
+                            TimeSlotColors.chronological.forEachIndexed { slot, color ->
                                 drawLine(color.copy(alpha = .25f), Offset(x, yAt(slot * 360.0)), Offset(x, yAt((slot + 1) * 360.0)), lineWidth)
                             }
                             parts.filter { it.part.date == date }.forEach { a ->
                                 val end = minOf(a.endMinute, progress.value * 1440)
-                                if (end > a.startMinute) drawLine(Color(0xFF22D3EE).copy(alpha = .65f), Offset(x, yAt(a.startMinute.toDouble())), Offset(x, yAt(end.toDouble())), lineWidth)
+                                if (end > a.startMinute) {
+                                    val color = a.part.entry.label_snapshot?.let(labelColors::get) ?: unclassifiedTimerColor
+                                    drawLine(color, Offset(x, yAt(a.startMinute.toDouble())), Offset(x, yAt(end.toDouble())), lineWidth)
+                                }
                             }
                         }
-                        points.forEach { (e, p) -> drawVerticalMark(e.todo, e.subtask != null, p, (if (month) 3 else 4).dp.toPx(), clockEntryAlpha(progress.value, StatsTimeline.clockMinute(e.time))) }
+                        points.forEach { (e, p) -> drawStatsTaskMark(e.todo.statsVisualStyle(), p, (if (month) 3 else 4).dp.toPx(), clockEntryAlpha(progress.value, StatsTimeline.clockMinute(e.time)), subtask = e.subtask != null) }
                     }
                 }
             }
         }
     }
-    completed.filter { it.time == null }.forEach { e -> TextButton(onClick = { onEditTodo(e.todo) }) { Text("${e.date.toString().drop(5)} · ${e.todo.content}（无具体时间）") } }
     val format = DateTimeFormatter.ofPattern("MM-dd HH:mm")
     fun time(value: Instant) = value.atZone(ZoneId.systemDefault()).format(format)
     if (selectedPoints.isNotEmpty()) AlertDialog(
@@ -143,24 +142,4 @@ fun StatsVerticalTimeline(viewModel: TodoViewModel, todos: List<Todo>, period: S
     if (selectedParts.isNotEmpty()) TimelineRecordEditor(viewModel, selectedParts.map { it.part.entry.id }.distinct()) { selectedParts = emptyList() }
     if (tooltipParts.isNotEmpty()) TimelineTimerTooltip(tooltipParts, tooltipAnchor) { tooltipParts = emptyList() }
     if (editingSteps.isNotEmpty()) TimelineSubtaskPicker(viewModel, editingSteps) { editingSteps = emptyList() }
-}
-
-private fun DrawScope.drawVerticalMark(todo: Todo, subtask: Boolean, center: Offset, radius: Float, alpha: Float) {
-    val style = todo.statsVisualStyle()
-    if (subtask || style.shape == "circle") {
-        if (!subtask) drawCircle(style.color, radius, center, alpha = alpha)
-        drawCircle(if (subtask) style.color else Color.White, radius, center, alpha = alpha, style = Stroke(1.5.dp.toPx()))
-    } else {
-        val count = when (style.shape) { "triangle" -> 3; "diamond" -> 4; else -> 10 }
-        val path = Path().apply {
-            repeat(count) { i ->
-                val angle = i.toDouble() / count * PI * 2 - PI / 2
-                val r = if (style.shape == "star" && i % 2 == 1) radius * .45f else radius
-                val x = center.x + cos(angle).toFloat() * r; val y = center.y + sin(angle).toFloat() * r
-                if (i == 0) moveTo(x, y) else lineTo(x, y)
-            }
-            close()
-        }
-        drawPath(path, style.color, alpha = alpha); drawPath(path, Color.White, alpha = alpha, style = Stroke(1.dp.toPx()))
-    }
 }

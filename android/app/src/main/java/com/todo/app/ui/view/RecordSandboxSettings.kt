@@ -1,38 +1,55 @@
 package com.todo.app.ui.view
 
+import com.todo.app.ui.theme.SupportingText
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.LocalPinnableContainer
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.todo.app.data.model.Learning
@@ -64,10 +81,27 @@ internal class PersonalPlanningState(
     val syncFailed: Boolean,
     val saveError: String,
     val actionDate: String?,
-    val change: (JsonObject, () -> Unit) -> Unit,
+    val change: (JsonObject, Boolean, () -> Unit) -> Unit,
     val retry: () -> Unit,
-    val reload: () -> Unit
-)
+    val reload: () -> Unit,
+    val focusStatus: String,
+    val canEnableFocus: Boolean,
+    val cloudBacked: Boolean,
+    val enableFocus: () -> Unit,
+    val pendingRating: Boolean,
+    val saveRating: suspend (String, Int?, JsonElement, Boolean) -> RatingSaveResult
+) {
+    fun rating(date: String): JsonElement? = data?.let { ratingRecord(it, date) }
+}
+
+internal data class RatingSaveResult(val record: JsonElement? = null, val error: String = "", val pending: Boolean = false)
+
+private fun ratingRecord(data: JsonObject, date: String): JsonElement =
+    data.getValue("daily_ratings").jsonArray.firstOrNull { it.jsonObject["date"] == JsonPrimitive(date) } ?: JsonNull
+
+internal fun JsonElement?.ratingScore(): Int? = (this as? JsonObject)?.takeUnless {
+    it["deleted"]?.jsonPrimitive?.booleanOrNull == true
+}?.get("score")?.jsonPrimitive?.intOrNull
 
 @Composable
 internal fun rememberPersonalPlanning(viewModel: com.todo.app.ui.viewmodel.TodoViewModel): PersonalPlanningState {
@@ -83,6 +117,7 @@ internal fun rememberPersonalPlanning(viewModel: com.todo.app.ui.viewmodel.TodoV
         var writing by remember { mutableStateOf(false) }
         var status by remember { mutableStateOf("") }
         var actionDate by remember { mutableStateOf<String?>(null) }
+        var pendingRating by remember { mutableStateOf(false) }
         var afterSave by remember { mutableStateOf<(() -> Unit)?>(null) }
         LaunchedEffect(settings) {
             while (config.planningSettings() == settings) {
@@ -98,7 +133,10 @@ internal fun rememberPersonalPlanning(viewModel: com.todo.app.ui.viewmodel.TodoV
                 try {
                     val (_, saved) = operation()
                     if (config.planningSettings() != settings) return@launch
-                    if (saved) afterSave?.invoke()
+                    if (saved) {
+                        afterSave?.invoke()
+                        pendingRating = false
+                    }
                     afterSave = null
                 } catch (error: CancellationException) {
                     throw error
@@ -109,64 +147,150 @@ internal fun rememberPersonalPlanning(viewModel: com.todo.app.ui.viewmodel.TodoV
                 }
             }
         }
+        suspend fun rate(date: String, score: Int?, baseline: JsonElement, retry: Boolean): RatingSaveResult {
+            val view = current?.data
+            if (writing || config.planningSettings() != settings || view == null) return RatingSaveResult(error = "评分暂不可用，请重试")
+            val action = buildJsonObject {
+                put("kind", "rate"); put("date", date); put("score", score?.let(::JsonPrimitive) ?: JsonNull)
+                put("expectedRating", baseline)
+            }
+            writing = true
+            status = ""
+            actionDate = date
+            return try {
+                val (result, saved) = if (retry) repository.retry(settings) else {
+                    try {
+                        repository.change(settings, action, view.revision)
+                    } catch (error: IllegalStateException) {
+                        if (error.message != "RECORD_WRITE_STALE") throw error
+                        repository.change(settings, action, view.revision)
+                    }
+                }
+                check(saved) { "评分未保存，请重试" }
+                pendingRating = false
+                RatingSaveResult(ratingRecord(requireNotNull(result.preview.view), date))
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                status = error.message ?: "评分未保存，请重试"
+                try {
+                    pendingRating = repository.hasPendingRating(settings, date)
+                    if ("已更新" in status) repository.readLocal(settings)
+                } catch (refreshError: CancellationException) {
+                    throw refreshError
+                } catch (_: Exception) {
+                    // 保留原写入错误，由用户重试读取。
+                }
+                RatingSaveResult(error = status, pending = pendingRating)
+            } finally {
+                writing = false
+            }
+        }
         PersonalPlanningState(settings, current?.data?.preview?.view, writing || current?.loading == true,
             current?.loadError != null, current?.phase == SyncPhase.FAILED, status, actionDate,
-            change = { action, onSaved ->
+            change = { action, activateFocus, onSaved ->
                 if (!writing && current?.data != null) {
                     actionDate = action["date"]?.jsonPrimitive?.content
                     afterSave = onSaved
-                    write { repository.change(settings, action, current.data.revision) }
+                    write {
+                        val baseline = if (activateFocus) repository.enableFocus(settings).first else current.data
+                        repository.change(settings, action, baseline.revision)
+                    }
                 }
             },
             retry = { write { repository.retry(settings) } },
-            reload = { viewModel.refreshPlanning() })
+            reload = { viewModel.refreshPlanning() },
+            focusStatus = current?.data?.focusStatus ?: "unknown",
+            canEnableFocus = current?.data?.canEnableFocus == true,
+            cloudBacked = current?.data?.cloudBacked == true,
+            enableFocus = {
+                actionDate = null
+                write { repository.enableFocus(settings) }
+            },
+            pendingRating = pendingRating,
+            saveRating = ::rate)
     }
 }
 
 @Composable
 internal fun PersonalPlanningStats(
     state: PersonalPlanningState, date: LocalDate, period: String, navigation: InsightsNavigation,
+    detailOpen: Boolean, setDetailOpen: (Boolean) -> Unit, viewModel: com.todo.app.ui.viewmodel.TodoViewModel,
     selectDay: (LocalDate) -> Unit
 ) {
     var confirmation by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var expanded by remember(date, period) { mutableStateOf(false) }
+    var exporting by remember(date, period) { mutableStateOf(false) }
+    val data = state.data
+    val week = WeeklyPlanning.monday(date.toString())
+    val plan = remember(data, week) { data?.let { WeeklyPlanning.state(it, week) } }
+    val learning = currentLearningData(viewModel)
     ElevatedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp)) {
-            Text(if (period == "week") "周计划与评分" else "月评分", style = MaterialTheme.typography.titleSmall)
-            val data = state.data
+            Text(if (period == "week") "本周计划与回顾" else "月评分", style = MaterialTheme.typography.titleMedium)
             if (data != null) {
-                val week = WeeklyPlanning.monday(date.toString())
-                val plan = remember(data, week) { WeeklyPlanning.state(data, week) }
-                if (state.syncFailed) Text("计划与评分同步未完成")
+                if (state.syncFailed) SupportingText("计划与评分同步未完成")
                 if (period == "week") {
-                    plan.current?.getValue("days")?.jsonArray?.forEachIndexed { index, text ->
-                        val day = LocalDate.parse(week).plusDays(index.toLong())
-                        Text(planDayLabel(day), style = MaterialTheme.typography.labelLarge)
-                        Text(text.jsonPrimitive.content.ifEmpty { "当天未安排" })
-                        OutlinedButton(onClick = { selectDay(day) }) { Text("查看当日回顾") }
-                    }
-                    OutlinedButton(onClick = {
-                        if (expanded) navigation.request { expanded = false } else expanded = true
-                    }) { Text(when {
-                        expanded -> "收起周计划"
-                        plan.status == "conflict" -> "处理计划分歧"
-                        plan.status == "restart" -> "重新制定周计划"
-                        plan.status == "empty" -> "制定周计划"
-                        else -> "编辑周计划"
-                    }) }
-                }
-                if (expanded && period == "week") RecordSandboxPlanning(data, date.toString(), week, state.busy,
-                    { action -> state.change(action) {} }, { confirmation = it }, {}, showRating = false,
-                    navigation = navigation, savePlan = state.change, saveError = state.saveError, retry = state.retry)
-                RecordRatingCalendar(data, date, state.busy, { selectDay(LocalDate.parse(it)) }, period)
+                    Text("本周重点", style = MaterialTheme.typography.labelLarge)
+                    CollapsibleInsightText(plan?.current?.get("focus")?.jsonPrimitive?.content.orEmpty().ifBlank { "未填写本周重点" }, 3)
+                    if (plan?.status == "conflict") Text("周计划存在分歧")
+                    Text("每日评分", style = MaterialTheme.typography.labelLarge)
+                    RecordRatingCalendar(data, date, state.busy, {}, period, summary = false, interactive = false)
+                    OutlinedButton(onClick = { setDetailOpen(true) }) { Text("查看本周详情") }
+                } else RecordRatingCalendar(data, date, state.busy, { selectDay(LocalDate.parse(it)) }, period)
             } else PlanningReadStatus(state)
-            if (state.busy && state.actionDate == null) Text("正在保存计划…")
-            if (state.saveError.isNotEmpty() && state.actionDate == null) {
-                Text(state.saveError)
-                OutlinedButton(enabled = !state.busy, onClick = state.retry) { Text("重试上次保存") }
+        }
+    }
+    if (period == "week" && detailOpen) {
+        fun close() = navigation.request { setDetailOpen(false) }
+        Dialog(onDismissRequest = ::close) {
+            Surface(shape = MaterialTheme.shapes.large) {
+                Column(Modifier.padding(16.dp).heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
+                    Text("本周详情", style = MaterialTheme.typography.titleMedium)
+                    if (data == null) PlanningReadStatus(state)
+                    else {
+                        var edit by remember(week) { mutableStateOf(plan?.status != "current") }
+                        if (!edit) {
+                            Text("本周重点", style = MaterialTheme.typography.labelLarge)
+                            Text(plan?.current?.get("focus")?.jsonPrimitive?.content.orEmpty().ifBlank { "未填写本周重点" })
+                            plan?.current?.get("days")?.jsonArray?.forEachIndexed { index, value ->
+                                Text(planDayLabel(LocalDate.parse(week).plusDays(index.toLong())), style = MaterialTheme.typography.labelLarge)
+                                Text(value.jsonPrimitive.content.ifBlank { "当天未安排" })
+                            }
+                            OutlinedButton(onClick = { edit = true }) { Text("编辑周计划与历史") }
+                        }
+                        if (edit) key(state.target) {
+                            RecordSandboxPlanning(data, date.toString(), week, state.busy,
+                                { action -> state.change(action, false) {} }, { confirmation = it }, {}, showRating = false,
+                                navigation = navigation, savePlan = state.change, saveError = state.saveError, retry = state.retry,
+                                focusStatus = state.focusStatus, canEnableFocus = state.canEnableFocus,
+                                cloudBacked = state.cloudBacked, reload = state.reload)
+                        }
+                        if (state.saveError.isNotEmpty() && state.actionDate == null) {
+                            Text(state.saveError, color = MaterialTheme.colorScheme.error)
+                            OutlinedButton(enabled = !state.busy, onClick = state.retry) { Text("重试上次保存") }
+                        }
+                        Text("每日回顾", style = MaterialTheme.typography.labelLarge)
+                        for (index in 0..6) {
+                            val day = LocalDate.parse(week).plusDays(index.toLong())
+                            val record = learning.data.dailyReviews.find { it.date == day.toString() && !it.deleted }
+                            val score = state.rating(day.toString()).ratingScore()
+                            TextButton(onClick = { selectDay(day) }) {
+                                Column(Modifier.fillMaxWidth()) {
+                                    Text("${planDayLabel(day)} · ${score?.let { "$it / 5" } ?: "未评分"}")
+                                    Text(record?.let(Learning::preview) ?: "尚未填写复盘", maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                        val (average, covered, days) = WeeklyPlanning.ratingSummary(data, week, LocalDate.parse(week).plusDays(6).toString())
+                        Text("周平均 ${average ?: "—"} · 已评分 $covered/$days 天")
+                        TextButton(onClick = { exporting = true }) { Text("导出 Markdown") }
+                    }
+                    TextButton(onClick = ::close) { Text("关闭详情") }
+                }
             }
         }
     }
+    if (exporting) ReviewExportDialog(viewModel, learning.data, "week", date, state) { exporting = false }
     confirmation?.let { action ->
         AlertDialog(onDismissRequest = { confirmation = null }, text = { Text("删除此历史版本？") },
             confirmButton = { OutlinedButton(onClick = { confirmation = null; action() }) { Text("删除") } },
@@ -186,52 +310,98 @@ private fun PlanningReadStatus(state: PersonalPlanningState) {
 
 @Composable
 internal fun DailyPlanReference(state: PersonalPlanningState, date: LocalDate, openWeek: (() -> Unit)? = null) {
-    Text("当日计划 · 当前周计划", style = MaterialTheme.typography.labelLarge)
+    Text("今日计划", style = MaterialTheme.typography.labelLarge)
     val data = state.data
     if (data == null) {
         PlanningReadStatus(state)
+        if (openWeek != null) OutlinedButton(onClick = openWeek) { Text("查看周计划") }
         return
     }
     val week = WeeklyPlanning.monday(date.toString())
     val plan = remember(data, week) { WeeklyPlanning.state(data, week) }
-    Text(when (plan.status) {
+    CollapsibleInsightText(when (plan.status) {
         "current" -> plan.current?.getValue("days")?.jsonArray?.get(date.dayOfWeek.value - 1)
             ?.jsonPrimitive?.content.orEmpty().ifEmpty { "当天未安排" }
         "conflict" -> "周计划存在分歧，请到周视图处理"
         "restart" -> "周计划需重新制定"
         else -> "本周尚未制定计划"
-    })
-    if (state.syncFailed) Text("计划与评分同步未完成")
-    if (openWeek != null) OutlinedButton(onClick = openWeek) { Text(if (plan.status == "empty") "去制定周计划" else "查看本周计划") }
+    }, 2)
+    if (state.syncFailed) SupportingText("计划与评分同步未完成")
+    if (openWeek != null) OutlinedButton(onClick = openWeek) { Text("查看周计划") }
+}
+
+@Composable
+internal fun PlanningFocusSetting(viewModel: com.todo.app.ui.viewmodel.TodoViewModel) {
+    val state = rememberPersonalPlanning(viewModel)
+    if (!state.cloudBacked) return
+    var confirm by remember(state.target) { mutableStateOf(false) }
+    OutlinedButton(enabled = state.canEnableFocus && !state.busy, onClick = { confirm = true }) { Text("启用本周重点") }
+    when {
+        state.focusStatus == "enabled" -> SupportingText("当前计划数据集已启用本周重点")
+        state.focusStatus in listOf("unknown", "invalid") -> {
+            SupportingText("本周重点启用状态待核对")
+            TextButton(enabled = !state.busy, onClick = state.reload) { Text("重试读取") }
+        }
+        !state.canEnableFocus -> SupportingText("云端本周重点尚不可启用")
+    }
+    if (state.saveError.isNotEmpty() && state.actionDate == null) Text(state.saveError, color = MaterialTheme.colorScheme.error)
+    if (confirm) ConfirmPlanningFocusUpgrade({ confirm = false }) {
+        confirm = false
+        state.enableFocus()
+    }
+}
+
+@Composable
+private fun ConfirmPlanningFocusUpgrade(cancel: () -> Unit, confirm: () -> Unit) {
+    AlertDialog(onDismissRequest = cancel, title = { Text("升级云端周计划格式") },
+        text = { Text("请确认仍在使用此计划数据集的设备均已升级到兼容版本。") },
+        confirmButton = { TextButton(onClick = confirm) { Text("确认升级") } },
+        dismissButton = { TextButton(onClick = cancel) { Text("取消") } })
 }
 
 @Composable
 internal fun DailyRating(state: PersonalPlanningState, date: LocalDate) {
-    val data = state.data ?: return
-    val score = data.getValue("daily_ratings").jsonArray.map { it.jsonObject }.find {
-        it["date"]?.jsonPrimitive?.content == date.toString() && it["deleted"]?.jsonPrimitive?.booleanOrNull != true
-    }?.get("score")?.jsonPrimitive?.intOrNull
+    val rating = state.rating(date.toString())
+    val score = rating.ratingScore()
+    val scope = rememberCoroutineScope()
     val error = state.saveError.takeIf { state.actionDate == date.toString() }.orEmpty()
-    Text("当日评分 · " + (score?.let { "$it 分" } ?: "未评分"), style = MaterialTheme.typography.labelLarge)
-    fun rate(value: Int?) = state.change(buildJsonObject {
-        put("kind", "rate")
-        put("date", date.toString())
-        put("score", value?.let(::JsonPrimitive) ?: JsonNull)
-    }) {}
-    Row(Modifier.fillMaxWidth()) {
-        for (value in 1..5) androidx.compose.material3.FilterChip(
-            selected = score == value, enabled = !state.busy && error.isEmpty(),
-            onClick = { rate(value) }, label = { Text(value.toString()) },
-            modifier = Modifier.weight(1f).padding(horizontal = 2.dp).semantics { contentDescription = "$value 分" }
-        )
+    if (score != null) {
+        val fill = ratingFill(score)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("当日评分", style = MaterialTheme.typography.labelLarge)
+            Box(Modifier.widthIn(min = 36.dp).heightIn(min = 30.dp)
+                .background(fill, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
+                contentAlignment = Alignment.Center) {
+                Text(score.toString(), Modifier.clearAndSetSemantics { contentDescription = "$score 分" },
+                    color = ratingTextColor(fill), style = MaterialTheme.typography.titleSmall)
+            }
+        }
+    } else {
+        Text("当日评分", style = MaterialTheme.typography.labelLarge)
+        if (rating == null) Text("评分暂不可用")
+        else Row(Modifier.fillMaxWidth()) {
+            for (value in 1..5) androidx.compose.material3.FilterChip(
+                selected = false, enabled = !state.busy && !state.pendingRating,
+                onClick = { scope.launch { state.saveRating(date.toString(), value, rating, false) } }, label = { Text(value.toString()) },
+                modifier = Modifier.weight(1f).padding(horizontal = 2.dp).semantics { contentDescription = "$value 分" }
+            )
+        }
     }
-    if (score != null) OutlinedButton(enabled = !state.busy && error.isEmpty(), onClick = { rate(null) }) { Text("清除评分") }
     if (state.busy && state.actionDate == date.toString()) Text("正在保存评分…")
     if (error.isNotEmpty()) {
         Text(error, color = MaterialTheme.colorScheme.error)
-        OutlinedButton(enabled = !state.busy, onClick = state.retry) { Text("重试保存评分") }
+        if (state.pendingRating) OutlinedButton(enabled = !state.busy, onClick = state.retry) { Text("重试保存评分") }
     }
 }
+
+@Composable
+private fun ratingFill(score: Int, inRange: Boolean = true): Color {
+    val colors = MaterialTheme.colorScheme
+    val strength = 0.06f + 0.16f * score
+    return lerp(colors.surfaceContainer, colors.primary, if (inRange) strength else strength * 0.5f)
+}
+
+private fun ratingTextColor(fill: Color): Color = if (fill.luminance() >= 0.179f) Color.Black else Color.White
 
 internal class InsightsNavigation {
     val guards = mutableListOf<(() -> Unit) -> Unit>()
@@ -347,7 +517,7 @@ internal fun RecordSandboxSettings() {
                 status = "试用清单已关闭。"
             } }) { Text("关闭试用清单") }
         }
-        if (status.isNotEmpty()) Text(status)
+        if (status.isNotEmpty()) SupportingText(status)
         val view = state?.preview?.view
         if (view != null) {
             OutlinedTextField(name, { name = it }, enabled = !busy, label = { Text("任务名称") })
@@ -375,7 +545,8 @@ internal fun RecordSandboxSettings() {
             OutlinedTextField(date, { date = it }, enabled = !busy, label = { Text("日期 YYYY-MM-DD") }, singleLine = true)
             val week = remember(date) { runCatching { WeeklyPlanning.monday(date) }.getOrNull() }
             if (week != null) {
-                RecordSandboxPlanning(view, date, week, busy, { change(it) }, { confirmation = it }, { date = it })
+                RecordSandboxPlanning(view, date, week, busy, { change(it) }, { confirmation = it }, { date = it },
+                    savePlan = { action, _, onSaved -> change(action, onSaved) })
                 RecordSandboxExport(view, LocalDate.parse(date), busy, { status = it })
             }
             OutlinedButton(enabled = !busy, onClick = { run { session?.retry()?.let(::publish) } }) { Text("重试上次保存") }
@@ -392,8 +563,9 @@ internal fun RecordSandboxSettings() {
 private fun RecordSandboxPlanning(
     data: JsonObject, date: String, week: String, busy: Boolean, change: (JsonObject) -> Unit, confirm: (() -> Unit) -> Unit,
     selectDate: (String) -> Unit, showPlan: Boolean = true, calendarPeriod: String? = null, showRating: Boolean = true,
-    navigation: InsightsNavigation? = null, savePlan: ((JsonObject, () -> Unit) -> Unit)? = null,
-    saveError: String = "", retry: () -> Unit = {}
+    navigation: InsightsNavigation? = null, savePlan: ((JsonObject, Boolean, () -> Unit) -> Unit)? = null,
+    saveError: String = "", retry: () -> Unit = {}, focusStatus: String = "legacy",
+    canEnableFocus: Boolean = false, cloudBacked: Boolean = false, reload: () -> Unit = {}
 ) {
     val plan = remember(data, week) { WeeklyPlanning.state(data, week) }
     fun operation(kind: String, versionId: String, fields: JsonObjectBuilder.() -> Unit = {}) = buildJsonObject {
@@ -405,6 +577,16 @@ private fun RecordSandboxPlanning(
     }
     fun act(kind: String, versionId: String) = change(operation(kind, versionId))
     if (showPlan) {
+        var draftDays by rememberSaveable(week) { mutableStateOf<ArrayList<String>?>(null) }
+        var draftFocus by rememberSaveable(week) { mutableStateOf<String?>(null) }
+        var draftTips by rememberSaveable(week) { mutableStateOf<ArrayList<String>?>(null) }
+        var reason by rememberSaveable(week) { mutableStateOf("") }
+        fun clearDraft() {
+            draftDays = null
+            draftFocus = null
+            draftTips = null
+            reason = ""
+        }
         Text("$week 当周计划 · " + when (plan.status) {
             "current" -> "已有计划"
             "conflict" -> "存在分歧"
@@ -415,6 +597,7 @@ private fun RecordSandboxPlanning(
             for (candidate in plan.candidates.filter { it["deleted"]?.jsonPrimitive?.booleanOrNull != true }) {
                 val id = candidate.getValue("id").jsonPrimitive.content
                 Text(candidate.getValue("created_at").jsonPrimitive.content)
+                Text(candidate["focus"]?.jsonPrimitive?.content.orEmpty().ifBlank { "未填写本周重点" })
                 candidate.getValue("days").jsonArray.forEachIndexed { index, day -> Text("周${"一二三四五六日"[index]} ${day.jsonPrimitive.content}") }
                 OutlinedButton(enabled = !busy, onClick = { act("resolve", id) }) { Text("采用此版") }
             }
@@ -422,43 +605,75 @@ private fun RecordSandboxPlanning(
             val baseline = remember(week, plan.tips) {
                 List(7) { plan.current?.getValue("days")?.jsonArray?.get(it)?.jsonPrimitive?.content.orEmpty() }
             }
-            var days by rememberSaveable(week, plan.tips) { mutableStateOf(ArrayList(baseline)) }
-            var reason by rememberSaveable(week, plan.tips) { mutableStateOf("") }
-            var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
-            val canSave = plan.status == "current" || days.any { it.isNotBlank() }
-            fun save(after: (() -> Unit)? = null) {
-                val action = operation("save", UUID.randomUUID().toString()) {
-                    put("days", JsonArray(days.map(::JsonPrimitive)))
-                    put("reason", reason)
-                }
-                if (savePlan == null) change(action) else savePlan(action) {
-                    reason = ""
-                    pending = null
-                    after?.invoke()
+            val initialFocus = plan.current?.get("focus")?.jsonPrimitive?.content.orEmpty()
+            val days = draftDays ?: baseline
+            val focus = draftFocus ?: initialFocus
+            fun editDraft(newDays: List<String> = days, newFocus: String = focus, newReason: String = reason) {
+                if (newDays == baseline && newFocus == initialFocus && newReason.isEmpty()) clearDraft()
+                else {
+                    if (draftTips == null) draftTips = ArrayList(plan.tips)
+                    draftDays = ArrayList(newDays)
+                    draftFocus = newFocus
+                    reason = newReason
                 }
             }
-            RegisterInsightsGuard(navigation, days != baseline || reason.isNotEmpty() || busy) { next ->
+            var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
+            var upgradeConfirmation by remember { mutableStateOf<(() -> Unit)?>(null) }
+            val needsRead = focusStatus in listOf("unknown", "invalid")
+            val upgrade = cloudBacked && focusStatus == "legacy" && focus.isNotBlank()
+            val unsupported = upgrade && !canEnableFocus
+            val canSave = !needsRead && !unsupported &&
+                (plan.status == "current" || focus.isNotBlank() || days.any { it.isNotBlank() })
+            fun save(after: (() -> Unit)? = null) {
+                val action = operation("save", UUID.randomUUID().toString()) {
+                    draftTips?.let { put("tips", JsonArray(it.map(::JsonPrimitive))) }
+                    put("days", JsonArray(days.map(::JsonPrimitive)))
+                    if (focusStatus == "enabled" || upgrade) put("focus", focus)
+                    put("reason", reason)
+                }
+                val submit = {
+                    if (savePlan == null) change(action) else savePlan(action, upgrade) {
+                        clearDraft()
+                        pending = null
+                        after?.invoke()
+                    }
+                }
+                if (upgrade) upgradeConfirmation = submit else submit()
+            }
+            RegisterInsightsGuard(navigation, draftTips != null || busy) { next ->
                 if (!busy && pending == null) pending = next
+            }
+            if (navigation != null) {
+                OutlinedTextField(focus, { editDraft(newFocus = it) }, enabled = !busy,
+                    label = { Text("本周重点") }, modifier = Modifier.fillMaxWidth())
+                if (needsRead) {
+                    SupportingText("本周重点启用状态待核对，请重试同步")
+                    TextButton(enabled = !busy, onClick = reload) { Text("重试读取") }
+                }
+                if (unsupported) SupportingText("当前云端暂不支持启用本周重点")
             }
             days.forEachIndexed { index, day ->
                 val label = if (navigation == null) "周${"一二三四五六日"[index]}"
                     else planDayLabel(LocalDate.parse(week).plusDays(index.toLong()))
-                OutlinedTextField(day, { value -> days = ArrayList(days).apply { set(index, value) } },
+                OutlinedTextField(day, { value -> editDraft(newDays = days.toMutableList().apply { set(index, value) }) },
                     enabled = !busy, label = { Text(label) })
             }
-            OutlinedTextField(reason, { reason = it }, enabled = !busy, label = { Text("修订原因") })
-            OutlinedButton(enabled = !busy && canSave && saveError.isEmpty(), onClick = { save() }) { Text("保存计划") }
-            pending?.let { next ->
+            OutlinedTextField(reason, { editDraft(newReason = it) }, enabled = !busy, label = { Text("修订原因") })
+            OutlinedButton(enabled = !busy && canSave, onClick = { save() }) { Text("保存计划") }
+            val confirmUpgrade = upgradeConfirmation
+            if (confirmUpgrade != null) ConfirmPlanningFocusUpgrade({ upgradeConfirmation = null }) {
+                upgradeConfirmation = null
+                confirmUpgrade()
+            } else pending?.let { next ->
                 AlertDialog(onDismissRequest = { if (!busy) pending = null }, title = { Text("周计划有未保存的修改") },
                     text = { Column {
-                        OutlinedButton(enabled = !busy && canSave && saveError.isEmpty(), onClick = { save(next) }) { Text("保存并离开") }
+                        OutlinedButton(enabled = !busy && canSave, onClick = { save(next) }) { Text("保存并离开") }
                         if (saveError.isNotEmpty()) {
                             Text(saveError, color = MaterialTheme.colorScheme.error)
                             OutlinedButton(enabled = !busy, onClick = retry) { Text("重试上次保存") }
                         }
                         OutlinedButton(enabled = !busy, onClick = {
-                            days = ArrayList(baseline)
-                            reason = ""
+                            clearDraft()
                             pending = null
                             next()
                         }) { Text("放弃修改") }
@@ -472,6 +687,7 @@ private fun RecordSandboxPlanning(
         if (history) for (version in plan.history) {
             Text(version.getValue("created_at").jsonPrimitive.content)
             version["change_reason"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }?.let { Text(it) }
+            Text(version["focus"]?.jsonPrimitive?.content.orEmpty().ifBlank { "未填写本周重点" })
             version.getValue("days").jsonArray.forEachIndexed { index, day -> Text("周${"一二三四五六日"[index]} ${day.jsonPrimitive.content}") }
             if (version !in plan.candidates) OutlinedButton(enabled = !busy, onClick = {
                 confirm { act("delete", version.getValue("id").jsonPrimitive.content) }
@@ -494,7 +710,8 @@ private fun RecordSandboxPlanning(
 }
 
 @Composable
-private fun RecordRatingCalendar(data: JsonObject, selectedDate: LocalDate, busy: Boolean, selectDate: (String) -> Unit, period: String?) {
+private fun RecordRatingCalendar(data: JsonObject, selectedDate: LocalDate, busy: Boolean, selectDate: (String) -> Unit,
+    period: String?, summary: Boolean = true, interactive: Boolean = true) {
     var showMonth by remember { mutableStateOf(false) }
     val month = if (period == null) showMonth else period == "month"
     val (start, end) = Learning.range(if (month) "month" else "week", selectedDate)
@@ -508,30 +725,51 @@ private fun RecordRatingCalendar(data: JsonObject, selectedDate: LocalDate, busy
         WeeklyPlanning.ratingSummary(data, start.toString(), end.minusDays(1).toString())
     }
     val coverage = if (period == null) "" else " · 已评分 $covered/$days 天"
-    val summary = if (average == null) "暂无评分" else "${if (month) "月" else "周"}平均 $average"
-    Text("$summary$coverage")
+    if (summary) Text((if (average == null) "暂无评分" else "${if (month) "月" else "周"}平均 $average") + coverage)
     if (period == null) OutlinedButton(onClick = { showMonth = !showMonth }) { Text(if (month) "查看本周评分" else "查看本月评分") }
-    Row { for (weekday in "一二三四五六日") Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { Text(weekday.toString()) } }
     val colors = MaterialTheme.colorScheme
+    val dateStyle = MaterialTheme.typography.labelMedium
+    val scoreStyle = MaterialTheme.typography.labelSmall
+    val weekScoreStyle = MaterialTheme.typography.titleSmall
     val today = LocalDate.now()
-    for (week in rows) Row {
-        for (index in 0..6) {
-            val day = week.plusDays(index.toLong())
-            val score = scores[day.toString()]
-            val active = day >= start && day < end
-            val fill = if (score == null) colors.surfaceVariant else colors.primary.copy(alpha = (0.10f + score * 0.09f) * if (active) 1f else 0.5f)
-            val mark = when {
-                day == selectedDate -> Modifier.border(2.dp, colors.primary)
-                day == today -> Modifier.border(1.dp, colors.outline)
-                else -> Modifier
+    val gap = 4.dp
+    BoxWithConstraints(Modifier.widthIn(max = 336.dp).fillMaxWidth().padding(top = 4.dp, bottom = 8.dp)) {
+        val squareSize = (maxWidth - gap * 6) / 7
+        val textHeight = with(LocalDensity.current) {
+            if (interactive) dateStyle.lineHeight.toDp() + scoreStyle.lineHeight.toDp() else weekScoreStyle.lineHeight.toDp()
+        }
+        val height = maxOf(squareSize, textHeight + 4.dp)
+        Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                for (weekday in "一二三四五六日") Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    SupportingText(weekday.toString())
+                }
             }
-            Box(Modifier.weight(1f).height(48.dp).padding(2.dp).background(fill).then(mark)
-                .semantics {
-                    contentDescription = "$day ${score?.let { "$it 分" } ?: "未评分"}"
-                    selected = day == selectedDate
-                }.clickable(enabled = !busy) { selectDate(day.toString()) }, contentAlignment = Alignment.Center) {
-                Text(day.dayOfMonth.toString() + (score?.let { "\n$it" } ?: ""),
-                    color = if (active) colors.onSurface else colors.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+            for (week in rows) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                for (index in 0..6) {
+                    val day = week.plusDays(index.toLong())
+                    val score = scores[day.toString()]
+                    val active = day >= start && day < end
+                    val fill = if (score == null) Color.Unspecified else ratingFill(score, active)
+                    val foreground = if (score != null) ratingTextColor(fill) else if (active) colors.onSurface else colors.onSurfaceVariant
+                    val isSelected = interactive && day == selectedDate
+                    Box(Modifier.weight(1f).height(height)
+                        .calendarCell(today = day == today, inRange = active, fill = fill, selected = isSelected)
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = "$day ${score?.let { "$it 分" } ?: "未评分"}"
+                            if (interactive) selected = isSelected
+                        }.then(if (interactive) Modifier.clickable(enabled = !busy, role = Role.Button) {
+                            selectDate(day.toString())
+                        } else Modifier), contentAlignment = Alignment.Center) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 3.dp).clearAndSetSemantics {},
+                            horizontalAlignment = Alignment.CenterHorizontally) {
+                            if (interactive) Text(day.dayOfMonth.toString(), color = foreground, style = dateStyle, maxLines = 1)
+                            if (score != null) Text(score.toString(),
+                                modifier = if (interactive) Modifier.align(Alignment.End) else Modifier,
+                                color = foreground, style = if (interactive) scoreStyle else weekScoreStyle, maxLines = 1)
+                        }
+                    }
+                }
             }
         }
     }
@@ -556,10 +794,12 @@ private fun RecordSandboxComparison(week: String, versions: List<JsonObject>) {
         }
         val oldDays = versions[old].getValue("days").jsonArray
         val nextDays = versions[next].getValue("days").jsonArray
-        for (index in 0..6) {
-            Text("周${"一二三四五六日"[index]}")
-            val diff = remember(oldDays[index], nextDays[index]) {
-                WeeklyPlanning.compare(oldDays[index].jsonPrimitive.content, nextDays[index].jsonPrimitive.content)
+        for (index in -1..6) {
+            Text(if (index < 0) "本周重点" else "周${"一二三四五六日"[index]}")
+            val oldText = (if (index < 0) versions[old]["focus"] else oldDays[index])?.jsonPrimitive?.content.orEmpty()
+            val nextText = (if (index < 0) versions[next]["focus"] else nextDays[index])?.jsonPrimitive?.content.orEmpty()
+            val diff = remember(oldText, nextText) {
+                WeeklyPlanning.compare(oldText, nextText)
             }
             Row {
                 for ((text, style) in listOf(diff.removed to TextDecoration.LineThrough, diff.added to TextDecoration.Underline)) {

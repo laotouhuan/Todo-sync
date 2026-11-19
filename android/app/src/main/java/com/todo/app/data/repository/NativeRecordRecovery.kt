@@ -42,7 +42,8 @@ internal data class RecordRecoveryPreview(
     val journal: JournalState,
     val missing: List<String>,
     val view: JsonObject?,
-    val submitted: Artifact? = null
+    val submitted: Artifact? = null,
+    val focusHistory: Boolean = false
 )
 
 internal data class RecordRepair(val observedSha256: String, val restored: Artifact)
@@ -101,5 +102,9 @@ internal fun previewRecordRecovery(
     else observed.stageLocal(intent, current?.encodeToByteArray()?.let(::sha))
     val missing = journal.dependencies(expected).missing
     val view = if (missing.isEmpty() && journal.fault == null) replayPersonalRecords(snapshot.data, journal, expected, fixed.operation_set) else null
-    return RecordRecoveryPreview(journal, missing, view, submitted)
+    val focusHistory = view != null && fixed.operation_set in setOf(PLANNING_OPERATION_SET, CLOUD_PLANNING_OPERATION_SET) &&
+        journal.recordsForReplay(expected).any { record ->
+            record.operations.any { operation -> (operation["version"] as? JsonObject)?.containsKey("focus") == true }
+        }
+    return RecordRecoveryPreview(journal, missing, view, submitted, focusHistory)
 }

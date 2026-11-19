@@ -32,6 +32,7 @@ window.__TAURI__ = { event: { listen: async () => () => {} }, core: { invoke: as
             window.releasePlanningCloud = () => { window.pausePlanningCloud = false; resolve(); };
         });
         if (window.failPlanningCloud) throw new Error('模拟计划云端不可达');
+        if (args.action === 'read_capabilities') return null;
         return '<d:multistatus xmlns:d="DAV:"><d:response><d:href>/dav/synthetic/' +
             args.binding.pin.namespace + 'records/</d:href></d:response></d:multistatus>';
     default: return null;
@@ -100,14 +101,16 @@ try {
     // 重试当前会话必须保留编辑草稿。
     await browser.evaluate(`document.querySelector('#stats-btn').click()`);
     await browser.evaluate(`document.querySelector('#stats-period-week').click()`);
-    await waitFor(browser, `Boolean(document.querySelector('#stats-planning textarea'))`);
+    await waitFor(browser, `[...document.querySelectorAll('#stats-planning button')].some(node => node.textContent === '查看本周详情')`);
+    await browser.evaluate(`[...document.querySelectorAll('#stats-planning button')].find(node => node.textContent === '查看本周详情').click()`);
+    await waitFor(browser, `Boolean(document.querySelector('#stats-planning textarea:not(:disabled)'))`);
     await browser.evaluate(`(() => {
-        const input = document.querySelector('#stats-planning textarea');
+        const input = document.querySelector('#stats-planning textarea:not(:disabled)');
         input.value = '尚未保存的周计划'; input.dispatchEvent(new Event('input', { bubbles: true }));
         window.failPlanningCloud = true; document.querySelector('#manual-sync-btn').click();
     })()`);
     await waitFor(browser, `!document.querySelector('#manual-sync-btn').disabled`);
-    assert.equal(await browser.evaluate(`document.querySelector('#stats-planning textarea').value`), '尚未保存的周计划');
+    assert.equal(await browser.evaluate(`document.querySelector('#stats-planning textarea:not(:disabled)').value`), '尚未保存的周计划');
     assert.equal(await browser.evaluate(`document.querySelector('#manual-sync-btn').classList.contains('sync-success')`), false);
     console.log('计划读取与云端失败有明确原因，手动重试恢复后清灯，且不丢失周计划草稿');
 } finally {

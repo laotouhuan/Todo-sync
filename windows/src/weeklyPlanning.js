@@ -3,12 +3,16 @@ import { canonicalJson } from './stableJsonDigest.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const collections = {
-    weekly_plan_versions: { base_version_id: null, days: Array(7).fill(''), change_reason: '', deleted: false, deleted_at: null },
+    weekly_plan_versions: { base_version_id: null, focus: '', days: Array(7).fill(''), change_reason: '', deleted: false, deleted_at: null },
     weekly_plan_selections: { parent_selection_ids: [], kind: 'save' },
     daily_ratings: { score: null, deleted: false }
 };
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 const same = (a, b) => canonicalJson(a) === canonicalJson(b);
+// 只在业务校验时补默认值，记录原始字节仍用于摘要和父引用。
+const comparableOperation = operation => operation.version
+    ? { ...operation, version: { focus: '', ...operation.version } }
+    : operation;
 const clock = todoTimestampMillis;
 const requireValid = (condition, code = 'INVALID_PLANNING_DATA') => { if (!condition) throw new Error(code); };
 
@@ -54,7 +58,7 @@ function row(raw, key) {
         if (key === 'weekly_plan_versions') {
             requireValid((result.base_version_id === null || uuid.test(result.base_version_id)) &&
                 Array.isArray(result.days) && result.days.length === 7 && result.days.every(day => typeof day === 'string') &&
-                typeof result.change_reason === 'string' && typeof result.deleted === 'boolean');
+                typeof result.focus === 'string' && typeof result.change_reason === 'string' && typeof result.deleted === 'boolean');
             if (result.deleted_at !== null) clock(result.deleted_at);
             requireValid(result.deleted || result.deleted_at === null);
         } else {
@@ -200,6 +204,10 @@ export function planningExport(data, start, end, { includePlans, includeRatings,
             const calendar = Array.from({ length: 7 }, (_, index) => new Date(date(week) + index * 86400000).toISOString().slice(0, 10));
             if (!calendar.some(day => day >= start && day < end)) continue;
             const plan = weeklyPlanState(normalize, week);
+            const focus = plan.current?.focus;
+            if (includePlans && focus?.trim()) {
+                append(calendar.find(day => day >= start && day < end), ['### 本周重点', '', escape(focus), '']);
+            }
             if (includePlans) calendar.forEach((day, index) => {
                 if (day < start || day >= end) return;
                 const text = plan.state === 'conflict' ? '计划存在分歧，尚未选择当前版本' : plan.state === 'restart' ?
@@ -211,6 +219,7 @@ export function planningExport(data, start, end, { includePlans, includeRatings,
                 for (const version of plan.history) {
                     history.push(`#### ${version.created_at}`, '', `版本：${version.id}`, '',
                         `修订原因：${escape(version.change_reason) || '未填写'}`, '');
+                    if (version.focus.trim()) history.push('**本周重点**', '', escape(version.focus), '');
                     calendar.forEach((day, index) => history.push(`**${day}**`, '', escape(version.days[index]) || '未安排', ''));
                 }
             }
@@ -239,7 +248,9 @@ export function planningChange(data, action, identity) {
             return null;
         }
         requireValid(same(current.tips, action.tips) && !current.candidates.some(item => item.id === target.id), 'WEEKLY_PLAN_STALE');
-        return { type: 'planning.version.delete', version: { ...target, deleted: true, updated_at: at, deleted_at: at } };
+        const { focus, ...version } = target;
+        return { type: 'planning.version.delete', version: { ...version, ...(focus ? { focus } : {}),
+            deleted: true, updated_at: at, deleted_at: at } };
     }
     requireValid(same(current.tips, action.tips), 'WEEKLY_PLAN_STALE');
     const selection = { id, ...stamps, week_start: week, parent_selection_ids: current.tips };
@@ -247,12 +258,14 @@ export function planningChange(data, action, identity) {
         requireValid(current.state === 'conflict' && current.candidates.some(item => item.id === action.versionId && !item.deleted));
         return { type: 'planning.selection.resolve', selection: { ...selection, kind: 'resolve', version_id: action.versionId } };
     }
-    requireValid(action.kind === 'save' && ['empty', 'current', 'restart'].includes(current.state) &&
+    const focus = Object.hasOwn(action, 'focus') ? action.focus : current.current?.focus ?? '';
+    requireValid(action.kind === 'save' && ['empty', 'current', 'restart'].includes(current.state) && typeof focus === 'string' &&
         Array.isArray(action.days) && action.days.length === 7 && action.days.every(day => typeof day === 'string') &&
-        (current.state === 'current' || action.days.some(day => day.trim())));
+        (current.state === 'current' || focus.trim() || action.days.some(day => day.trim())));
     requireValid(!mergePlanningData(data).weekly_plan_versions.some(item => item.id === action.versionId), 'WEEKLY_PLAN_ID_CONFLICT');
     return { type: 'planning.version.save', version: { id: action.versionId, ...stamps, week_start: week,
-        base_version_id: current.current?.id ?? null, days: action.days, change_reason: action.reason, deleted: false, deleted_at: null },
+        base_version_id: current.current?.id ?? null, ...(focus || Object.hasOwn(action, 'focus') ? { focus } : {}),
+        days: action.days, change_reason: action.reason, deleted: false, deleted_at: null },
     selection: { ...selection, kind: 'save', version_id: action.versionId } };
 }
 
@@ -306,7 +319,8 @@ export function validatePlanningRecords(baseline, records) {
         switch (operation.type) {
             case 'planning.version.save':
                 action = { kind: 'save', week: version.week_start, versionId: version.id,
-                    days: version.days, reason: version.change_reason, tips: selection.parent_selection_ids };
+                    days: version.days, reason: version.change_reason, tips: selection.parent_selection_ids,
+                    ...(Object.hasOwn(version, 'focus') ? { focus: version.focus } : {}) };
                 break;
             case 'planning.version.delete':
                 action = { kind: 'delete', week: version.week_start, versionId: version.id,
@@ -321,7 +335,7 @@ export function validatePlanningRecords(baseline, records) {
             default: throw new Error('UNSUPPORTED_RECORD_OPERATION');
         }
         const expected = planningChange(view, action, { id: record.id, at: record.created_at });
-        requireValid(expected !== null && same(operation, expected), 'INVALID_PLANNING_OPERATION');
+        requireValid(expected !== null && same(comparableOperation(operation), comparableOperation(expected)), 'INVALID_PLANNING_OPERATION');
         changes.set(record.id, operation);
     }
 }

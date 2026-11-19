@@ -1,5 +1,7 @@
 package com.todo.app.ui.view
 
+import com.todo.app.ui.theme.SupportingText
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -56,7 +58,7 @@ fun LabelManagerView(viewModel: TodoViewModel) {
             TextButton(onClick = { selected = members.map { it.id }.toSet() }) { Text("全选") }
             TextButton(onClick = { selected = emptySet() }) { Text("清除选择") }
             Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.CenterStart) {
-                Text("已选 ${selected.size} 个", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SupportingText("已选 ${selected.size} 个")
             }
         }
         FlowRow(
@@ -75,7 +77,7 @@ fun LabelManagerView(viewModel: TodoViewModel) {
             TextButton(enabled = members.isNotEmpty(), onClick = { propose("重命名 / 合并标签", true) }) { Text("重命名 / 合并") }
             TextButton(enabled = members.isNotEmpty(), onClick = { propose("清空标签（不删除任务）", true, true) }) { Text("清空标签") }
         }
-        if (members.isEmpty()) Text("此标签暂无任务", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (members.isEmpty()) SupportingText("此标签暂无任务")
         members.forEach { todo ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(todo.id in selected, { checked -> selected = if (checked) selected + todo.id else selected - todo.id })
@@ -98,10 +100,10 @@ fun LabelManagerView(viewModel: TodoViewModel) {
                     }
                 }
                 val normalized = Learning.label(target)
-                Text("个人清单 · ${pending.expected.size} 个任务 → ${normalized ?: "未分类"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (pending.wholeLabel && normalized != null && normalized != pending.label && groups.any { it.label == normalized }) Text("将合并到已有标签", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("确认后立即保存。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("相关计时记录将在统计中按新标签归类，计时时长不变。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SupportingText("个人清单 · ${pending.expected.size} 个任务 → ${normalized ?: "未分类"}")
+                if (pending.wholeLabel && normalized != null && normalized != pending.label && groups.any { it.label == normalized }) SupportingText("将合并到已有标签")
+                SupportingText("确认后立即保存。")
+                SupportingText("相关计时记录将在统计中按新标签归类，计时时长不变。")
                 if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
             }
         }, confirmButton = { TextButton(enabled = !busy, onClick = {

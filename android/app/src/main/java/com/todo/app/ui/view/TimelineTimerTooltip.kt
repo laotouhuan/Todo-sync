@@ -20,6 +20,30 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
+private fun StatsTooltipCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.small,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.inverseSurface,
+            contentColor = MaterialTheme.colorScheme.inverseOnSurface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        content = content
+    )
+}
+
+@Composable
+internal fun CompletionTooltip(title: String, date: String, time: String? = null) {
+    StatsTooltipCard {
+        Column(Modifier.padding(10.dp)) {
+            Text(title, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+            val detailColor = LocalContentColor.current.copy(alpha = 0.8f)
+            Text("完成日期: $date", style = MaterialTheme.typography.labelSmall, color = detailColor)
+            if (time != null) Text("打卡时间: $time", style = MaterialTheme.typography.labelSmall, color = detailColor)
+        }
+    }
+}
+
+@Composable
 internal fun TimelineTimerTooltip(arcs: List<TimerArc>, anchor: Offset, onDismiss: () -> Unit) {
     val parts = arcs.distinctBy { it.part.entry.id to it.part.date }.map { it.part }
     if (parts.isEmpty()) return
@@ -39,13 +63,7 @@ internal fun TimelineTimerTooltip(arcs: List<TimerArc>, anchor: Offset, onDismis
     }
     Popup(popupPositionProvider = position, onDismissRequest = onDismiss,
         properties = PopupProperties(focusable = true)) {
-        Card(
-            modifier = Modifier.widthIn(max = minOf(320.dp, (configuration.screenWidthDp - 24).coerceAtLeast(1).dp)),
-            shape = MaterialTheme.shapes.medium,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.inverseSurface,
-                contentColor = MaterialTheme.colorScheme.inverseOnSurface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-        ) {
+        StatsTooltipCard(Modifier.widthIn(max = minOf(320.dp, (configuration.screenWidthDp - 24).coerceAtLeast(1).dp))) {
             Column(Modifier.heightIn(max = (configuration.screenHeightDp * 0.6f).dp)
                 .verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (parts.size == 1) parts.first().entry.display_content ?: parts.first().entry.task_content_snapshot

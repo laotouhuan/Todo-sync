@@ -2,7 +2,7 @@ import { labelGroups, planLabelChange } from './labelUtils.js';
 import { normalizeLabel } from './timeTracking.js';
 
 const node = (tag, text) => { const n = document.createElement(tag); if (text != null) n.textContent = text; return n; };
-function action(text, handler) { const b = node('button', text); b.type = 'button'; b.className = 'learning-button'; b.onclick = handler; return b; }
+function action(text, handler) { const b = node('button', text); b.type = 'button'; b.className = 'ui-button'; b.onclick = handler; return b; }
 function dialog(title) {
     const d = node('dialog'); d.className = 'learning-dialog settings-dialog'; d.append(node('h3', title));
     document.body.append(d); d.showModal(); d.addEventListener('keydown', e => e.stopPropagation());
@@ -42,6 +42,7 @@ export function createLabelManager({ getTodos, commit }) {
             } catch (e) { error.textContent = e.message || String(e); }
             finally { busy = false; save.disabled = cancel.disabled = field.disabled = choices.disabled = false; }
         });
+        save.classList.add(clear ? 'danger' : 'primary');
         d.addEventListener('cancel', e => { if (busy) e.preventDefault(); }); d.append(save, cancel);
     }
     function render() {
@@ -66,13 +67,18 @@ export function createLabelManager({ getTodos, commit }) {
             const toolbar = node('div'); toolbar.className = 'label-actions';
             const edit = action('批量修改', () => propose('批量修改标签', false));
             const remove = action('移除标签', () => propose('移除所选任务标签', false, true));
+            remove.classList.add('danger');
             const count = node('span'); count.className = 'setting-hint';
             const updateSelection = () => { count.textContent = `已选 ${selected.size} 个`; edit.disabled = remove.disabled = !selected.size; };
             toolbar.append(action('全选', () => { selected = new Set(members.map(t => t.id)); drawTasks(); }),
                 action('清除选择', () => { selected.clear(); drawTasks(); }), count, edit, remove);
             if (label !== null) toolbar.append(action('重命名 / 合并', () => propose('重命名 / 合并标签', true)), action('清空标签', () => propose('清空标签（不删除任务）', true, true)));
             tasks.append(toolbar); updateSelection();
-            if (!members.length) tasks.append(node('p', '此标签暂无任务'));
+            if (!members.length) {
+                const empty = node('p', '此标签暂无任务');
+                empty.className = 'setting-hint';
+                tasks.append(empty);
+            }
             for (const t of members) {
                 const row = node('div'); row.className = 'label-task';
                 const check = node('input'); check.type = 'checkbox'; check.checked = selected.has(t.id); check.setAttribute('aria-label', `选择 ${t.content}`);

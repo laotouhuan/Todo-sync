@@ -12,7 +12,7 @@ import { applyReminderSettingsEdit, normalizeReminderSettings } from '../src/rem
 
 const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 const tree = parse(source, { sourceType: 'module', ecmaVersion: 'latest' });
-const names = ['parsePersonalData', 'loadData', 'saveSettings', '_doSaveData', 'commitPersonal', 'commitPeriodData', 'createAndAddTodo', 'applyTaskType', 'openTimelineSubtask'];
+const names = ['parsePersonalData', 'loadData', 'syncBeforeTiming', 'saveSettings', '_doSaveData', 'commitPersonal', 'commitPeriodData', 'createAndAddTodo', 'applyTaskType', 'openTimelineSubtask'];
 const declarations = names.map(name => {
     const node = tree.body.find(n => n.type === 'FunctionDeclaration' && n.id.name === name);
     return source.slice(node.start, node.end);
@@ -106,6 +106,20 @@ test('云端读取失败不能作为手动同步成功结果', async () => {
     h.hook(async cmd => { if (cmd === 'fetch_from_cloud') throw new Error('模拟网络失败'); });
     assert.equal(await h.api.loadData(), false);
     assert.ok(h.notices.some(message => message.includes('同步失败')));
+});
+
+test('计时前只同步个人数据，仍读取云端运行记录，完整同步继续覆盖协作配置', async () => {
+    const h = harness('webdav');
+    h.cloud.get('A').time_entries = [{ id: 'remote-running', task_ref: { todo_id: 'A', source_type: 'personal', source_id: null },
+        started_at: '2026-11-15T10:00:00Z', ended_at: null, created_at: '2026-11-15T10:00:00Z', updated_at: '2026-11-15T10:00:00Z',
+        deleted: false, task_content_snapshot: 'A', label_snapshot: null }];
+    assert.equal(await h.api.syncBeforeTiming(), true);
+    assert.ok(h.io.some(call => call.cmd === 'fetch_from_cloud'));
+    assert.equal(h.state.todoData.time_entries[0].id, 'remote-running');
+    assert.equal(h.io.some(call => call.cmd.includes('collaboration')), false);
+    await h.api.loadData();
+    assert.ok(h.io.some(call => call.cmd === 'fetch_collaborations_from_cloud'));
+    assert.ok(h.io.some(call => call.cmd === 'sync_collaborations_to_cloud'));
 });
 
 for (const secondFails of [false, true]) {

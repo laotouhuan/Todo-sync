@@ -56,6 +56,11 @@ import java.util.Locale
 // ====== Widget Theme (extracted colors) ======
 
 object WidgetTheme {
+    val TitleSize = 18.sp
+    val HeadingSize = 15.sp
+    val BodySize = 14.sp
+    val NoteSize = 12.sp
+
     val Background = Color(0xB3121212)
     val Surface = Color(0x26FFFFFF)
     val TextPrimary = Color.White
@@ -164,12 +169,12 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                     .padding(if (size.width < 200.dp || size.height < 200.dp) 8.dp else 16.dp)
             ) {
                 if (loadFailure != null) {
-                    Text("数据加载失败", style = TextStyle(color = textColor, fontSize = 15.sp))
-                    Text("请重试或打开应用，在设置中恢复备份。", style = TextStyle(color = textVariantColor))
+                    Text("数据加载失败", style = TextStyle(color = textColor, fontSize = WidgetTheme.HeadingSize))
+                    Text("请重试或打开应用，在设置中恢复备份。", style = TextStyle(color = textVariantColor, fontSize = WidgetTheme.NoteSize))
                     Text("重试", modifier = GlanceModifier.padding(12.dp)
-                        .clickable(actionRunCallback<RetryLoadActionCallback>()), style = TextStyle(color = textColor))
+                        .clickable(actionRunCallback<RetryLoadActionCallback>()), style = TextStyle(color = textColor, fontSize = WidgetTheme.BodySize))
                     Text("打开应用", modifier = GlanceModifier.padding(12.dp)
-                        .clickable(actionStartActivity<MainActivity>()), style = TextStyle(color = textColor))
+                        .clickable(actionStartActivity<MainActivity>()), style = TextStyle(color = textColor, fontSize = WidgetTheme.BodySize))
                     return@Column
                 }
                 if (fullHeader) {
@@ -180,12 +185,12 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                         Column(modifier = GlanceModifier.defaultWeight()) {
                             Text(
                                 text = "Todo",
-                                style = TextStyle(color = textColor, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                style = TextStyle(color = textColor, fontSize = WidgetTheme.TitleSize, fontWeight = FontWeight.Bold)
                             )
                             Spacer(modifier = GlanceModifier.height(2.dp))
                             Text(
                                 text = dateString,
-                                style = TextStyle(color = textVariantColor, fontSize = 12.sp)
+                                style = TextStyle(color = textVariantColor, fontSize = WidgetTheme.NoteSize)
                             )
                         }
 
@@ -194,7 +199,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                             WidgetRefreshButton(textColor)
                             Text(
                                 text = "打开",
-                                style = TextStyle(color = textColor, fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                                style = TextStyle(color = textColor, fontSize = WidgetTheme.NoteSize, fontWeight = FontWeight.Bold),
                                 modifier = GlanceModifier
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                                     .background(ColorProvider(WidgetTheme.OpenButtonBg))
@@ -217,7 +222,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                     ) {
                         Text(
                             text = "+ 快速添加新任务...",
-                            style = TextStyle(color = textVariantColor, fontSize = 14.sp)
+                            style = TextStyle(color = textVariantColor, fontSize = WidgetTheme.BodySize)
                         )
                     }
                     Spacer(modifier = GlanceModifier.height(16.dp))
@@ -228,7 +233,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                     ) {
                         if (size.width >= 260.dp) Text(
                             text = "今天聚焦",
-                            style = TextStyle(color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold),
+                            style = TextStyle(color = textColor, fontSize = WidgetTheme.HeadingSize, fontWeight = FontWeight.Bold),
                             modifier = GlanceModifier.defaultWeight()
                         )
                         TimerStartButton(timerState, textColor, actionSize)
@@ -242,7 +247,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                         } else {
                             Text(
                                 text = "打开",
-                                style = TextStyle(color = textColor, fontSize = 12.sp, fontWeight = FontWeight.Bold),
+                                style = TextStyle(color = textColor, fontSize = WidgetTheme.NoteSize, fontWeight = FontWeight.Bold),
                                 modifier = GlanceModifier
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                                     .background(ColorProvider(WidgetTheme.OpenButtonBg))
@@ -258,7 +263,7 @@ abstract class BaseTodoWidget(private val maxItems: Int, private val showHeader:
                     Box(modifier = GlanceModifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             text = "☕ 任务全搞定啦！",
-                            style = TextStyle(color = textVariantColor, fontSize = 14.sp)
+                            style = TextStyle(color = textVariantColor, fontSize = WidgetTheme.BodySize)
                         )
                     }
                 } else {
@@ -342,7 +347,7 @@ fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProv
                 style = TextStyle(
                     color = if (isCompletedToShow) textVariantColor else textColor,
                     textDecoration = if (isCompletedToShow) androidx.glance.text.TextDecoration.LineThrough else androidx.glance.text.TextDecoration.None,
-                    fontSize = 15.sp
+                    fontSize = WidgetTheme.BodySize
                 ),
                 maxLines = 1,
                 modifier = GlanceModifier.defaultWeight().padding(end = 12.dp, top = 12.dp, bottom = 12.dp)
@@ -355,7 +360,7 @@ fun TodoItemWidget(todo: Todo, surfaceColor: ColorProvider, textColor: ColorProv
                     val decoration = if (sub.completed) androidx.glance.text.TextDecoration.LineThrough else androidx.glance.text.TextDecoration.None
                     Text(
                         text = "- ${sub.content}",
-                        style = TextStyle(color = color, fontSize = 13.sp, textDecoration = decoration),
+                        style = TextStyle(color = color, fontSize = WidgetTheme.NoteSize, textDecoration = decoration),
                         modifier = GlanceModifier.padding(vertical = 2.dp)
                     )
                 }
@@ -401,7 +406,7 @@ private fun WidgetTimerBar(state: WidgetTimerState, color: ColorProvider, surfac
             }
             Column(GlanceModifier.fillMaxWidth().background(surface).cornerRadius(12.dp).padding(8.dp)) {
                 Text("⏱ ${widgetTimerTitle(entry)}", maxLines = 1,
-                    style = TextStyle(color = color, fontSize = 14.sp),
+                    style = TextStyle(color = color, fontSize = WidgetTheme.BodySize),
                     modifier = GlanceModifier.fillMaxWidth().padding(vertical = 6.dp)
                         .clickable(actionStartActivity<MainActivity>()))
                 Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -409,14 +414,14 @@ private fun WidgetTimerBar(state: WidgetTimerState, color: ColorProvider, surfac
                     Box(GlanceModifier.width(56.dp).height(48.dp)
                         .clickable(actionRunCallback<StopTimerActionCallback>(actionParametersOf(TimeEntryIdKey to entry.id))),
                         contentAlignment = Alignment.Center) {
-                        Text("结束", style = TextStyle(color = color, fontWeight = FontWeight.Bold))
+                        Text("结束", style = TextStyle(color = color, fontSize = WidgetTheme.NoteSize, fontWeight = FontWeight.Bold))
                     }
                 }
             }
             Spacer(GlanceModifier.height(8.dp))
         }
         is WidgetTimerState.Attention -> {
-            Text(state.message, style = TextStyle(color = color, fontSize = 14.sp),
+            Text(state.message, style = TextStyle(color = color, fontSize = WidgetTheme.BodySize),
                 modifier = GlanceModifier.fillMaxWidth().padding(vertical = 16.dp)
                     .clickable(actionStartActivity<MainActivity>()))
         }

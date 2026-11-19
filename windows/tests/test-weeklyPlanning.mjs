@@ -106,3 +106,28 @@ test('保留 emoji 完整性，新增导出选项转义计划文本且保留旧�
     assert.doesNotMatch(history, /^## 2026-11-09$/m);
     assert.match(history, /2026-11-15/);
 });
+
+test('新旧周计划操作混合重放，重点保留在历史并仅按周导出一次', () => {
+    const legacy = save([], 1, '旧计划');
+    assert.equal(Object.hasOwn(legacy.operations[0].version, 'focus'), false);
+    const initialFocus = action([], { week: '2026-11-16', kind: 'save', versionId: id(102),
+        tips: [], days: days(''), reason: '', focus: '准备 <例题>\n第二行 😀' }, 2);
+    const oldFocus = initialFocus.operations[0].version.focus;
+    const later = action([legacy, initialFocus], { week: '2026-11-16', kind: 'save', versionId: id(103),
+        tips: [id(2)], days: days(''), reason: '调整', focus: '新的重点' }, 3);
+    const records = [legacy, initialFocus, later];
+    const data = replay(records);
+    assert.equal(weeklyPlanState(data, week).current.focus, '');
+    assert.equal(weeklyPlanState(data, '2026-11-16').current.focus, '新的重点');
+    assert.equal(weeklyPlanState(data, '2026-11-16').history[0].focus, oldFocus);
+    const equivalent = structuredClone(legacy);
+    equivalent.operations[0].version.focus = '';
+    assert.deepEqual(replay([equivalent, initialFocus, later]), data);
+    assert.throws(() => action([], { kind: 'save', versionId: id(104), tips: [], days: days(''), reason: '', focus: '\n  ' }, 4));
+    assert.throws(() => mergePlanningData(data, { weekly_plan_versions: [{ ...data.weekly_plan_versions[1], focus: '篡改' }] }),
+        /WEEKLY_PLAN_ID_CONFLICT/);
+    const { content } = exportReviews(data, 'month', '2026-11-16T12:00:00', false, undefined, undefined, undefined,
+        { includePlans: true, includePlanHistory: true });
+    assert.equal(content.match(/^### 本周重点$/gm).length, 1);
+    assert.match(content, /准备 \\<例题\\>\n第二行 😀/);
+});

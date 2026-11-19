@@ -1,4 +1,5 @@
-import { collectSubtaskEvents, collectTimerArcs, arcPath, hitArcs, clockMinute, clockTooltipDateTime } from './statsTimeline.js';
+import { createStatsTaskMark, statsTaskStyle } from './statsTaskMark.js';
+import { collectSubtaskEvents, arcPath, hitArcs, clockMinute, clockTooltipDateTime, timerLabelColors, unclassifiedTimerColor } from './statsTimeline.js';
 import { renderVerticalTimeline } from './statsVerticalView.js';
 import { formatDuration } from './timeTracking.js';
 import { prepareClockEntry, playClockEntry } from './clockAnimation.js';
@@ -49,16 +50,16 @@ export function bindClockTooltip(mark, title, lines, color, stroke = '#ffffff', 
     mark.addEventListener('click', hide);
 }
 
-export function renderTimeline({ svgEl, todos, entries, source, period, target, filters, openTodo, openRecord, openSubtask, timingEnabled = true, conflicts = undefined }) {
+export function renderTimeline({ svgEl, todos, completionEvents, entries, arcs, source, period, target, openTodo, openRecord, openSubtask, timingEnabled, conflicts }) {
     document.querySelectorAll('.timeline-detail').forEach(d => d.close());
     const card = document.getElementById('time-distribution');
     let header = card.querySelector('.timeline-header');
     if (!header) { header = node('div', ''); header.className = 'timeline-header'; card.prepend(header); }
-    header.replaceChildren(node('h3', '完成时间分布'));
+    header.replaceChildren(node('h3', timingEnabled ? '打卡任务时长分布' : '任务时间线'));
     let enabled = false; try { enabled = localStorage.getItem('stats-show-timing') === 'true'; } catch { /* 无本地存储时保持默认 */ }
     const showTiming = timingEnabled && (period === 'day' || enabled);
     if (timingEnabled && period !== 'day') {
-        const toggle = node('button', enabled ? '隐藏计时' : '显示计时'); toggle.className = 'timeline-toggle';
+        const toggle = node('button', enabled ? '隐藏计时' : '显示计时'); toggle.className = 'ui-button timeline-toggle';
         toggle.setAttribute('aria-pressed', String(enabled));
         toggle.onclick = () => {
             enabled = !enabled;
@@ -66,19 +67,25 @@ export function renderTimeline({ svgEl, todos, entries, source, period, target, 
             draw(enabled); toggle.textContent = enabled ? '隐藏计时' : '显示计时'; toggle.setAttribute('aria-pressed', String(enabled));
         }; header.append(toggle);
     }
-    const type = t => t.task_type === 'weekly_checkin' ? 'weekly' : t.task_type === 'monthly_checkin' ? 'monthly' : 'normal';
-    const colors = { normal: '#10B981', weekly: '#6366F1', monthly: '#F43F5E' };
-    const steps = collectSubtaskEvents(todos.filter(t => filters[type(t)] !== false), period, target);
-    const arcs = timingEnabled ? collectTimerArcs(entries, source, period, target, conflicts) : [];
+    const steps = collectSubtaskEvents(todos, period, target);
+    const labelColors = arcs.length ? timerLabelColors(entries, source, conflicts) : new Map();
     let note = card.querySelector('.timeline-note');
     if (!note) { note = node('p', ''); note.className = 'timeline-note'; card.append(note); }
-    let undated = card.querySelector('.timeline-undated');
-    if (!undated) { undated = node('div', ''); undated.className = 'timeline-undated'; card.append(undated); }
-    undated.replaceChildren();
-    steps.filter(e => !e.explicit).forEach(e => {
-        const b = node('button', `子步骤 · ${e.date} · ${e.subtask.content}（无具体时间）`);
-        b.onclick = () => openSubtask(e.todo, e.subtask); undated.append(b);
-    });
+    const undated = [...completionEvents, ...steps].filter(event => !event.explicit);
+    let dateList = card.querySelector('.timeline-undated');
+    if (!undated.length) dateList?.remove();
+    else {
+        if (!dateList) { dateList = node('details', ''); dateList.className = 'timeline-undated'; card.append(dateList); }
+        const summary = node('summary', '无具体时间 · ' + undated.length + ' 条');
+        dateList.replaceChildren(summary);
+        undated.forEach(event => {
+            const title = event.subtask ? '子步骤 · ' + event.subtask.content : event.todo.content;
+            const button = node('button', event.date + ' · ' + title);
+            button.className = 'ui-button';
+            button.onclick = () => event.subtask ? openSubtask(event.todo, event.subtask) : openTodo(event.todo);
+            dateList.append(button);
+        });
+    }
     const openTimers = list => {
         const parts = [...new Map(list.map(a => [`${a.entry.id}:${a.date}`, a])).values()];
         if (!parts.length) return;
@@ -107,14 +114,15 @@ export function renderTimeline({ svgEl, todos, entries, source, period, target, 
         note.hidden = !note.textContent;
         if (linear) {
             const host = document.createElement('div'); host.className = 'timeline-lines-host'; clockContainer.after(host);
-            renderVerticalTimeline({ host, todos: todos.filter(t => filters[type(t)] !== false), steps, arcs, period, target,
+            renderVerticalTimeline({ host, completed: completionEvents, steps, arcs, labelColors, period, target,
                 bindTooltip: bindClockTooltip, timerTooltip, openTimers, openTodo, openSubtask, showDetails: details });
             return;
         }
         const layer = svg('g', { class: 'timeline-layer' });
         if (visible) {
             arcs.forEach(a => {
-                const path = svg('path', { d: arcPath(170, 130, 100, a.startMinute, a.endMinute), fill: 'none', stroke: '#22d3ee', 'stroke-width': 6 });
+                const path = svg('path', { d: arcPath(170, 130, 100, a.startMinute, a.endMinute), fill: 'none',
+                    stroke: labelColors.get(a.entry.label_snapshot) ?? unclassifiedTimerColor, 'stroke-width': 6 });
                 prepareClockEntry(path, a.startMinute, a.endMinute); layer.append(path);
             });
             const hit = svg('circle', { cx: 170, cy: 130, r: 100, fill: 'none', stroke: 'transparent', 'stroke-width': 18, 'pointer-events': 'stroke', role: 'button', tabindex: 0, 'aria-label': '查看计时区间记录' });
@@ -133,12 +141,17 @@ export function renderTimeline({ svgEl, todos, entries, source, period, target, 
         steps.filter(e => e.explicit).forEach((e, i) => {
             const angle = clockMinute(e.completed_at) / 1440 * Math.PI * 2;
             const r = 44 + (i % 3) * 5;
-            const dot = svg('circle', { cx: 170 + r * Math.sin(angle), cy: 130 - r * Math.cos(angle), r: period === 'day' ? 4 : 3, fill: 'transparent', stroke: colors[type(e.todo)], 'stroke-width': 2, role: 'button', tabindex: 0 });
+            const { color } = statsTaskStyle(e.todo.task_type);
+            const dot = createStatsTaskMark(e.todo.task_type, 170 + r * Math.sin(angle), 130 - r * Math.cos(angle), period === 'day' ? 4 : 3, true);
+            dot.setAttribute('fill', 'transparent');
+            dot.setAttribute('stroke-width', 2);
+            dot.setAttribute('role', 'button');
+            dot.setAttribute('tabindex', 0);
             const caption = `${e.todo.content} / ${e.subtask.content}\n${timeText(e.completed_at)}`;
             prepareClockEntry(dot, clockMinute(e.completed_at));
             dot.setAttribute('aria-label', caption);
             const stamp = clockTooltipDateTime(e.completed_at);
-            bindClockTooltip(dot, e.subtask.content, [`所属任务: ${e.todo.content}`, `完成日期: ${stamp.date}`, `完成时间: ${stamp.time}`], colors[type(e.todo)], colors[type(e.todo)], 2, 1);
+            bindClockTooltip(dot, e.subtask.content, [`所属任务: ${e.todo.content}`, `完成日期: ${stamp.date}`, `完成时间: ${stamp.time}`], color, color, 2, 1);
             const open = () => openSubtask(e.todo, e.subtask);
             dot.onclick = open; dot.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } }; layer.append(dot);
         });

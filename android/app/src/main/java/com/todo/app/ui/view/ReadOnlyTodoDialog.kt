@@ -15,7 +15,7 @@ import com.todo.app.ui.viewmodel.TodoViewModel
 internal fun ReadOnlyTodoDialog(todo: Todo, viewModel: TodoViewModel, onDismiss: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text("任务详情") }, text = {
         Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(todo.content)
+            Text(todo.content, style = MaterialTheme.typography.bodyLarge)
             val type = when {
                 todo.taskType == TaskType.WEEKLY_CHECKIN -> "周打卡"
                 todo.taskType == TaskType.MONTHLY_CHECKIN -> "月打卡"

@@ -1,5 +1,6 @@
 package com.todo.app.data.repository
 
+import android.content.SharedPreferences
 import com.todo.app.data.model.NormalTodoConflict
 import com.todo.app.data.model.TaskType
 import com.todo.app.data.model.Todo
@@ -8,10 +9,12 @@ import com.todo.app.data.recordsync.canonical
 import com.todo.app.data.recordsync.parse
 import com.todo.app.data.recordsync.sha
 import java.io.File
+import java.io.IOException
 import java.time.Instant
 import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -38,6 +41,9 @@ internal data class PlanningCloudConnection(val endpoint: String, val username: 
 
     fun transport(binding: RecordRecoveryInput) = RecordWebDavTransport(
         normalizedEndpoint(), filePath.split('/').dropLast(1), username, password, binding.pin, initialization = binding)
+
+    // 仅在通过集合创建与文件占位验收的服务上开放启用。
+    fun canCreateFocus() = normalizedEndpoint().toHttpUrlOrNull()?.let { it.host == "dav.jianguoyun.com" && it.port == 443 } == true
 }
 
 @Serializable
@@ -71,7 +77,9 @@ internal data class RecordSandboxTarget(val datasetId: String, val actorId: Stri
 }
 
 internal data class RecordSandboxView(val preview: RecordRecoveryPreview, val revision: String?, val uploadFailures: Int = 0,
-                                     val syncIncomplete: Boolean = false)
+                                     val syncIncomplete: Boolean = false, val focusStatus: String = "legacy",
+                                     val canEnableFocus: Boolean = false, val cloudBacked: Boolean = false,
+                                     val transportError: String? = null)
 
 // 已清除的本机评分只属于旧清单，不能覆盖云端评分或阻止加入云端。
 internal fun RecordRecoveryPreview.retainsLocalPlanning(): Boolean {
@@ -85,40 +93,107 @@ internal fun RecordRecoveryPreview.retainsLocalPlanning(): Boolean {
         }
 }
 
-internal class RecordSandbox(files: File, target: RecordSandboxTarget, localOnly: Boolean = false, cloud: PlanningCloudConnection? = null) {
+internal class RecordSandbox(files: File, target: RecordSandboxTarget, localOnly: Boolean = false, cloud: PlanningCloudConnection? = null,
+                             private val focusPreferences: SharedPreferences? = null) {
     private val binding = target.binding(if (cloud == null) PLANNING_OPERATION_SET else CLOUD_PLANNING_OPERATION_SET)
     private val actorId = target.actorId
     private val store = RecordRecoveryStore(files)
-    private val transport = cloud?.transport(binding) ?: if (localOnly) null else RecordFolderTransport.sandbox(files, binding)
+    private val cloudTransport = cloud?.transport(binding)
+    private val transport = cloudTransport ?: if (localOnly) null else RecordFolderTransport.sandbox(files, binding)
     private val mutex = Mutex()
     private val json = Json { encodeDefaults = true }
     private var pending: RecordCommitIntent? = null
     private var closed = false
+    private var lastHistoryCheck: Long? = null
+    private val focusKey = "focus:${target.datasetId}:${binding.pin.descriptor_sha256}"
+    private fun storedFocus() = focusPreferences?.getString(focusKey, null)
+    private fun storeFocus(status: String) {
+        check(focusPreferences?.edit()?.putString(focusKey, status)?.commit() == true) { "无法保存本机启用状态" }
+    }
+    private val canCreateFocus = cloud?.canCreateFocus() == true
+    private var focusStatus = if (cloud != null) storedFocus() ?: "unknown" else if (localOnly) "enabled" else "legacy"
+
+    private fun withFocus(view: RecordSandboxView) = view.copy(focusStatus = focusStatus,
+        canEnableFocus = focusPreferences != null && canCreateFocus &&
+            (focusStatus == "legacy" || focusStatus == "invalid" && storedFocus() == "invalid"),
+        cloudBacked = cloudTransport != null)
 
     private fun current(failures: Int = 0): RecordSandboxView {
         val prepared = store.prepare(binding)
-        return RecordSandboxView(prepared.preview, prepared.receipt.previousSha256, failures)
+        return withFocus(RecordSandboxView(prepared.preview, prepared.receipt.previousSha256, failures))
     }
 
     suspend fun open() = use { current() }
 
     suspend fun sync(): RecordSandboxView = use {
-        val result = syncRecordJournal(store, binding, requireNotNull(transport))
-        current(result.uploadFailures.size).copy(syncIncomplete = result.listFailed || result.readFailures.isNotEmpty() || result.uploadFailures.isNotEmpty())
+        val verifyKnown = cloudTransport == null || lastHistoryCheck?.let { System.nanoTime() - it >= 30L * 60 * 1_000_000_000 } != false
+        val result = syncRecordJournal(store, binding, requireNotNull(transport), verifyKnown)
+        val failed = result.listFailed || result.readFailures.isNotEmpty() || result.uploadFailures.isNotEmpty()
+        if (verifyKnown && !failed) lastHistoryCheck = System.nanoTime()
+        val next = current(result.uploadFailures.size)
+        if (cloudTransport != null && !failed) {
+            focusStatus = try {
+                if (cloudTransport.readFocus()) {
+                    storeFocus("enabled")
+                    "enabled"
+                } else if (storedFocus() != null || next.preview.focusHistory) {
+                    storeFocus("invalid")
+                    "invalid"
+                } else "legacy"
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (error is IOException) storedFocus() ?: "unknown"
+                else {
+                    if (storedFocus() != null) storeFocus("invalid")
+                    "invalid"
+                }
+            }
+        }
+        withFocus(next).copy(syncIncomplete = failed, transportError = result.transportError)
+    }
+
+    suspend fun enableFocus(isCurrent: () -> Boolean): RecordSandboxView = use {
+        check(isCurrent()) { "个人清单已切换，请重试" }
+        check(pending == null) { "RECORD_RETRY_PENDING" }
+        if (focusStatus != "enabled") {
+            check(focusPreferences != null && cloudTransport != null && canCreateFocus) { "当前云端尚未通过本周重点启用验收" }
+            val result = syncRecordJournal(store, binding, cloudTransport)
+            val latest = current()
+            check(!result.listFailed && result.readFailures.isEmpty() && result.uploadFailures.isEmpty() &&
+                latest.preview.view != null && latest.preview.journal.fault == null && latest.preview.journal.pending.isEmpty() &&
+                latest.preview.journal.unread.isEmpty()) { "请先完成计划同步并核对数据完整性" }
+            check(isCurrent()) { "个人清单已切换，请重试" }
+            cloudTransport.enableFocus()
+            storeFocus("enabled")
+            focusStatus = "enabled"
+        }
+        current()
+    }
+
+    suspend fun hasPendingRating(date: String): Boolean = use {
+        (pending?.operations?.singleOrNull()?.get("rating") as? JsonObject)?.get("date") == JsonPrimitive(date)
     }
 
     suspend fun change(action: JsonObject, revision: String?): RecordSandboxView = use {
         check(pending == null) { "RECORD_RETRY_PENDING" }
         val latest = current()
         val data = requireNotNull(latest.preview.view)
-        check(latest.revision == revision) { "RECORD_WRITE_STALE" }
         val kind = action.getValue("kind").jsonPrimitive.content
+        val guardedRating = kind == "rate" && "expectedRating" in action
+        check(guardedRating || latest.revision == revision) { "RECORD_WRITE_STALE" }
+        if (cloudTransport != null && kind in listOf("save", "delete")) {
+            check(focusStatus == "enabled" || focusStatus == "legacy" && !latest.preview.focusHistory && "focus" !in action) {
+                "本周重点启用状态待核对，请重试同步"
+            }
+        }
         val todoId = action["todoId"]?.jsonPrimitive?.content
         val existing = data.getValue("todos").jsonArray.firstOrNull { it.jsonObject["id"]?.jsonPrimitive?.content == todoId }
             ?.let { json.decodeFromJsonElement<Todo>(it) }?.takeIf { !it.deleted && it.taskType == TaskType.NORMAL }
         val rating = if (kind == "rate") data.getValue("daily_ratings").jsonArray.map { it.jsonObject }.firstOrNull {
             it["date"] == action["date"]
         } else null
+        if (guardedRating) check((rating ?: JsonNull) == action["expectedRating"]) { "当日评分已更新，请核对后再保存" }
         val previousClock = existing?.updatedAt ?: rating?.get("updated_at")?.jsonPrimitive?.content
         val minimum = previousClock?.let { NormalTodoConflict.timestampMillis(it) + 1 } ?: 0
         val time = maxOf(System.currentTimeMillis(), minimum)
@@ -136,7 +211,13 @@ internal class RecordSandbox(files: File, target: RecordSandboxTarget, localOnly
                     put("todo", json.encodeToJsonElement(Todo.serializer(), NormalTodoConflict.normalize(todo)))
                 }
             }
-            else -> WeeklyPlanning.change(data, action, id, at)
+            else -> {
+                val details = if (kind == "save" && focusStatus == "enabled" && "focus" !in action) {
+                    val focus = WeeklyPlanning.state(data, action.getValue("week").jsonPrimitive.content).current?.get("focus")
+                    JsonObject(action + ("focus" to (focus ?: JsonPrimitive(""))))
+                } else action
+                WeeklyPlanning.change(data, details, id, at)
+            }
         }
         if (operation == null) return@use latest
         pending = RecordCommitIntent(latest.revision, id, actorId, at, listOf(operation))
@@ -155,7 +236,7 @@ internal class RecordSandbox(files: File, target: RecordSandboxTarget, localOnly
         try {
             val saved = store.submitLocal(binding, requireNotNull(pending))
             pending = null
-            return RecordSandboxView(saved.preview, saved.revision)
+            return withFocus(RecordSandboxView(saved.preview, saved.revision))
         } catch (error: Exception) {
             if (error is IllegalArgumentException || error.message in listOf("RECORD_WRITE_STALE", "RECORD_DATASET_FROZEN")) pending = null
             throw error

@@ -4,6 +4,8 @@ import com.todo.app.data.model.NormalTodoConflict
 import com.todo.app.data.recordsync.canonical
 import com.todo.app.data.recordsync.parse
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -23,6 +25,82 @@ import java.util.UUID
 import okhttp3.ResponseBody.Companion.toResponseBody
 
 class NativeRecordRecoveryTest {
+    @Test fun incrementalPollingSkipsHistoryButFullAuditReadsIt() = runBlocking {
+        val store = RecordRecoveryStore(folder.root)
+        val input = RecordRecoveryInput(pin, descriptor, baseline)
+        val received = input.copy(received = complete.records)
+        store.commit(received, store.prepare(received).receipt)
+        var reads = 0
+        val transport = object : RecordTransport {
+            override val namespace = pin.namespace
+            override suspend fun list() = emptyList<String>()
+            override suspend fun read(name: String): String {
+                synchronized(this) { reads++ }
+                return complete.records.single { it.name == name }.content
+            }
+            override suspend fun write(name: String, content: String) = error("没有待上传项")
+        }
+        syncRecordJournal(store, input, transport, verifyKnown = false)
+        assertEquals(0, reads)
+        syncRecordJournal(store, input, transport)
+        assertEquals(complete.records.size, reads)
+    }
+
+    @Test fun listFailureStopsRequestsAndKeepsHttpStatus() = runBlocking {
+        val store = RecordRecoveryStore(folder.root)
+        val input = RecordRecoveryInput(pin, descriptor, baseline)
+        val received = input.copy(received = complete.records)
+        store.commit(received, store.prepare(received).receipt)
+        val result = syncRecordJournal(store, input, object : RecordTransport {
+            override val namespace = pin.namespace
+            override suspend fun list(): List<String> = throw java.io.IOException("RECORD_DAV_HTTP_429")
+            override suspend fun read(name: String): String = error("目录失败后不再请求")
+            override suspend fun write(name: String, content: String) = error("目录失败后不再请求")
+        })
+        assertTrue(result.listFailed)
+        assertEquals("RECORD_DAV_HTTP_429", result.transportError)
+        assertEquals(complete.records.toSet(), result.state.journal.records.toSet())
+    }
+
+    @Test fun targetVerificationDistinguishesHttpFailureFromChangedBytes() = runBlocking {
+        for (status in listOf(429, 503, 404, 401, 200)) {
+            val client = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
+                okhttp3.Response.Builder().request(chain.request()).protocol(okhttp3.Protocol.HTTP_1_1)
+                    .code(status).message("Test").body(byteArrayOf().toResponseBody()).build()
+            }.build()
+            val transport = RecordWebDavTransport("https://example.test/dav/", listOf("synthetic"), "fake", "fake", pin, client)
+            val error = runCatching { transport.list() }.exceptionOrNull()
+            assertEquals(if (status == 200) "RECORD_DAV_TARGET_MISMATCH" else "RECORD_DAV_HTTP_$status", error?.message)
+            assertEquals(status == 200, error is RecordTransportIntegrityException)
+        }
+    }
+
+    @Test fun knownRecordsReadConcurrentlyWithoutChangingProjection() = runBlocking {
+        val store = RecordRecoveryStore(folder.root)
+        val input = RecordRecoveryInput(pin, descriptor, baseline)
+        val received = input.copy(received = complete.records)
+        store.commit(received, store.prepare(received).receipt)
+        val entered = java.util.concurrent.CountDownLatch(2)
+        val release = CompletableDeferred<Unit>()
+        val transport = object : RecordTransport {
+            override val namespace = pin.namespace
+            override suspend fun list() = emptyList<String>()
+            override suspend fun read(name: String): String {
+                entered.countDown()
+                release.await()
+                return complete.records.single { it.name == name }.content
+            }
+            override suspend fun write(name: String, content: String) = error("没有待上传项")
+        }
+        val operation = async(kotlinx.coroutines.Dispatchers.IO) { syncRecordJournal(store, input, transport) }
+        try {
+            assertTrue("历史记录应同时等候网络，而不是逐条排队", entered.await(2, java.util.concurrent.TimeUnit.SECONDS))
+        } finally { release.complete(Unit) }
+        val result = operation.await()
+        assertTrue(result.readFailures.isEmpty())
+        assertEquals(store.prepare(input).preview.view, result.state.view)
+    }
+
     @Test fun backgroundRecordSyncStopsAfterIntegrityFailure() = runBlocking {
         var runs = 0
         var reported: String? = null
@@ -243,7 +321,7 @@ class NativeRecordRecoveryTest {
             }
             override suspend fun write(name: String, content: String) = error("冻结前不得上传")
         }
-        val error = runCatching { syncRecordJournal(store, input, transport) }.exceptionOrNull()
+        val error = runCatching { syncRecordJournal(store, input, transport, verifyKnown = false) }.exceptionOrNull()
         assertEquals("RECORD_REMOTE_BYTES_CHANGED", error?.message)
         val reopened = RecordRecoveryStore(folder.root)
         val state = reopened.prepare(input).preview

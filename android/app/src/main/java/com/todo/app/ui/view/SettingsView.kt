@@ -1,5 +1,7 @@
 package com.todo.app.ui.view
 
+import com.todo.app.ui.theme.SupportingText
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
@@ -38,9 +40,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.text.font.FontWeight
 import com.todo.app.ui.viewmodel.TodoViewModel
 import com.todo.app.utils.AppUpdater
 import com.todo.app.utils.UpdateInfo
@@ -171,7 +171,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                     Tab(
                         selected = activeTab == index,
                         onClick = { if (!savingPreferences) activeTab = index },
-                        text = { Text(title, fontWeight = FontWeight.Bold, maxLines = 1) }
+                        text = { Text(title, maxLines = 1) }
                     )
                 }
             }
@@ -193,7 +193,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                         Text("关于与更新", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
                         ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                Text("当前版本: v$versionName", style = MaterialTheme.typography.bodyMedium)
+                                SupportingText("当前版本: v$versionName")
                                 Spacer(Modifier.height(16.dp))
                                 var checkingForUpdate by remember { mutableStateOf(false) }
                                 Button(
@@ -242,7 +242,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                         Text("偏好习惯设置", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
                         ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                Text("默认截止日期 (新建无 @ 待办时)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                Text("默认截止日期 (新建无 @ 待办时)", style = MaterialTheme.typography.titleSmall)
                                 FlowRow(
                                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -258,7 +258,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                                 }
                                 Spacer(modifier = Modifier.height(16.dp))
 
-                                Text("新待办默认插入位置", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                Text("新待办默认插入位置", style = MaterialTheme.typography.titleSmall)
                                 FlowRow(
                                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -280,12 +280,12 @@ fun SettingsView(viewModel: TodoViewModel) {
                                     Text("子步骤全部打勾时，自动勾选大任务", Modifier.weight(1f))
                                     Switch(completeParent, { completeParent = it }, enabled = !savingPreferences)
                                 }
-                                Text("默认均不联动，仅对本机生效。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                SupportingText("默认均不联动，仅对本机生效。")
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Text("启用任务计时", Modifier.weight(1f))
                                     Switch(timing, { timing = it }, enabled = !savingPreferences)
                                 }
-                                Text("显示计时入口、计时记录和时长统计；关闭后保留已有数据。仅对本机生效。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                SupportingText("显示计时入口、计时记录和时长统计；关闭后保留已有数据。仅对本机生效。")
                             }
                         }
                         Spacer(modifier = Modifier.height(24.dp))
@@ -335,7 +335,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                                             horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             Column(modifier = Modifier.weight(1f)) {
-                                                Text(collab.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                                                Text(collab.name, style = MaterialTheme.typography.titleMedium)
                                                 val expireText = if (collab.expireAt != null) {
                                                     val date = java.time.Instant.ofEpochSecond(collab.expireAt)
                                                         .atZone(java.time.ZoneId.systemDefault())
@@ -426,7 +426,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                                 }
 
                                 TextDivider("生成我的共享授权口令")
-                                Text("仅分享给可信朋友。授权码包含 WebDAV 凭据，接收者可直接访问该凭据允许访问的文件；只读和有效期限制仅在本应用内生效。撤销访问需在网盘中更换或撤销应用密码。协作密码仅保存在本机；其他设备同步清单信息后，需重新导入分享码才能访问。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                SupportingText("仅分享给可信朋友。授权码包含 WebDAV 凭据，接收者可直接访问该凭据允许访问的文件；只读和有效期限制仅在本应用内生效。撤销访问需在网盘中更换或撤销应用密码。协作密码仅保存在本机；其他设备同步清单信息后，需重新导入分享码才能访问。")
                                 Spacer(Modifier.height(8.dp))
                                 Text("口令有效期：", style = MaterialTheme.typography.bodyMedium)
                                 FlowRow(
@@ -585,12 +585,13 @@ fun SettingsView(viewModel: TodoViewModel) {
                             Text("保存连接设置")
                         }
 
+                        PlanningFocusSetting(viewModel)
                         TextDivider("数据维护")
                         RecordRecoverySettings(viewModel.configManager)
                         RecordSandboxSettings()
                         ElevatedCard(modifier = Modifier.fillMaxWidth(), shape = cardShape) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                Text("如果因为误操作同步导致数据丢失，可以从本地自动生成的快照中恢复，或从云端强制覆盖本地数据。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                SupportingText("如果因为误操作同步导致数据丢失，可以从本地自动生成的快照中恢复，或从云端强制覆盖本地数据。")
                                 Spacer(Modifier.height(16.dp))
                                 Button(
                                     onClick = {
@@ -663,7 +664,7 @@ fun SettingsView(viewModel: TodoViewModel) {
                     title = { Text("选择要恢复的备份") },
                     text = {
                         if (backupsList.isEmpty()) {
-                            Text("暂无本地备份记录。")
+                            SupportingText("暂无本地备份记录。")
                         } else {
                             LazyColumn(modifier = Modifier.fillMaxWidth().height(200.dp)) {
                                 items(backupsList) { backup ->
@@ -777,7 +778,7 @@ private fun ReminderSettingsPanel(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("开启提醒功能", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("开启提醒功能", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                 Switch(
                     checked = enabled,
                     onCheckedChange = { isChecked ->
@@ -835,7 +836,7 @@ private fun ReminderSettingsPanel(
 
                     AlertDialog(
                         onDismissRequest = { showPermissionDialog = false },
-                        title = { Text("提醒权限检测", fontWeight = FontWeight.Bold) },
+                        title = { Text("提醒权限检测") },
                         text = {
                             Column(
                                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -854,8 +855,8 @@ private fun ReminderSettingsPanel(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text("通知权限", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                                        Text("允许应用弹出通知消息", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("通知权限", style = MaterialTheme.typography.titleSmall)
+                                        SupportingText("允许应用弹出通知消息")
                                     }
                                     if (hasNotif) {
                                         Text("已开启", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
@@ -877,8 +878,8 @@ private fun ReminderSettingsPanel(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text("精确闹钟权限", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                                        Text("允许应用准时触发闹钟", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("精确闹钟权限", style = MaterialTheme.typography.titleSmall)
+                                        SupportingText("允许应用准时触发闹钟")
                                     }
                                     if (hasAlarm) {
                                         Text("已开启", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
@@ -900,8 +901,8 @@ private fun ReminderSettingsPanel(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text("后台运行 / 忽略电池优化", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                                        Text("防止锁屏后被系统休眠杀死", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("后台运行 / 忽略电池优化", style = MaterialTheme.typography.titleSmall)
+                                        SupportingText("防止锁屏后被系统休眠杀死")
                                     }
                                     if (hasBattery) {
                                         Text("已开启", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
@@ -927,8 +928,7 @@ private fun ReminderSettingsPanel(
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
                                                     if (manufacturerLabel.isNotEmpty()) "$manufacturerLabel 自启动权限" else "自启动权限",
-                                                    fontWeight = FontWeight.Bold,
-                                                    style = MaterialTheme.typography.bodyMedium
+                                                    style = MaterialTheme.typography.titleSmall
                                                 )
                                                 Spacer(Modifier.height(2.dp))
                                                 Text(
@@ -968,8 +968,7 @@ private fun ReminderSettingsPanel(
                                                     Text(
                                                         autoStartSteps,
                                                         style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        lineHeight = 18.sp
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                                     )
                                                     Spacer(Modifier.height(4.dp))
                                                     Text(
@@ -992,8 +991,8 @@ private fun ReminderSettingsPanel(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text("应用设置", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                                            Text("确保应用通知及后台权限完整开启", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text("应用设置", style = MaterialTheme.typography.titleSmall)
+                                            SupportingText("确保应用通知及后台权限完整开启")
                                         }
                                         Spacer(Modifier.width(8.dp))
                                         TextButton(onClick = {
@@ -1016,7 +1015,7 @@ private fun ReminderSettingsPanel(
                 Spacer(Modifier.height(12.dp))
                 TextDivider("提醒模式与规则")
                 Spacer(Modifier.height(8.dp))
-                Text("单项任务通知模式", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Text("单项任务通知模式", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(4.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1111,7 +1110,7 @@ private fun ReminderSettingsPanel(
 
         AlertDialog(
             onDismissRequest = { showPresetDialog = false },
-            title = { Text("💡 导入预设提醒规则", fontWeight = FontWeight.Bold) },
+            title = { Text("💡 导入预设提醒规则") },
             text = {
                 Column(modifier = Modifier.padding(vertical = 4.dp)) {
                     Row(
@@ -1129,7 +1128,7 @@ private fun ReminderSettingsPanel(
                                 sel3 = checked
                             }
                         )
-                        Text("全选", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Text("全选", style = MaterialTheme.typography.titleSmall)
                     }
 
                     Divider()
@@ -1260,7 +1259,7 @@ private fun GlobalRuleCard(
                         onCheckedChange = { onUpdate(rule.copy(enabled = it)) }
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text(rule.time, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                    Text(rule.time, style = MaterialTheme.typography.titleMedium)
                 }
 
                 Row {
@@ -1283,7 +1282,7 @@ private fun GlobalRuleCard(
                 )
                 Spacer(Modifier.height(8.dp))
 
-                Text("触发判定条件", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Text("触发判定条件", style = MaterialTheme.typography.titleSmall)
                 FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val condOpts = listOf("none_completed" to "未完成任何", "any_remaining" to "存在未完成", "unconditional" to "无条件")
                     condOpts.forEach { (valStr, label) ->
@@ -1300,7 +1299,7 @@ private fun GlobalRuleCard(
 
                 if (localCondition != "unconditional") {
                     Spacer(Modifier.height(8.dp))
-                    Text("任务类型筛选", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Text("任务类型筛选", style = MaterialTheme.typography.titleSmall)
                     FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         val scopeOpts = listOf("all" to "全部任务", "today_only" to "仅今日任务（含逾期）", "recurring_only" to "仅打卡")
                         scopeOpts.forEach { (valStr, label) ->
@@ -1367,7 +1366,7 @@ private fun GlobalRuleCard(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
-                                        Text(code, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        Text(code, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                                         Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 },
@@ -1407,7 +1406,7 @@ private fun GlobalRuleCard(
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                     ) {
                         Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("✨ 实时效果渲染预览：", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                            Text("✨ 实时效果渲染预览：", style = MaterialTheme.typography.labelMedium)
                             Text(previewText, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
@@ -1431,7 +1430,7 @@ private fun GlobalRuleCard(
                 ) {
                     Icon(Icons.Filled.Check, contentDescription = "确认保存", modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("确认保存", fontWeight = FontWeight.Bold)
+                    Text("确认保存")
                 }
             }
         }

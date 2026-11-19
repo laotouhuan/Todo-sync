@@ -7,6 +7,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -34,6 +36,7 @@ fun StatsTimelineLayer(viewModel: TodoViewModel, todos: List<Todo>, period: Stri
     val ref = if (source is TodoViewModel.ActiveSource.Collaboration) TaskReference("", "collaboration", (source as TodoViewModel.ActiveSource.Collaboration).collab.id) else TaskReference("")
     val resolved = remember(data.timeEntries, tasks, data.taskSeries, data.taskSeriesLinks) { Learning.resolveEntries(data.timeEntries, tasks, data, learning.sourceId) }
     val arcs = remember(resolved, learning.conflicts, ref, period, target) { StatsTimeline.arcs(resolved, ref, period, target, conflicts = learning.conflicts) }
+    val labelColors = remember(resolved, ref, learning.conflicts) { timerLabelColors(resolved, ref, learning.conflicts) }
     val timerSweep = rememberClockSweep(showTiming, arcs)
     val steps = remember(todos, period, target) { StatsTimeline.subtasks(todos, period, target) }
     val density = LocalDensity.current
@@ -77,13 +80,13 @@ fun StatsTimelineLayer(viewModel: TodoViewModel, todos: List<Todo>, period: Stri
         if (showTiming) arcs.forEach { a ->
             val r = 95.dp.toPx()
             val sweep = clockArcSweep(minOf(sweepProgress(), timerSweep.value), a.startMinute, a.endMinute)
-            drawArc(Color(0xFF22D3EE).copy(alpha = .65f), a.startMinute / 4 - 90, sweep, false,
+            val color = a.part.entry.label_snapshot?.let(labelColors::get) ?: unclassifiedTimerColor
+            drawArc(color, a.startMinute / 4 - 90, sweep, false,
                 Offset(size.width / 2 - r, size.height / 2 - r), Size(2 * r, 2 * r), style = Stroke(6.dp.toPx()))
         }
         points.forEach { (e, p) ->
-            val color = when { e.todo.taskType == TaskType.WEEKLY_CHECKIN -> Color(0xFF6366F1); e.todo.taskType == TaskType.MONTHLY_CHECKIN -> Color(0xFFF43F5E); else -> Color(0xFF10B981) }
             val alpha = clockEntryAlpha(sweepProgress(), StatsTimeline.clockMinute(e.time!!))
-            drawCircle(color, (if (period == "day") 4 else 3).dp.toPx(), p, alpha = alpha, style = Stroke(2.dp.toPx()))
+            drawStatsTaskMark(e.todo.statsVisualStyle(), p, (if (period == "day") 4 else 3).dp.toPx(), alpha, 2.dp.toPx(), subtask = true)
         }
     }
     if (selectedSteps.isNotEmpty()) TimelineSubtaskPicker(viewModel, selectedSteps.map { it.todo to it.subtask }) { selectedSteps = emptyList() }
@@ -93,7 +96,7 @@ fun StatsTimelineLayer(viewModel: TodoViewModel, todos: List<Todo>, period: Stri
 }
 
 @Composable
-fun TimelineLegend(viewModel: TodoViewModel, todos: List<Todo>, period: String, target: LocalDate, showTiming: Boolean, onEditTodo: (Todo) -> Unit) {
+fun TimelineLegend(viewModel: TodoViewModel, todos: List<Todo>, dateOnly: List<Pair<Todo, String>>, period: String, target: LocalDate, showTiming: Boolean, onEditTodo: (Todo) -> Unit) {
     val personalTimingEnabled by viewModel.timeTrackingEnabled.collectAsState()
     val timingEnabled = personalTimingEnabled || currentLearningData(viewModel).readOnly
     val learning = currentLearningData(viewModel)
@@ -106,5 +109,19 @@ fun TimelineLegend(viewModel: TodoViewModel, todos: List<Todo>, period: String, 
     if (timingEnabled && !showTiming && arcs.isNotEmpty()) Text("可点击“显示计时”查看投入", style = MaterialTheme.typography.bodySmall)
     var selectedStep by remember { mutableStateOf<SubtaskEvent?>(null) }
     selectedStep?.let { e -> TimelineSubtaskEditor(viewModel, e.todo, e.subtask) { selectedStep = null } }
-    undated.forEach { e -> TextButton(onClick = { selectedStep = e }) { Text("子步骤 · ${e.date} · ${e.subtask.content}（无具体时间）") } }
+    val count = dateOnly.size + undated.size
+    if (count > 0) {
+        var expanded by remember(source, period, target) { mutableStateOf(false) }
+        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.semantics {
+            stateDescription = if (expanded) "已展开" else "已收起"
+        }) { Text("无具体时间 · $count 条 " + if (expanded) "▴" else "▾") }
+        if (expanded) {
+            dateOnly.forEach { (todo, date) ->
+                TextButton(onClick = { onEditTodo(todo) }) { Text("$date · ${todo.content}") }
+            }
+            undated.forEach { e ->
+                TextButton(onClick = { selectedStep = e }) { Text("${e.date} · 子步骤 · ${e.subtask.content}") }
+            }
+        }
+    }
 }

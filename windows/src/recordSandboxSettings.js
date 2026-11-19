@@ -6,19 +6,25 @@ import { exportReviews } from './reviewUtils.js';
 
 const targetKey = 'todo-record-sandbox-target-v1';
 
-export function bindRecordSandbox(document, invoke, panel = document.getElementById('record-sandbox'), onPlanningSync = () => {}) {
+export function bindRecordSandbox(document, invoke, panel = document.getElementById('record-sandbox'),
+    onPlanningSync = () => {}, chooseWeekLeave = () => 'cancel') {
     if (!panel) return;
     const get = name => panel.querySelector(`[data-${name}]`);
     const status = get('status'), task = get('task'), date = get('date'), form = get('content');
     const tasks = get('tasks'), planning = get('planning'), start = get('start'), stop = get('stop');
     const selector = get('target');
     const retry = get('retry');
+    const enableFocus = document.getElementById('enable-planning-focus');
+    const retryFocus = document.getElementById('retry-planning-focus');
+    const focusStatus = document.getElementById('planning-focus-status');
     date.value = getTodayString();
     const personal = panel.id === 'stats-planning';
     let session, state, shownView, shownPlan, busy = false, reportError = false, closeRequested = false, month = false;
     let sourceKey = null, connectedKey, statsPeriod = 'day';
     let config, connectedConfig, cloudActive = false, cloudState = 'syncing', visible = false;
     let planningStatus = 'idle', planningError = '', retainedLocalPlanning = false;
+    let weekDetails = null;
+    let weekReviewList;
     const drafts = new Map();
     const listeners = new Set();
     let loadError = '', lastOperationError = '', ratingDate, weekDraft, opening = false, onWriteSaved;
@@ -40,7 +46,7 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
     function button(text, parent, action, style = '') {
         const node = element('button', text, parent);
         node.type = 'button';
-        if (personal) node.className = ['learning-button', style].filter(Boolean).join(' ');
+        node.className = ['ui-button', style].filter(Boolean).join(' ');
         node.addEventListener('click', action);
         return node;
     }
@@ -69,10 +75,21 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
                 else if (next.listFailed) reason = '计划与评分云端目录读取失败，请检查网络或同步配置';
                 else if (next.readFailures?.length) reason = '部分云端计划与评分读取失败，请重试';
                 else if (next.uploadFailures?.length) reason = '部分计划与评分尚未上传，请重试';
+                if (next.transportError && reason) reason += `（${next.transportError}）`;
                 publishSync(cloudState === 'idle' && next.journal.pending.length ? 'syncing' : cloudState, reason);
             }
         }
         if (personal) {
+            if (enableFocus && focusStatus) {
+                const needsRead = cloudActive && ['unknown', 'invalid'].includes(next.focusStatus);
+                enableFocus.parentElement.hidden = !cloudActive;
+                if (retryFocus) retryFocus.hidden = !needsRead;
+                enableFocus.disabled = !next.canEnableFocus;
+                if (next.focusEnabled) focusStatus.textContent = '当前计划数据集已启用本周重点';
+                else if (needsRead) focusStatus.textContent = '本周重点启用状态待核对';
+                else if (next.canEnableFocus) focusStatus.textContent = '也可在首次保存本周重点时启用';
+                else focusStatus.textContent = cloudActive ? '云端本周重点尚不可启用' : '';
+            }
             loadError = next.view ? '' : '无法读取本机计划与评分';
             if (!cloudActive && isCurrent()) {
                 if (loadError) publishSync('error', loadError);
@@ -93,39 +110,100 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
             name.value = todo.content;
             name.setAttribute('aria-label', '任务名称');
             button('改名', item, () => change({ kind: 'rename', todoId: todo.id, content: name.value }, state.revision));
-            button('删除', item, () => change({ kind: 'remove', todoId: todo.id }, state.revision));
+            button('删除', item, () => change({ kind: 'remove', todoId: todo.id }, state.revision), 'danger');
         }
-        const planContent = JSON.stringify(next.view && [next.view.weekly_plan_versions, next.view.weekly_plan_selections, next.view.daily_ratings]);
+        const planContent = JSON.stringify(next.view && [next.view.weekly_plan_versions, next.view.weekly_plan_selections,
+            next.view.daily_ratings, next.focusStatus]);
         if (planContent !== shownPlan) {
             shownPlan = planContent;
             renderPlanning();
         }
     }
 
+    function renderRatingGrid(parent, calendar, ratings, showDates, onSelect) {
+        const grid = element('div', null, parent);
+        grid.className = 'checkin-grid-container record-rating-grid';
+        const scores = new Map(ratings.filter(item => !item.deleted).map(item => [item.date, item.score]));
+        const today = getTodayString();
+        for (const weekday of '一二三四五六日') element('span', weekday, grid).className = 'checkin-grid-header ui-note';
+        for (const cell of calendar.cells) {
+            const score = scores.get(cell.date);
+            const tile = element(onSelect ? 'button' : 'span', null, grid);
+            tile.className = 'calendar-cell rating-calendar-cell rating-tone';
+            tile.classList.toggle('today-cell', cell.date === today);
+            if (score != null) tile.dataset.score = score;
+            tile.dataset.inRange = cell.inRange;
+            const label = `${cell.date} ${score == null ? '未评分' : score + ' 分'}`;
+            tile.setAttribute('aria-label', label);
+            tile.title = label;
+            if (onSelect) {
+                tile.type = 'button';
+                tile.classList.add('ui-button');
+                tile.setAttribute('aria-pressed', String(cell.date === date.value));
+                tile.addEventListener('click', () => onSelect(cell.date));
+            } else tile.setAttribute('role', 'img');
+            if (showDates) element('span', String(Number(cell.date.slice(-2))), tile).className = 'rating-calendar-date';
+            if (score != null) element('span', String(score), tile).className = 'rating-calendar-score';
+        }
+    }
+
     function renderPlanning() {
         weekDraft = null;
+        weekReviewList = undefined;
         planning.replaceChildren();
         if (!state?.view || !date.value || closeRequested || (personal && (!isCurrent() || statsPeriod === 'day'))) return;
         const view = state.view, day = date.value, week = mondayForDate(day);
         const plan = weeklyPlanState(view, week);
-        const action = (details, onSaved) => change({ week, tips: plan.tips, ...details }, state.revision, onSaved);
-        const showPlan = !personal || statsPeriod === 'week';
-        const weekCells = planningCalendar(day, false).cells;
+        const action = (details, onSaved, activateFocus) =>
+            change({ week, tips: plan.tips, ...details }, state.revision, onSaved, activateFocus);
+        const personalWeek = personal && statsPeriod === 'week';
+        const weekCalendar = planningCalendar(day, false);
+        const weekCells = weekCalendar.cells;
         const dayLabel = index => {
             const [, month, day] = weekCells[index].date.split('-').map(Number);
             return `周${'一二三四五六日'[index]} · ${month}月${day}日`;
         };
-        if (personal && showPlan && plan.current) {
-            const overview = element('div', null, planning);
+        if (personalWeek) {
+            element('h4', '本周重点', planning);
+            const focus = element('p', plan.current?.focus?.trim() ? plan.current.focus : '未填写本周重点', planning);
+            focus.className = 'learning-text insight-clipped insight-focus';
+            const expand = button('展开', planning, () => {
+                const expanded = focus.classList.toggle('insight-expanded');
+                expand.textContent = expanded ? '收起' : '展开';
+                expand.setAttribute('aria-expanded', String(expanded));
+            });
+            expand.hidden = true;
+            expand.setAttribute('aria-expanded', 'false');
+            requestAnimationFrame(() => { expand.hidden = focus.scrollHeight <= focus.clientHeight + 1; });
+            if (plan.state === 'conflict') element('p', '周计划存在分歧', planning);
+            element('h4', '每日评分', planning);
+            renderRatingGrid(planning, weekCalendar, view.daily_ratings, false);
+            if (weekDetails !== week) {
+                button('查看本周详情', planning, () => { weekDetails = week; renderPlanning(); });
+                return;
+            }
+        }
+        const detail = personalWeek ? element('section', null, planning) : planning;
+        if (personalWeek) {
+            detail.className = 'planning-week-detail';
+            element('h4', '本周详情', detail);
+            button('关闭详情', detail, async () => {
+                if (!await beforeLeave(chooseWeekLeave)) return;
+                weekDetails = null;
+                renderPlanning();
+            });
+        }
+        if (personalWeek && plan.current) {
+            const overview = element('div', null, detail);
             overview.className = 'planning-week-days';
+            element('p', plan.current.focus || '未填写本周重点', overview).className = 'learning-text';
             weekCells.forEach((cell, index) => {
                 const row = element('div', null, overview);
                 element('strong', dayLabel(index), row);
                 element('p', plan.current.days[index] || '当天未安排', row).className = 'learning-text';
-                button('查看当日回顾', row, () => panel.dispatchEvent(new CustomEvent('planning-day', { detail: cell.date })));
             });
         }
-        const editor = personal ? showPlan && element('details', null, planning) : planning;
+        const editor = personal ? personalWeek && element('details', null, detail) : detail;
         const draftKey = personal ? week : `${week}:${plan.tips.join(',')}`;
         const draft = drafts.get(draftKey);
         if (personal && editor) {
@@ -140,12 +218,19 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
             if (plan.state === 'conflict') for (const version of plan.candidates.filter(item => !item.deleted)) {
                 const details = element('details', null, editor);
                 element('summary', `候选 · ${version.created_at}`, details);
+                element('p', version.focus || '未填写本周重点', details).className = 'learning-text';
                 version.days.forEach((value, index) => element('p', `周${'一二三四五六日'[index]} ${value}`, details));
                 button('采用此版', details, () => action({ kind: 'resolve', versionId: version.id }));
             }
             if (plan.state !== 'conflict') {
                 const fields = personal ? element('div', null, editor) : editor;
                 if (personal) fields.className = 'planning-fields';
+                const focus = document.createElement('textarea');
+                focus.value = draft?.focus ?? plan.current?.focus ?? '';
+                if (personal) {
+                    focus.rows = 3;
+                    element('label', '本周重点', fields).append(focus);
+                }
                 const inputs = Array.from({ length: 7 }, (_, index) => {
                     const label = element('label', personal ? dayLabel(index) : `周${'一二三四五六日'[index]} `, fields);
                     const input = element('textarea', null, label);
@@ -158,18 +243,39 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
                 const rememberDraft = () => {
                     const days = inputs.map(input => input.value);
                     const baseline = plan.current?.days ?? Array(7).fill('');
-                    if (reason.value || days.some((value, index) => value !== baseline[index])) {
-                        drafts.set(draftKey, { days, reason: reason.value, tips: draft?.tips ?? plan.tips });
+                    if (reason.value || focus.value !== (plan.current?.focus ?? '') || days.some((value, index) => value !== baseline[index])) {
+                        drafts.set(draftKey, { days, focus: focus.value, reason: reason.value, tips: draft?.tips ?? plan.tips });
                     } else drafts.delete(draftKey);
                 };
-                [...inputs, reason].forEach(input => input.addEventListener('input', rememberDraft));
-                const save = () => action({ kind: 'save', versionId: generateUUID(), days: inputs.map(input => input.value),
-                    reason: reason.value, tips: drafts.get(draftKey)?.tips ?? plan.tips }, () => {
-                        drafts.delete(draftKey);
-                        if (personal) renderPlanning();
-                    });
+                [...inputs, focus, reason].forEach(input => input.addEventListener('input', rememberDraft));
+                const needsRead = ['unknown', 'invalid'].includes(state.focusStatus);
+                const needsFocusUpgrade = () => cloudActive && state.focusStatus === 'legacy' && Boolean(focus.value.trim());
+                const save = () => {
+                    if (busy || needsRead) return false;
+                    const upgrade = needsFocusUpgrade();
+                    if (upgrade && (!state.canEnableFocus || !confirmFocusUpgrade())) return false;
+                    const submittedDraft = drafts.get(draftKey);
+                    return action({ kind: 'save', versionId: generateUUID(), days: inputs.map(input => input.value),
+                        ...(state.focusEnabled || upgrade ? { focus: focus.value } : {}),
+                        reason: reason.value, tips: submittedDraft?.tips ?? plan.tips }, () => {
+                            if (drafts.get(draftKey) === submittedDraft) drafts.delete(draftKey);
+                            if (personal) renderPlanning();
+                        }, upgrade);
+                };
                 if (personal) weekDraft = { key: draftKey, save };
-                button('保存计划', editor, save, 'planning-primary');
+                const saveButton = button('保存计划', editor, save, 'primary');
+                const unavailable = personal && element('p', '当前云端暂不支持启用本周重点', editor);
+                const updateSaveButton = () => {
+                    const unsupported = needsFocusUpgrade() && !state.canEnableFocus;
+                    saveButton.disabled = needsRead || unsupported;
+                    if (unavailable) unavailable.hidden = !unsupported;
+                };
+                focus.addEventListener('input', updateSaveButton);
+                updateSaveButton();
+                if (needsRead) {
+                    element('p', '本周重点启用状态待核对，请重试同步', editor);
+                    button('重试读取', editor, () => void session.sync().catch(() => {}));
+                }
             }
             const history = element('details', null, editor);
             element('summary', '历史版本', history);
@@ -177,41 +283,36 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
                 const item = element('details', null, history);
                 element('summary', version.created_at, item);
                 if (version.change_reason) element('p', version.change_reason, item).className = 'learning-text';
+                element('p', version.focus || '未填写本周重点', item).className = 'learning-text';
                 version.days.forEach((value, index) => element('p', `周${'一二三四五六日'[index]} ${value}`, item));
                 if (!plan.candidates.some(candidate => candidate.id === version.id)) {
                     button('删除历史版本', item, () => {
                         if (window.confirm('删除此历史版本？')) action({ kind: 'delete', versionId: version.id });
-                    });
+                    }, 'danger');
                 }
             }
             if (plan.history.length > 1) renderComparison(plan.history, editor);
         }
         const rating = view.daily_ratings.find(item => item.date === day && !item.deleted)?.score;
         const monthly = personal ? statsPeriod === 'month' : month;
-        const calendar = planningCalendar(day, monthly);
+        const calendar = monthly ? planningCalendar(day, true) : weekCalendar;
         const { average, count, days } = ratingSummary(view, calendar.start, calendar.last);
+        if (personalWeek) {
+            element('h4', '每日回顾', detail);
+            weekReviewList = { host: element('div', null, detail), cells: weekCells };
+            refreshWeekReviews();
+            button('导出 Markdown', detail, () => panel.dispatchEvent(new CustomEvent('planning-export', { detail: day })));
+        }
         const scoreSummary = element('p',
             (average == null ? '暂无评分' : `${monthly ? '月' : '周'}平均 ${average}`) +
-            (personal ? ` · 已评分 ${count}/${days} 天` : ` · 当日评分 ${rating ?? '未评分'}`), planning);
+            (personal ? ` · 已评分 ${count}/${days} 天` : ` · 当日评分 ${rating ?? '未评分'}`), detail);
         if (personal) scoreSummary.className = 'planning-score-summary';
+        if (personalWeek) return;
         if (!personal) button(month ? '查看本周评分' : '查看本月评分', planning, () => { month = !month; renderPlanning(); });
-        const grid = element('div', null, planning);
-        grid.className = 'record-rating-grid';
-        for (const value of '一二三四五六日') element('span', value, grid);
-        for (const cell of calendar.cells) {
-            const score = view.daily_ratings.find(item => item.date === cell.date && !item.deleted)?.score;
-            const tile = element('button', cell.date.slice(-2) + (score == null ? '' : ' · ' + score), grid);
-            tile.type = 'button';
-            tile.dataset.score = score ?? '';
-            tile.dataset.inRange = cell.inRange;
-            tile.dataset.today = cell.date === getTodayString();
-            tile.setAttribute('aria-pressed', String(cell.date === day));
-            tile.setAttribute('aria-label', `${cell.date} ${score == null ? '未评分' : score + ' 分'}`);
-            tile.addEventListener('click', () => {
-                if (personal) panel.dispatchEvent(new CustomEvent('planning-day', { detail: cell.date }));
-                else { date.value = cell.date; renderPlanning(); }
-            });
-        }
+        renderRatingGrid(planning, calendar, view.daily_ratings, true, selectedDay => {
+            if (personal) panel.dispatchEvent(new CustomEvent('planning-day', { detail: selectedDay }));
+            else { date.value = selectedDay; renderPlanning(); }
+        });
         if (!personal) {
             for (const score of [1, 2, 3, 4, 5]) {
                 const choice = button(`${score} 分`, planning, () => change({ kind: 'rate', date: day, score }, state.revision));
@@ -239,7 +340,11 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
             const result = exportReviews(state.view, range.value, day + 'T12:00:00', false,
                 undefined, undefined, undefined, flags);
             if (await invoke('export_review_markdown', result)) report('已保存 Markdown。');
-        }), 'planning-primary');
+        }), 'primary');
+    }
+
+    function refreshWeekReviews() {
+        if (weekReviewList) panel.dispatchEvent(new CustomEvent('planning-reviews', { detail: weekReviewList }));
     }
 
     function renderComparison(versions, parent) {
@@ -256,10 +361,10 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
         const render = () => {
             table.replaceChildren();
             const [old, next] = selectors.map(input => versions.find(version => version.id === input.value));
-            for (let index = 0; index < 7; index++) {
+            for (let index = -1; index < 7; index++) {
                 const row = element('tr', null, table);
-                element('th', `周${'一二三四五六日'[index]}`, row);
-                const diff = comparePlanText(old.days[index], next.days[index]);
+                element('th', index < 0 ? '本周重点' : `周${'一二三四五六日'[index]}`, row);
+                const diff = comparePlanText(index < 0 ? old.focus : old.days[index], index < 0 ? next.focus : next.days[index]);
                 for (const [tag, text] of [['del', diff.removed], ['ins', diff.added]]) {
                     const cell = element('td', diff.before, row);
                     element(tag, text, cell);
@@ -304,23 +409,43 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
         }
     }
 
-    function change(action, revision, onSaved) {
+    function confirmFocusUpgrade() {
+        return window.confirm('保存本周重点需要升级云端周计划格式。请确认仍在使用此计划数据集的设备均已升级到兼容版本。');
+    }
+    function change(action, revision, onSaved, activateFocus = false) {
         if (busy || !session || (personal && !isCurrent())) return false;
+        const selected = session;
         ratingDate = action.kind === 'rate' ? action.date : null;
         onWriteSaved = onSaved;
         return run(async () => {
-            await session.change(action, revision);
+            if (activateFocus) {
+                const upgraded = await selected.enableFocus(() => isCurrent() && session === selected);
+                if (!isCurrent() || session !== selected) throw new Error('个人清单已切换，请重试');
+                revision = upgraded.revision;
+            }
+            await selected.change(action, revision);
             if (!personal || isCurrent()) onWriteSaved?.();
             onWriteSaved = undefined;
         }, true);
     }
     function retryWrite() {
-        if (personal && !isCurrent()) return false;
+        if (personal && !isCurrent() || !session?.hasPendingWrite()) return false;
         return run(async () => {
             const saved = await session.retry();
             if (saved && (!personal || isCurrent())) onWriteSaved?.();
             onWriteSaved = undefined;
         }, true);
+    }
+    async function beforeLeave(choose) {
+        if (busy && !opening) return false;
+        const key = mondayForDate(date.value);
+        if (!drafts.has(key)) return true;
+        const answer = await choose();
+        if (answer === 'save') return weekDraft?.key === key && await weekDraft.save();
+        if (answer !== 'discard') return false;
+        drafts.delete(key);
+        renderPlanning();
+        return true;
     }
     get('add')?.addEventListener('click', async () => {
         if (await change({ kind: 'add', content: task.value }, state.revision)) task.value = '';
@@ -363,7 +488,7 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
                 publishSync('error', `计划与评分读取失败（${error?.message ?? error}）`);
                 if (!reportError) report(`同步未完成（${error?.message ?? error}）`, 'error');
             }
-        }, cloud ? 15000 : 5000, { localOnly: personal, webDav: cloud?.webDav });
+        }, cloud ? 60000 : 5000, { localOnly: personal, webDav: cloud?.webDav });
         form.hidden = false;
         if (start) start.hidden = true;
         if (stop) stop.hidden = false;
@@ -419,8 +544,21 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
         if (sourceKey && (sourceKey !== key || config !== connection)) void refresh();
     }
     if (personal) {
+        retryFocus?.addEventListener('click', () => {
+            if (session && isCurrent()) void session.sync().catch(() => {});
+            else void refresh(true);
+        });
+        enableFocus?.addEventListener('click', async () => {
+            if (!session) await refresh(true);
+            if (!session || !isCurrent() || !state?.canEnableFocus) return;
+            if (cloudActive && !confirmFocusUpgrade()) return;
+            const selected = session;
+            const ok = await run(() => selected.enableFocus(() => isCurrent() && session === selected));
+            if (!ok && focusStatus) focusStatus.textContent = lastOperationError || '启用失败，请重试';
+        });
         const setContext = (key, period, day, savedConfig, show) => {
             const changed = date.value !== day || statsPeriod !== period;
+            if (changed || key !== sourceKey) weekDetails = null;
             const previousKey = sourceKey, previousConfig = config;
             sourceKey = key;
             visible = show;
@@ -430,7 +568,7 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
             date.value = day;
             panel.hidden = !key || !visible || period === 'day';
             const title = panel.querySelector('h3');
-            if (title) title.textContent = period === 'month' ? '月评分' : '周计划与评分';
+            if (title) title.textContent = period === 'month' ? '月评分' : '本周计划与回顾';
             if (key !== previousKey || config !== previousConfig) {
                 loadError = '';
                 publishSync('idle');
@@ -449,6 +587,7 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
         const snapshot = () => isCurrent() ? state?.view : undefined;
         return {
             setContext, snapshot,
+            prepareFocusSetting: () => refresh(true),
             async sync() {
                 if (busy || !sourceKey) return false;
                 // 手动同步覆盖计划与评分，不以统计页是否打开作为前置条件。
@@ -473,26 +612,24 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
                 const week = mondayForDate(day);
                 const plan = view && weeklyPlanState(view, week);
                 const index = planningCalendar(day, false).cells.findIndex(cell => cell.date === day);
-                return { plan: plan?.state, text: plan?.current?.days[index],
-                    score: view?.daily_ratings.find(item => item.date === day && !item.deleted)?.score,
+                const rating = view ? view.daily_ratings.find(item => item.date === day) ?? null : undefined;
+                return { plan: plan?.state, text: plan?.current?.days[index], rating,
+                    score: rating?.deleted ? null : rating?.score ?? null,
                     busy, loadError, syncFailed: isCurrent() && cloudActive && cloudState === 'error',
                     saving: busy && !opening && ratingDate === day,
                     saveError: isCurrent() && ratingDate === day && reportError ? status.textContent : '' };
             },
-            rate: (day, score) => change({ kind: 'rate', date: day, score }, state?.revision),
+            rate: (day, score, expectedRating) => expectedRating === undefined ? false :
+                change({ kind: 'rate', date: day, score, expectedRating }, state?.revision),
+            hasPendingWrite: day => Boolean(session?.hasPendingWrite(day)),
             retryRating: retryWrite,
             reload: () => isCurrent() && session ? close() : refresh(),
-            async beforeLeave(choose) {
-                if (busy && !opening) return false;
-                const key = mondayForDate(date.value);
-                if (!drafts.has(key)) return true;
-                const answer = await choose();
-                if (answer === 'save') return weekDraft?.key === key && await weekDraft.save();
-                if (answer !== 'discard') return false;
-                drafts.delete(key);
+            openWeek() {
+                weekDetails = mondayForDate(date.value);
                 renderPlanning();
-                return true;
-            }
+            },
+            refreshWeekReviews,
+            beforeLeave
         };
     }
     const settings = document.getElementById('settings-modal');

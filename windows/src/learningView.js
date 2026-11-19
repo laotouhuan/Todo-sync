@@ -4,14 +4,16 @@ import { learningSnapshot, requirePersonalTarget } from './collaborationView.js'
 import { normalizeLabel, taskReference, sameTask, learningRange, summarizeLearning, formatDuration, validateTimeEntry, localDay, availableLabels, resolveLearningEntries, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE, canTimeTodo, lastTimedText, recentTimingTasks, createRunningTimeEntry, timingTodos, splitTimeEntry } from './timeTracking.js';
 import { sortFunc } from './dateUtils.js';
 import { reviewFields, reviewPreview, exportReviews } from './reviewUtils.js';
+import { canonicalJson } from './stableJsonDigest.js';
 
 // 所有用户文字均通过 textContent/value 写入，计时刷新只更新文本。
 function el(tag, text, className) {
     const node = document.createElement(tag); if (text != null) node.textContent = text;
     if (className) node.className = className; return node;
 }
-function button(text, action) {
-    const b = el('button', text, 'learning-button'); b.type = 'button';
+function button(text, action, variant) {
+    const b = el('button', text, 'ui-button'); b.type = 'button';
+    if (variant) b.classList.add(variant);
     b.onclick = async e => { e.stopPropagation(); if (!b.isConnected) return; b.disabled = true; try { await action(); } finally { b.disabled = false; } }; return b;
 }
 function input(type, value, caption, host) {
@@ -27,6 +29,20 @@ function modal(title) {
 function localInput(iso) {
     if (!iso) return ''; const date = new Date(iso);
     return localDay(date) + 'T' + [date.getHours(), date.getMinutes(), date.getSeconds()].map(n => String(n).padStart(2, '0')).join(':');
+}
+
+function clippedText(host, content, lines) {
+    const text = el('p', content, 'learning-text insight-clipped');
+    text.style.setProperty('--insight-lines', lines);
+    const expand = button('展开', () => {
+        const expanded = text.classList.toggle('insight-expanded');
+        expand.textContent = expanded ? '收起' : '展开';
+        expand.setAttribute('aria-expanded', String(expanded));
+    });
+    expand.hidden = true;
+    expand.setAttribute('aria-expanded', 'false');
+    host.append(text, expand);
+    requestAnimationFrame(() => { expand.hidden = text.scrollHeight <= text.clientHeight + 1; });
 }
 
 export function createLearningView({ state, commit: commitPersonal, redraw, sync, toast, exportFile, periods, planning, openWeek }) {
@@ -138,7 +154,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
                     .map(todo => ({ todo }));
             } else candidates = recentTimingTasks(state.todoData.todos, state.todoData.time_entries || [], state.todoData);
             duplicateTimingSeries(state.todoData).forEach(s => list.append(el('p', s.content + '：本期存在重复任务，请到周期关联中核对')));
-            if (!candidates.length) list.append(el('p', other ? '暂无匹配的可计时任务' : '暂无可继续计时的最近任务，请选择其他任务'));
+            if (!candidates.length) list.append(el('p', other ? '暂无匹配的可计时任务' : '暂无可继续计时的最近任务，请选择其他任务', 'ui-note'));
             for (const { todo, endedAt } of candidates) {
                 const item = button('', () => select(todo.id)); item.classList.add('learning-timer-candidate'); item.disabled = busy;
                 item.append(el('span', todo.content));
@@ -180,7 +196,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
                     d.time_entries = [...d.time_entries.filter(e => e.id !== updated.id), updated];
                 }); dialog.close(); changed();
             } catch (e) { error.textContent = e.message || String(e); }
-        }), button('取消', () => dialog.close()));
+        }, 'primary'), button('取消', () => dialog.close()));
     }
     function recordList(host, list, todo, ref) {
         host.replaceChildren();
@@ -193,7 +209,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             else if (!pendingReason(entry)) row.append(clock(entry));
             if (conflicts().has(entry.id)) row.append(el('small', '待核对：与其他计时重叠，未计入统计'));
             if (!readOnly()) row.append(button('编辑记录', () => editEntry(entry, todo, ref, () => recordList(host, list.map(e => entries().find(n => n.id === e.id) || e).filter(e => !e.deleted), todo, ref))),
-                button('删除', () => run(async () => { await remove(entry); row.remove(); })));
+                button('删除', () => run(async () => { await remove(entry); row.remove(); }), 'danger'));
             host.append(row);
         }
     }
@@ -241,7 +257,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             render(); picker.append(button('取消', () => picker.close()));
         }), button('新建标签', () => {
             const picker = modal('新建标签'); const name = input('text', '', '标签名称', picker);
-            picker.append(button('确认', () => { select(normalizeLabel(name.value)); picker.close(); }), button('取消', () => picker.close()));
+            picker.append(button('确认', () => { select(normalizeLabel(name.value)); picker.close(); }, 'primary'), button('取消', () => picker.close()));
         }));
         if (periods && ['weekly_checkin', 'monthly_checkin'].includes(todo.task_type)) {
             const manage = el('details', null, 'edit-section'); manage.id = 'edit-series-section'; manage.append(el('summary', '周期关联'), button('管理周期关联', () => periods().associations(todo.id))); host.append(manage);
@@ -323,7 +339,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             if (included.includes('subtasks')) { progress.append(subtasks); subtasks.open = true; }
             if (record && included.includes('timing')) { progress.append(record); record.open = true; }
             if (included.includes('checkins')) { progress.append(checkin); checkin.open = true; }
-            if (progress.children.length === 1) progress.append(el('p', '暂无进展记录，可在下方添加'));
+            if (progress.children.length === 1) progress.append(el('p', '暂无进展记录，可在下方添加', 'ui-note'));
             let period = byId('edit-period-description');
             if (!period) { period = el('p'); period.id = 'edit-period-description'; byId('edit-content').after(period); }
             period.textContent = ['weekly_checkin', 'monthly_checkin'].includes(todo.task_type) ? periodDescription(todo.date) : '';
@@ -359,31 +375,37 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
     function renderPlan(host, date, daily = false) {
         const controller = planning?.();
         if (!controller || readOnly()) return;
-        const { plan, text, score, busy, loadError, syncFailed, saving, saveError } = controller.day(date);
+        const { plan, text, rating, score, busy, loadError, syncFailed, saving, saveError } = controller.day(date);
         const messages = { empty: '本周尚未制定计划', current: text || '当天未安排',
             conflict: '周计划存在分歧，请到周视图处理', restart: '周计划需重新制定' };
-        host.replaceChildren(el('h4', '当日计划 · 当前周计划'),
-            el('p', loadError || messages[plan] || '正在读取计划与评分…', 'learning-text'));
+        host.replaceChildren(el('h4', '今日计划'));
+        clippedText(host, loadError || messages[plan] || '正在读取计划与评分…', 2);
         if (syncFailed && !loadError) host.append(el('p', '计划与评分同步未完成'));
         if (loadError) host.append(button('重试读取', controller.reload));
         if (!daily) return;
-        host.append(button(plan === 'empty' ? '去制定周计划' : '查看本周计划', () => openWeek?.(date)));
-        host.append(el('h4', `当日评分 · ${score == null ? '未评分' : score + ' 分'}`));
-        const scores = el('div', null, 'planning-score-choices');
-        for (const value of [1, 2, 3, 4, 5]) {
-            const choice = button(`${value} 分`, () => controller.rate(date, value));
-            choice.disabled = !plan || busy || Boolean(saveError);
-            choice.setAttribute('aria-pressed', String(score === value));
-            scores.append(choice);
-        }
-        host.append(scores);
         if (score != null) {
-            const clear = button('清除评分', () => controller.rate(date, null));
-            clear.disabled = busy || Boolean(saveError);
-            host.append(clear);
+            const row = el('div', null, 'daily-rating-row');
+            const badge = el('span', String(score), 'daily-rating-badge rating-tone');
+            badge.dataset.score = score;
+            badge.setAttribute('role', 'img');
+            badge.setAttribute('aria-label', `${score} 分`);
+            row.append(el('h4', '当日评分'), badge);
+            host.append(row);
+        } else {
+            host.append(el('h4', '当日评分'));
+            if (rating === undefined) host.append(el('p', '评分暂不可用'));
+            const scores = el('div', null, 'planning-score-choices');
+            if (rating !== undefined) for (const value of [1, 2, 3, 4, 5]) {
+                const choice = button(`${value} 分`, () => controller.rate(date, value, rating));
+                choice.disabled = busy || controller.hasPendingWrite();
+                choice.setAttribute('aria-pressed', 'false');
+                scores.append(choice);
+            }
+            host.append(scores);
         }
         if (saving) host.append(el('p', '正在保存评分…'));
-        if (saveError) host.append(el('p', saveError, 'learning-error'), button('重试保存评分', controller.retryRating));
+        if (saveError) host.append(el('p', saveError, 'learning-error'));
+        if (saveError && controller.hasPendingWrite(date)) host.append(button('重试保存评分', controller.retryRating));
     }
     function showPlanInDialog(dialog, date) {
         const controller = planning?.();
@@ -403,47 +425,134 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
     function editReview(date) {
         if (readOnly()) return;
         const target = state.personalTarget;
-        const base = data().daily_reviews?.find(r => r.date === date && !r.deleted);
-        const dialog = modal(`${date} · ${base ? '编辑复盘' : '写复盘'}`); const inputs = {};
+        const controller = planning?.();
+        let reviewBaseline = data().daily_reviews?.find(r => r.date === date) ?? null;
+        const base = reviewBaseline?.deleted ? null : reviewBaseline;
+        const dialog = modal(`${date} · 编辑当日回顾`); const inputs = {};
         let savedFields = Object.fromEntries(reviewFields.map(([key]) => [key, base?.[key] || '']));
+        const scoreOf = rating => rating?.deleted ? null : rating?.score ?? null;
+        let ratingBaseline = controller?.day(date).rating;
+        let score = scoreOf(ratingBaseline);
+        let retryingRating = false;
+        let saving = false, leaving = false;
         showPlanInDialog(dialog, date);
+        dialog.append(button('查看周计划', async () => {
+            if (await leave(true)) await openWeek?.(date);
+        }));
+        const scoreGroup = el('div', null, 'planning-score-choices');
+        const ratingReadStatus = el('p');
+        const scoreButtons = [1, 2, 3, 4, 5, null].map(value => button(value == null ? '清除评分' : `${value} 分`, () => {
+            score = value;
+            queueMicrotask(updateScore);
+        }));
+        scoreGroup.append(...scoreButtons);
+        dialog.append(el('h4', '当日评分'), scoreGroup, ratingReadStatus);
+        function updateScore() {
+            if (ratingBaseline === undefined && ratingBaseline === controller?.day(date).rating) {
+                ratingReadStatus.textContent = '评分暂不可用';
+            } else if (ratingBaseline === undefined) {
+                ratingBaseline = controller.day(date).rating;
+                score = scoreOf(ratingBaseline);
+                ratingReadStatus.textContent = '';
+            }
+            scoreButtons.forEach((node, index) => {
+                node.disabled = saving || retryingRating || ratingBaseline === undefined;
+                node.setAttribute('aria-pressed', String(score === ([1, 2, 3, 4, 5, null][index])));
+            });
+        }
+        updateScore();
+        const unsubscribe = controller?.subscribe(updateScore);
+        if (unsubscribe) dialog.addEventListener('close', unsubscribe, { once: true });
         for (const [key, title, hint] of reviewFields) {
             const label = el('label', title); const text = el('textarea'); text.rows = 3; text.placeholder = hint; text.value = base?.[key] || '';
             inputs[key] = text; label.append(text); dialog.append(label);
         }
         const error = el('p', '', 'learning-error'); dialog.append(error);
-        const dirty = () => reviewFields.some(([key]) => inputs[key].value !== savedFields[key]);
-        let saving = false, leaving = false;
+        const reviewDirty = () => reviewFields.some(([key]) => inputs[key].value !== savedFields[key]);
+        const ratingDirty = () => score !== scoreOf(ratingBaseline);
+        const dirty = () => reviewDirty() || ratingDirty() || retryingRating;
+        const rebase = button('核对最新内容', async () => {
+            const currentReview = data().daily_reviews?.find(r => r.date === date) ?? null;
+            const currentRating = controller?.day(date).rating;
+            const reviewText = reviewFields.map(([key, title]) => `${title}：${currentReview?.deleted ? '未填写' : currentReview?.[key] || '未填写'}`).join('\n');
+            const choice = await choices(`最新评分：${scoreOf(currentRating) ?? '未评分'}\n${reviewText}`,
+                [['保留草稿并采用最新基线', 'accept'], ['继续核对', 'cancel']]);
+            if (choice !== 'accept') return;
+            if (!ratingDirty()) score = scoreOf(currentRating);
+            if (!reviewDirty()) {
+                for (const [key] of reviewFields) inputs[key].value = currentReview?.deleted ? '' : currentReview?.[key] ?? '';
+            }
+            ratingBaseline = currentRating;
+            reviewBaseline = currentReview;
+            savedFields = Object.fromEntries(reviewFields.map(([key]) => [key, currentReview?.deleted ? '' : currentReview?.[key] ?? '']));
+            rebase.hidden = true;
+            error.textContent = '';
+            updateScore();
+        });
+        rebase.hidden = true;
+        dialog.append(rebase);
         const save = async () => {
             if (saving) return false;
             saving = true;
-            error.textContent = '正在保存复盘…';
+            error.textContent = '正在保存…';
+            updateScore();
+            Object.values(inputs).forEach(input => { input.disabled = true; });
+            const saved = [], failed = [];
             try {
                 if (target !== state.personalTarget || readOnly()) throw new Error('个人清单已切换，请重新打开复盘');
                 const fields = Object.fromEntries(reviewFields.map(([key]) => [key, inputs[key].value]));
-                if (!Object.values(fields).some(v => v.trim())) throw new Error('请至少填写一项复盘内容');
-                await commit(d => {
-                    const existing = d.daily_reviews.find(r => r.date === date); const now = new Date().toISOString();
-                    d.daily_reviews = [...d.daily_reviews.filter(r => r.date !== date), { id: existing?.id || crypto.randomUUID(), date,
-                        created_at: existing?.created_at || now, updated_at: now, deleted: false, ...fields }];
-                }); savedFields = fields; error.textContent = ''; return true;
+                if (reviewDirty() && !Object.values(fields).some(v => v.trim())) throw new Error('请至少填写一项复盘内容');
+                if (ratingDirty() || retryingRating) {
+                    const ok = retryingRating ? await controller.retryRating() : await controller.rate(date, score, ratingBaseline);
+                    retryingRating = !ok && controller.hasPendingWrite(date);
+                    if (ok) {
+                        ratingBaseline = controller.day(date).rating;
+                        score = scoreOf(ratingBaseline);
+                        saved.push('评分已保存');
+                    } else failed.push(controller.day(date).saveError || '评分未保存，请重试');
+                }
+                if (reviewDirty()) {
+                    try {
+                        let written;
+                        await commit(d => {
+                            if (target !== state.personalTarget) throw new Error('个人清单已切换，请重新打开');
+                            const existing = d.daily_reviews.find(r => r.date === date) ?? null;
+                            if (canonicalJson(existing) !== canonicalJson(reviewBaseline)) throw new Error('当日复盘已更新，请核对后再保存');
+                            const now = new Date().toISOString();
+                            written = { id: existing?.id || crypto.randomUUID(), date, created_at: existing?.created_at || now,
+                                updated_at: now, deleted: false, ...fields };
+                            d.daily_reviews = [...d.daily_reviews.filter(r => r.date !== date), written];
+                        });
+                        reviewBaseline = written;
+                        savedFields = fields;
+                        saved.push('复盘已保存');
+                    } catch (e) { failed.push(e.message || String(e)); }
+                }
+                rebase.hidden = retryingRating || !failed.some(message => message.includes('已更新'));
+                error.textContent = failed.length ? [...saved, ...failed].join('。') : '';
+                return !failed.length;
             } catch (e) { error.textContent = e.message || String(e); return false; }
-            finally { saving = false; }
+            finally {
+                saving = false;
+                updateScore();
+                Object.values(inputs).forEach(input => { input.disabled = false; });
+            }
         };
         const close = () => { reviewLeave = null; dialog.close(); };
-        const leave = async () => {
+        const leave = async (goingToWeek = false) => {
             if (saving || leaving) return false;
             if (!dirty()) { close(); return true; }
             leaving = true;
             try {
-                const answer = await chooseLeave('复盘');
+                const answer = goingToWeek ? await choices('当日回顾有未保存的修改',
+                    [['保存并前往', 'save'], ['放弃修改并前往', 'discard'], ['继续编辑', 'cancel']]) : await chooseLeave('当日回顾');
                 if (answer === 'discard' || (answer === 'save' && await save())) { close(); return true; }
                 return false;
             } finally { leaving = false; }
         };
         reviewLeave = leave;
         dialog.addEventListener('cancel', e => { e.preventDefault(); void leave(); });
-        dialog.append(button('保存', async () => { if (await save()) close(); }), button('取消', leave), button('导出', async () => {
+        dialog.append(button('保存', async () => { if (await save()) close(); }, 'primary'), button('取消', leave), button('导出', async () => {
             if (dirty()) {
                 const answer = await choices('有未保存的复盘修改', [['保存后导出', 'save'], ['仅导出已保存内容', 'saved'], ['取消', 'cancel']]);
                 if (answer === 'cancel' || (answer === 'save' && !await save())) return;
@@ -503,30 +612,71 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             catch (e) { error.textContent = e.message || String(e); }
         }), button('取消', () => d.close()));
     }
+    function learningDetails(start, end, resolved) {
+        const learning = modal('学习投入详情');
+        learning.dataset.timing = 'true';
+        const totals = el('div');
+        const filter = el('select');
+        filter.setAttribute('aria-label', '学习标签');
+        const names = [...new Set(resolved.filter(e => !e.deleted).map(e => normalizeLabel(e.label_snapshot) || '未分类'))].sort();
+        if (labelFilter && !names.includes(labelFilter)) labelFilter = '';
+        [['', '全部标签'], ...names.map(n => [n, n])].forEach(([v, t]) => { const o = el('option', t); o.value = v; filter.append(o); });
+        const renderTotals = () => {
+            const summary = summarizeLearning(resolved, start, end, labelFilter ? normalizeLabel(labelFilter) : undefined, conflicts());
+            totals.replaceChildren(el('p', `${labelFilter || '全部标签'}：${formatDuration(summary.duration)} · ${summary.count} 次`));
+            for (const group of summary.groups) totals.append(button(`${group.label} · ${formatDuration(group.duration)} · ${group.count} 次`, () => {
+                showRecords([...new Map(summary.parts.filter(p => (p.entry.label_snapshot || '未分类') === group.label)
+                    .map(p => [p.entry.id, p.entry])).values()]);
+            }));
+        };
+        filter.value = labelFilter || '';
+        filter.onchange = () => { labelFilter = filter.value; renderTotals(); };
+        learning.append(filter, totals, button('关闭', () => learning.close()));
+        renderTotals();
+    }
+    function renderWeekReviews(host, cells, openDay) {
+        host.replaceChildren();
+        for (const { date } of cells) {
+            const review = data().daily_reviews?.find(item => item.date === date && !item.deleted);
+            const content = review ? reviewPreview(review) : '尚未填写复盘';
+            const entry = button(`${date} · ${content}`, () => openDay(date));
+            entry.classList.add('learning-preview');
+            host.append(entry);
+        }
+    }
+    function renderLearningSummary(start, end) {
+        const learning = document.getElementById('stats-learning-summary');
+        if (!learning) return;
+        learning.replaceChildren();
+        if (!enabled()) return;
+        const resolved = resolvedEntries();
+        const summary = summarizeLearning(resolved, start, end, undefined, conflicts());
+        learning.append(el('p', summary.count ? `学习：已记录 ${formatDuration(summary.duration)}` : '暂无学习记录', 'ui-note'));
+        learning.append(button('查看投入详情', () => learningDetails(start, end, resolved)));
+        if (summary.running) learning.append(button(`${summary.running} 条进行中，尚未计入汇总`, () =>
+            showRecords(resolved.filter(e => !e.deleted && e.ended_at == null && !e.pending_reason &&
+                Date.parse(e.started_at) < Date.parse(end + 'T00:00:00')), '进行中')));
+        if (summary.pending) learning.append(button(`${summary.pending} 条待核对记录未计入 · 查看`, () => showRecords(resolved.filter(e => !e.deleted && (conflicts().has(e.id) || e.pending_reason) &&
+            Date.parse(e.started_at) < Date.parse(end + 'T00:00:00') && (e.ended_at == null || Date.parse(e.ended_at) > Date.parse(start + 'T00:00:00'))), '核对计时记录')));
+    }
     function renderStats() {
         const host = document.getElementById('learning-insights'); if (!host) return;
         stopReviewUpdates?.();
         stopReviewUpdates = undefined;
-        host.replaceChildren(); const { start, end } = learningRange(state.statsPeriod, state.statsTargetDate);
-        const learning = el('section', null, 'learning-card'); learning.append(el('h3', readOnly() ? '学习投入' : '我的学习投入'));
-        const filter = el('select');
-        const names = [...new Set(resolvedEntries().filter(e => !e.deleted).map(e => normalizeLabel(e.label_snapshot) || '未分类'))].sort();
-        if (labelFilter && !names.includes(labelFilter)) labelFilter = '';
-        [['', '全部标签'], ...names.map(n => [n, n])].forEach(([v, t]) => { const o = el('option', t); o.value = v; filter.append(o); });
-        filter.value = labelFilter || ''; filter.onchange = () => { labelFilter = filter.value; renderStats(); }; learning.append(filter);
-        const summary = summarizeLearning(resolvedEntries(), start, end, labelFilter ? normalizeLabel(labelFilter) : undefined, conflicts());
-        learning.append(el('p', `${labelFilter || '全部标签'}：${formatDuration(summary.duration)} · ${summary.count} 次`));
-        summary.groups.forEach(g => learning.append(button(`${g.label} · ${formatDuration(g.duration)} · ${g.count} 次`, () => {
-            showRecords([...new Map(summary.parts.filter(p => (p.entry.label_snapshot || '未分类') === g.label).map(p => [p.entry.id, p.entry])).values()]);
-        })));
-        if (summary.running) learning.append(el('p', `${summary.running} 条进行中，尚未计入汇总`));
-        if (summary.pending) learning.append(button(`${summary.pending} 条待核对记录未计入 · 查看`, () => showRecords(entries().filter(e => !e.deleted && (conflicts().has(e.id) || pendingReason(e)) &&
-            Date.parse(e.started_at) < Date.parse(end + 'T00:00:00') && (e.ended_at == null || Date.parse(e.ended_at) > Date.parse(start + 'T00:00:00'))), '核对计时记录')));
-        if (enabled()) host.append(learning);
+        host.replaceChildren();
+        const { start, end } = learningRange(state.statsPeriod, state.statsTargetDate);
+        renderLearningSummary(start, end);
+        if (state.statsPeriod === 'week' && !readOnly() && planning?.()) {
+            planning().refreshWeekReviews();
+            return;
+        }
         const localDaily = state.statsPeriod === 'day' && !readOnly();
-        const review = el('section', null, 'learning-card');
+        const review = el('section', null, 'ui-card learning-card');
         review.id = 'daily-review-card';
-        review.append(el('h3', localDaily ? '每日回顾' : readOnly() ? '每日复盘' : '我的复盘'), button('导出 Markdown', () => exportDialog()));
+        const header = el('div', null, 'insight-row');
+        header.append(el('h3', localDaily ? '计划与回顾' : readOnly() ? '每日复盘' : '我的复盘'),
+            localDaily ? button('编辑', () => editReview(start)) : button('导出 Markdown', () => exportDialog()));
+        review.append(header);
         if (localDaily && planning?.()) {
             const plan = el('section', null, 'daily-review-plan');
             review.append(plan, el('h4', '复盘'));
@@ -536,11 +686,28 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         }
         const list = (data().daily_reviews || []).filter(r => !r.deleted && r.date >= start && r.date < end).sort((a, b) => b.date.localeCompare(a.date));
         if (state.statsPeriod === 'day') {
-            if (list[0]) { for (const [key, title] of reviewFields) review.append(el('h4', title), el('p', list[0][key] || '未填写', 'learning-text')); }
-            if (!readOnly()) review.append(button(list.length ? '编辑' : '写复盘', () => editReview(start)));
-            else if (!list.length) review.append(el('p', '暂无复盘'));
+            if (localDaily && list[0]) {
+                const preview = el('p', reviewPreview(list[0]), 'learning-text insight-clipped');
+                const full = el('div');
+                full.hidden = true;
+                for (const [key, title] of reviewFields) full.append(el('h4', title), el('p', list[0][key] || '未填写', 'learning-text'));
+                const expand = button('展开', () => {
+                    full.hidden = !full.hidden;
+                    preview.hidden = !full.hidden;
+                    expand.textContent = full.hidden ? '展开' : '收起';
+                    expand.setAttribute('aria-expanded', String(!full.hidden));
+                });
+                expand.setAttribute('aria-expanded', 'false');
+                review.append(preview, expand, full);
+                const filled = reviewFields.filter(([key]) => list[0][key]?.trim());
+                if (filled.length <= 1 && !list[0][filled[0]?.[0]]?.split('\n').slice(2).length) {
+                    requestAnimationFrame(() => { expand.hidden = preview.scrollHeight <= preview.clientHeight + 1; });
+                }
+            } else if (localDaily) review.append(el('p', '尚未填写，可通过编辑记录', 'ui-note'));
+            else if (list[0]) for (const [key, title] of reviewFields) review.append(el('h4', title), el('p', list[0][key] || '未填写', 'learning-text'));
+            else review.append(el('p', '暂无复盘', 'ui-note'));
         } else {
-            if (!list.length) review.append(el('p', '这个时间范围还没有复盘'));
+            if (!list.length) review.append(el('p', '这个时间范围还没有复盘', 'ui-note'));
             list.forEach(r => { const card = button(`${r.date}\n${reviewPreview(r)}`, () => showReview(r)); card.classList.add('learning-preview'); review.append(card); });
         }
         host.append(review);
@@ -620,5 +787,5 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
     function chooseLeave(label) {
         return choices(`${label}有未保存的修改`, [['保存并离开', 'save'], ['放弃修改', 'discard'], ['继续编辑', 'cancel']]);
     }
-    return { beforeSourceChange: async () => !reviewLeave || await reviewLeave(), chooseLeave, enabled, conflicts, install, refresh, attachTimer, editTask, renderStats, compactEditor, updateEditorSummary, resolvedEntries, showRecords, editRecord, prepareDisable };
+    return { beforeSourceChange: async () => !reviewLeave || await reviewLeave(), chooseLeave, enabled, conflicts, install, refresh, attachTimer, editTask, renderStats, renderWeekReviews, exportDialog, compactEditor, updateEditorSummary, resolvedEntries, showRecords, editRecord, prepareDisable };
 }

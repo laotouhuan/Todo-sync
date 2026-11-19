@@ -449,12 +449,19 @@ class TodoRepository(private val context: Context) {
         }
     }
 
-    suspend fun saveDailyReview(review: com.todo.app.data.model.DailyReview): Result<Unit> = changeLearning { data ->
-        java.time.LocalDate.parse(review.date)
-        require(com.todo.app.data.model.Learning.fields(review).any { it.second.isNotBlank() }) { "请至少填写一项复盘内容" }
-        val existing = data.dailyReviews.find { it.date == review.date }
-        data.copy(dailyReviews = com.todo.app.data.model.Learning.mergeReviews(data.dailyReviews.filter { it.date != review.date } + review.copy(
-            id = existing?.id ?: review.id, created_at = existing?.created_at ?: review.created_at, updated_at = nowIso())))
+    internal suspend fun saveDailyReview(review: com.todo.app.data.model.DailyReview,
+        expected: com.todo.app.data.model.DailyReview?, target: PlanningSettings?): Result<com.todo.app.data.model.DailyReview> {
+        lateinit var saved: com.todo.app.data.model.DailyReview
+        return changeLearning { data ->
+            check(target == null || configManager.planningSettings() == target) { "个人清单已切换，请重新打开" }
+            java.time.LocalDate.parse(review.date)
+            require(com.todo.app.data.model.Learning.fields(review).any { it.second.isNotBlank() }) { "请至少填写一项复盘内容" }
+            val existing = data.dailyReviews.find { it.date == review.date }
+            check(existing == expected) { "当日复盘已更新，请核对后再保存" }
+            saved = review.copy(id = existing?.id ?: review.id, created_at = existing?.created_at ?: review.created_at,
+                updated_at = nowIso())
+            data.copy(dailyReviews = com.todo.app.data.model.Learning.mergeReviews(data.dailyReviews.filter { it.date != review.date } + saved))
+        }.map { saved }
     }
 
     /** 同步获取当前内存中的最新数据（非挂起），供 Glance provideContent 内部使用 */

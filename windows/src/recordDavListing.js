@@ -16,7 +16,7 @@ function xmlText(text) {
 }
 
 // 保守解析实际需要的 XML 子集；不解析实体定义、处理指令、CDATA 或注释。
-export function directoryNames(xml, collection) {
+export function directoryNames(xml, collection, verifyCollection = false) {
     if (xml.length > 1024 * 1024 || /<!|<\?(?!xml\s)/.test(xml)) fail('INVALID_DIRECTORY_XML');
     for (const char of xml) {
         const value = char.codePointAt(0);
@@ -82,7 +82,20 @@ export function directoryNames(xml, collection) {
             if (url.origin !== collection.origin || url.username || url.password || url.search || url.hash) fail('INVALID_DIRECTORY_PATH');
             pathname = decodeURIComponent(url.pathname); prefix = decodeURIComponent(collection.pathname);
         } catch { fail('INVALID_DIRECTORY_PATH'); }
-        if (pathname.replace(/\/$/, '') === prefix.replace(/\/$/, '')) { selfCount++; continue; }
+        if (pathname.replace(/\/$/, '') === prefix.replace(/\/$/, '')) {
+            selfCount++;
+            if (verifyCollection) {
+                const davChildren = (node, name) => node.children.filter(child => child.namespace === 'DAV:' && child.local === name);
+                const types = davChildren(response, 'propstat').flatMap(propstat => {
+                    const [status] = davChildren(propstat, 'status');
+                    if (!/^HTTP\/\S+ 200(?: |$)/.test(status?.text.trim() ?? '')) return [];
+                    return davChildren(propstat, 'prop').flatMap(prop => davChildren(prop, 'resourcetype'));
+                });
+                if (types.length !== 1 || davChildren(types[0], 'collection').length !== 1) fail('INVALID_DIRECTORY_TYPE');
+            }
+            continue;
+        }
+        if (verifyCollection) fail('INVALID_DIRECTORY_PATH');
         if (!pathname.startsWith(prefix) || pathname.slice(prefix.length).includes('/')) fail('INVALID_DIRECTORY_PATH');
         const name = 'records/' + pathname.slice(prefix.length);
         if (!RECORD.test(name)) fail('INVALID_DIRECTORY_PATH');

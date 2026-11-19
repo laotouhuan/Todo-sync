@@ -1,5 +1,7 @@
 package com.todo.app.ui.view
 
+import com.todo.app.ui.theme.SupportingText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -114,6 +116,5 @@ fun PeriodDailyBars(first: List<PeriodComparisonDay>, second: List<PeriodCompari
             Text(if (delta == 0L) "当天时长相同" else "当天${if (delta < 0) "少" else "多"} ${Learning.duration(kotlin.math.abs(delta))}", style = MaterialTheme.typography.bodySmall)
         }
     }
-    Text("点击日期查看当天差异；左右滑动查看更多。— 表示未到、未纳入或无数据。",
-        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    SupportingText("点击日期查看当天差异；左右滑动查看更多。— 表示未到、未纳入或无数据。")
 }

@@ -1,4 +1,10 @@
+import { statsPeriodKey } from './dateUtils.js';
 import { localDay, learningRange, splitTimeEntry, overlappingEntries } from './timeTracking.js';
+
+// 按本地时间从午夜起排列，钟面和纵向时间线共用。
+export const timeSlotColors = Object.freeze({
+    night: '#3b82f6', morning: '#f59e0b', afternoon: '#7b61ff', evening: '#6366f1'
+});
 
 // 所有钟面标记共用本地时间刻度，保留秒和毫秒，不添加角度偏移。
 export function clockMinute(value) {
@@ -26,9 +32,7 @@ export function collectTaskTimelineEvents(todos, period, target) {
         const times = ['weekly_checkin', 'monthly_checkin'].includes(todo.task_type) ? [...new Set(todo.completed_dates || [])] :
             todo.completed && todo.completed_at ? [todo.completed_at] : [];
         return times.flatMap(time => {
-            if (!Number.isFinite(Date.parse(time))) return [];
-            const explicit = time.includes('T'), date = explicit ? localDay(time) : time;
-            if (!explicit && (!/^\d{4}-\d{2}-\d{2}$/.test(time) || new Date(time).toISOString().slice(0, 10) !== time)) return [];
+            const date = statsPeriodKey(time), explicit = Boolean(date && time.includes('T'));
             return date >= start && date < end ? [{ todo, date, completed_at: time, explicit }] : [];
         });
     });
@@ -44,10 +48,7 @@ export function collectSubtaskEvents(todos, period, target) {
     return todos.filter(t => !t.deleted).flatMap(todo => (todo.subtasks || []).flatMap(subtask => {
         if (!subtask.completed || !subtask.completed_at) return [];
         const time = subtask.completed_at;
-        if (!Number.isFinite(Date.parse(time))) return [];
-        const explicit = time.includes('T');
-        if (!explicit && (!/^\d{4}-\d{2}-\d{2}$/.test(time) || new Date(time).toISOString().slice(0, 10) !== time)) return [];
-        const date = explicit ? localDay(time) : time;
+        const date = statsPeriodKey(time), explicit = Boolean(date && time.includes('T'));
         return date >= start && date < end ? [{ id: `${todo.id}:${subtask.id}`, todo, subtask, date, completed_at: time, explicit }] : [];
     }));
 }
@@ -71,11 +72,59 @@ export function clockSegments(part) {
     return result;
 }
 
+function timelineEntries(entries, source, conflicts) {
+    return entries.filter(e => !conflicts.has(e.id) && e.task_ref.source_type === source.type &&
+        (e.task_ref.source_id ?? null) === (source.type === 'personal' ? null : source.id));
+}
+
+// 与 Android 使用相同色板和 UTF-16 标签顺序。
+const timerPalette = ['#2593A7', '#8F77D8', '#B5832F', '#C96889', '#4E996C'];
+export const unclassifiedTimerColor = '#858899';
+
+export function timerLabelColors(resolvedEntries, source, conflicts = overlappingEntries(resolvedEntries)) {
+    const labels = new Set();
+    for (const entry of timelineEntries(resolvedEntries, source, conflicts)) {
+        if (!entry.deleted && entry.label_snapshot && Date.parse(entry.ended_at) > Date.parse(entry.started_at)) {
+            labels.add(entry.label_snapshot);
+        }
+    }
+    const assigned = new Map();
+    const used = new Set();
+    for (const label of [...labels].sort()) {
+        let hash = 0;
+        for (let i = 0; i < label.length; i++) {
+            hash = (Math.imul(31, hash) + label.charCodeAt(i)) | 0;
+        }
+        let index = ((hash % timerPalette.length) + timerPalette.length) % timerPalette.length;
+        if (used.size < timerPalette.length) {
+            while (used.has(index)) index = (index + 1) % timerPalette.length;
+            used.add(index);
+        }
+        assigned.set(label, timerPalette[index]);
+    }
+    return assigned;
+}
+
 export function collectTimerArcs(entries, source, period, target, conflicts = overlappingEntries(entries)) {
     const { start, end } = learningRange(period, target);
-    return entries.filter(e => !conflicts.has(e.id) && e.task_ref.source_type === source.type &&
-        (e.task_ref.source_id ?? null) === (source.type === 'personal' ? null : source.id))
+    return timelineEntries(entries, source, conflicts)
         .flatMap(splitTimeEntry).filter(p => p.date >= start && p.date < end).flatMap(clockSegments);
+}
+
+// 圆弧已在午夜和时区偏移变化处切开，每一段按实际覆盖的时段累计毫秒。
+export function checkinDurationBySlot(arcs, todos) {
+    const checkinIds = new Set(todos.filter(todo => !todo.deleted &&
+        (todo.task_type === 'weekly_checkin' || todo.task_type === 'monthly_checkin')).map(todo => todo.id));
+    const checkinArcs = arcs.filter(arc => checkinIds.has(arc.entry.task_ref.todo_id));
+    return Object.fromEntries(Object.keys(timeSlotColors).map((slot, index) => {
+        const start = index * 360, end = start + 360;
+        let duration = 0;
+        for (const arc of checkinArcs) {
+            const overlap = Math.min(arc.endMinute, end) - Math.max(arc.startMinute, start);
+            duration += Math.round(Math.max(0, overlap) * 60000);
+        }
+        return [slot, duration];
+    }));
 }
 
 export function arcPath(cx, cy, radius, startMinute, endMinute) {

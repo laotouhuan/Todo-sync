@@ -15,8 +15,10 @@ function dialog(title) {
     const d = node('dialog'); d.className = 'learning-dialog'; d.dataset.periodDialog = 'true'; d.append(node('h3', title));
     d.addEventListener('keydown', e => e.stopPropagation()); d.addEventListener('close', () => d.remove()); document.body.append(d); d.showModal(); return d;
 }
-function action(host, title, callback) {
-    const b = node('button', title); b.type = 'button'; b.className = 'learning-button'; host.append(b);
+function action(host, title, callback, variant) {
+    const b = node('button', title); b.type = 'button'; b.className = 'ui-button';
+    if (variant) b.classList.add(variant);
+    host.append(b);
     b.onclick = async e => { e.stopPropagation(); b.disabled = true; try { await callback(); } catch (error) { let p = host.querySelector('[role="alert"]'); if (!p) { p = node('p'); p.setAttribute('role', 'alert'); host.append(p); } p.textContent = error.message; } finally { b.disabled = false; } }; return b;
 }
 
@@ -71,7 +73,7 @@ export function createPeriodTaskView({ state, commit, toast, relationSaved = () 
             if (matches.length) row.append(node('small', '本期已有同名独立任务，可通过周期关联核对；仍可导入不同任务。'));
             d.append(row); rows.push({ row, checkbox, select, candidate, options });
         }
-        const empty = node('p'); d.append(empty);
+        const empty = node('p'); empty.className = 'period-help'; d.append(empty);
         function refreshCandidates() {
             for (const r of rows) {
                 const inScope = showEarlier || r.candidate.choices.some(c => c.todo.date === previous);
@@ -105,7 +107,7 @@ export function createPeriodTaskView({ state, commit, toast, relationSaved = () 
                     return allocated[index++];
                 });
             }); d.close();
-        }); action(d, '取消', () => d.close());
+        }, 'primary'); action(d, '取消', () => d.close());
     }
     function associations(todoId) {
         const reservedId = crypto.randomUUID();
@@ -130,7 +132,11 @@ export function createPeriodTaskView({ state, commit, toast, relationSaved = () 
                 }
                 action(history, '关闭', () => history.close());
             }).classList.add('period-text-button');
-        } else overview.append(node('p', '尚未关联往期任务'));
+        } else {
+            const empty = node('p', '尚未关联往期任务');
+            empty.className = 'period-help';
+            overview.append(empty);
+        }
         let status = `暂无其他同名${kind}`;
         if (summary.unlinkedSameName.length) status = `还有 ${summary.unlinkedSameName.length} 个同名${kind}未关联`;
         else if (summary.sameNameCount) status = `✓ 已关联全部同名${kind}`;
@@ -146,7 +152,7 @@ export function createPeriodTaskView({ state, commit, toast, relationSaved = () 
             if (historic.length) confirm.append(node('p', `另有 ${historic.length} 条历史关联将随系列迁移：${historic.map(l => l.period).join('、')}`));
             const noChange = p.members.every(t => seriesFor(data(), t.id)?.id === seriesFor(data(), todoId)?.id) && !!seriesFor(data(), todoId);
             if (p.duplicates.length || p.members.length < 2 || noChange) confirm.append(node('p', p.duplicates.length ? '同一周期存在重复任务，暂不能合并' : '没有需要新增的关联'));
-            else action(confirm, '确认关联，各期记录保留', async () => { await commit(latest => associatePeriods(latest, p, selected, new Date().toISOString(), () => reservedId)); relationSaved(); confirm.close(); d.close(); toast('关联已保存，其他编辑草稿已保留'); });
+            else action(confirm, '确认关联，各期记录保留', async () => { await commit(latest => associatePeriods(latest, p, selected, new Date().toISOString(), () => reservedId)); relationSaved(); confirm.close(); d.close(); toast('关联已保存，其他编辑草稿已保留'); }, 'primary');
             action(confirm, '取消', () => confirm.close());
         };
         const actions = node('div'); actions.className = 'period-association-actions'; d.append(actions);
@@ -201,7 +207,7 @@ export function createPeriodTaskView({ state, commit, toast, relationSaved = () 
                     });
                 });
                 relationSaved(); confirm.close(); d.close(); toast('关联已解除，任务和记录已保留');
-            }); action(confirm, '取消', () => confirm.close());
+            }, 'danger'); action(confirm, '取消', () => confirm.close());
         });
         action(footer, '关闭', () => d.close());
     }
@@ -265,7 +271,7 @@ export function createPeriodTaskView({ state, commit, toast, relationSaved = () 
         select.append(new Option('仅删除这一期', 'one')); if (seriesFor(data(), todoId)) select.append(new Option('删除全部周期', 'all'));
         d.append(select); const description = node('div'); d.append(description); let preview;
         function refresh() { preview = deletePreview(data(), todoId, select.value === 'all'); description.replaceChildren(node('p', `${preview.todos.length} 条任务，${new Set(preview.todos.map(t => t.date)).size} 个周期。历史计时记录将保留。`)); for (const t of preview.todos) description.append(node('p', t.date ? periodDescription(t.date) : '无日期')); if (preview.running.length) description.append(node('p', `确认后将结束以上任务的 ${preview.running.length} 条计时：${preview.running.map(e => displayTaskName(data(), e.task_ref.todo_id)).join('、')}`)); }
-        select.onchange = refresh; refresh(); action(d, '确认删除', async () => { await commit(latest => deletePeriods(latest, preview)); d.close(); done(); }); action(d, '取消', () => d.close());
+        select.onchange = refresh; refresh(); action(d, '确认删除', async () => { await commit(latest => deletePeriods(latest, preview)); d.close(); done(); }, 'danger'); action(d, '取消', () => d.close());
     }
     return { openImport, associations, compare, remove, refresh: closeOthers };
 }

@@ -2,10 +2,27 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { availableLabels, resolveLearningEntries, taskReference, summarizeLearning } from '../src/timeTracking.js';
 import { exportReviews } from '../src/reviewUtils.js';
-import { collectSubtaskEvents, collectTimerArcs, arcPath, hitArcs, clockMinute, clockTooltipDateTime, timelineDays, collectTaskTimelineEvents, hitTimelineSegments } from '../src/statsTimeline.js';
+import { collectSubtaskEvents, collectTimerArcs, checkinDurationBySlot, arcPath, hitArcs, clockMinute, clockTooltipDateTime, timelineDays, collectTaskTimelineEvents, hitTimelineSegments, timerLabelColors } from '../src/statsTimeline.js';
 process.env.TZ = 'Asia/Shanghai';
 const source = { type: 'personal' }, day = '2026-09-10T12:00:00';
 const entry = (id, start = '2026-09-10T09:00:00+08:00', end = '2026-09-10T10:30:00+08:00') => ({ id, task_ref: taskReference({ id: 'task' }), started_at: start, ended_at: end, updated_at: start, created_at: start, label_snapshot: '错字' });
+
+test('计时标签碰撞时先分配五种不同颜色，记录顺序和其他来源不影响分配', () => {
+    const records = ['A', 'F', 'K', 'P', 'U', 'Z'].map(label => ({ ...entry(label), label_snapshot: label }));
+    records.push(
+        { ...entry('deleted'), label_snapshot: '0', deleted: true },
+        { ...entry('running'), label_snapshot: '1', ended_at: null },
+        { ...entry('other'), label_snapshot: '2', task_ref: { todo_id: 'task', source_type: 'collaboration', source_id: 'x' } },
+        { ...entry('overlap'), label_snapshot: '3' },
+        { ...entry('unclassified'), label_snapshot: null }
+    );
+    const conflicts = new Set(['overlap']);
+    const expected = new Map([
+        ['A', '#2593A7'], ['F', '#8F77D8'], ['K', '#B5832F'], ['P', '#C96889'], ['U', '#4E996C'], ['Z', '#2593A7']
+    ]);
+    assert.deepEqual(timerLabelColors(records, source, conflicts), expected);
+    assert.deepEqual(timerLabelColors([...records].reverse(), source, conflicts), expected);
+});
 
 test('直线日期轴覆盖周一至周日及完整月份，包含跨年周和闰年二月', () => {
     assert.deepEqual(timelineDays('week', '2027-01-01T12:00:00'), ['2026-12-28', '2026-12-29', '2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02', '2027-01-03']);
@@ -110,15 +127,44 @@ test('多日钟面重叠允许，真实冲突、运行、删除和其他来源�
     for (const e of [{ ...a, ended_at: null }, { ...a, deleted: true }, { ...a, ended_at: 'bad' }, { ...a, task_ref: { ...a.task_ref, source_type: 'collaboration', source_id: 'x' } }])
         assert.equal(collectTimerArcs([e], source, 'day', day).length, 0);
 });
+
+test('时段占比只累计当前筛选内的打卡任务计时，按实际区间拆分', () => {
+    const weekly = { id: 'task', task_type: 'weekly_checkin', completed_dates: [] };
+    const monthly = { id: 'month', task_type: 'monthly_checkin', completed_dates: ['2026-09-10T20:00:00+08:00'] };
+    const normal = { id: 'normal', task_type: 'normal' };
+    const records = [
+        entry('weekly', '2026-09-10T05:30:00+08:00', '2026-09-10T07:00:00+08:00'),
+        { ...entry('monthly', '2026-09-10T11:59:59.999+08:00', '2026-09-10T12:30:00+08:00'), task_ref: taskReference(monthly) },
+        { ...entry('normal'), task_ref: taskReference(normal) },
+        entry('cross', '2026-09-09T23:00:00+08:00', '2026-09-10T00:30:00+08:00'),
+        { ...entry('deleted', '2026-09-10T18:00:00+08:00', '2026-09-10T19:00:00+08:00'), deleted: true },
+        entry('running', '2026-09-10T23:00:00+08:00', null),
+        entry('conflict', '2026-09-10T16:00:00+08:00', '2026-09-10T17:00:00+08:00'),
+        { ...entry('other', '2026-09-10T20:00:00+08:00', '2026-09-10T21:00:00+08:00'),
+            task_ref: taskReference(weekly, { type: 'collaboration', id: 'x' }) }
+    ];
+    const arcs = collectTimerArcs(records, source, 'day', day, new Set(['conflict']));
+    assert.deepEqual(checkinDurationBySlot(arcs, [weekly, monthly, normal]), {
+        night: 3600000, morning: 3600001, afternoon: 1800000, evening: 0
+    });
+    assert.deepEqual(checkinDurationBySlot(arcs, [monthly, normal]), {
+        night: 0, morning: 1, afternoon: 1800000, evening: 0
+    });
+});
+
 test('夏令时跳进与回拨按钟面分段，统计保留 23/25 小时', () => {
     process.env.TZ = 'America/New_York';
     try {
         const spring = entry('a', '2026-03-08T00:00:00-05:00', '2026-03-09T00:00:00-04:00');
         const arcs = collectTimerArcs([spring], source, 'day', '2026-03-08T12:00:00');
         assert.deepEqual(arcs.map(a => [a.startMinute, a.endMinute]), [[0, 120], [180, 1440]]);
+        const checkins = [{ id: 'task', task_type: 'weekly_checkin' }];
+        assert.deepEqual(Object.values(checkinDurationBySlot(arcs, checkins)), [5, 6, 6, 6].map(h => h * 3600000));
         assert.equal(summarizeLearning([spring], '2026-03-08', '2026-03-09').duration, 23 * 3600000);
         const fall = entry('b', '2026-11-01T00:00:00-04:00', '2026-11-02T00:00:00-05:00');
-        assert.deepEqual(collectTimerArcs([fall], source, 'day', '2026-11-01T12:00:00').map(a => [a.startMinute, a.endMinute]), [[0, 120], [60, 1440]]);
+        const fallArcs = collectTimerArcs([fall], source, 'day', '2026-11-01T12:00:00');
+        assert.deepEqual(fallArcs.map(a => [a.startMinute, a.endMinute]), [[0, 120], [60, 1440]]);
+        assert.deepEqual(Object.values(checkinDurationBySlot(fallArcs, checkins)), [7, 6, 6, 6].map(h => h * 3600000));
         assert.equal(summarizeLearning([fall], '2026-11-01', '2026-11-02').duration, 25 * 3600000);
     } finally { process.env.TZ = 'Asia/Shanghai'; }
 });

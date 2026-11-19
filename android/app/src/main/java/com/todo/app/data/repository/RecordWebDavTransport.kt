@@ -97,6 +97,40 @@ internal class RecordWebDavTransport(
         }
     }
 
+    private val focusPath get() = "capabilities/weekly-plan-focus-v1.${pin.descriptor_sha256}"
+
+    suspend fun readFocus(): Boolean {
+        verifyTarget()
+        return readCollection("capabilities") && readCollection(focusPath)
+    }
+
+    suspend fun enableFocus() {
+        verifyTarget()
+        for (path in listOf("capabilities", focusPath)) {
+            if (readCollection(path)) continue
+            try {
+                execute(dataset.resolve(path)!!, "MKCOL") { expect(it, 201, 405) }
+            } catch (error: IOException) {
+                if (readCollection(path)) continue
+                throw error
+            }
+            check(readCollection(path)) { "RECORD_DAV_CREATE_UNVERIFIED" }
+        }
+    }
+
+    private fun readCollection(path: String): Boolean {
+        val url = dataset.resolve(path)!!
+        val collection = dataset.resolve("$path/")!!
+        val body = """<d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>"""
+        return execute(url, "PROPFIND", body.toRequestBody("application/xml".toMediaType()), "Depth" to "0") {
+            if (it.code == 404) false else {
+                expect(it, 207)
+                directoryNames(bounded(it).decodeToString(throwOnInvalidSequence = true), collection, true)
+                true
+            }
+        }
+    }
+
     private fun initialize(binding: RecordRecoveryInput) {
         val fixed = listOf(
             Triple("baseline", pin.baseline_sha256, bytes(binding.baseline)),
@@ -144,7 +178,8 @@ internal class RecordWebDavTransport(
     private fun verifyTarget() {
         for ((kind, expected) in listOf("dataset" to pin.descriptor_sha256, "baseline" to pin.baseline_sha256)) {
             execute(dataset.resolve("$kind.$expected.json")!!, "GET") {
-                if (it.code != 200 || sha(bounded(it)) != expected) integrity("RECORD_DAV_TARGET_MISMATCH")
+                expect(it, 200)
+                if (sha(bounded(it)) != expected) integrity("RECORD_DAV_TARGET_MISMATCH")
             }
         }
     }
@@ -178,7 +213,7 @@ private fun bounded(response: Response): ByteArray {
     integrity("RECORD_DAV_SIZE_LIMIT")
 }
 
-private fun directoryNames(xml: String, collection: HttpUrl): List<String> = try {
+private fun directoryNames(xml: String, collection: HttpUrl, verifyCollection: Boolean = false): List<String> = try {
     // 限制为 WebDAV 列表需要的 XML 子集，拒绝 DTD、实体声明和处理指令。
     val input = xml.replaceFirst(Regex("^<\\?xml\\s+[^?]*\\?>"), "")
     if ("<!" in input || "<?" in input) integrity("RECORD_DAV_INVALID_LIST")
@@ -200,8 +235,22 @@ private fun directoryNames(xml: String, collection: HttpUrl): List<String> = try
         }
         val prefix = collection.pathSegments.dropLast(1)
         val path = url.pathSegments
-        if (path == prefix || path == collection.pathSegments) self++
-        else {
+        if (path == prefix || path == collection.pathSegments) {
+            self++
+            if (verifyCollection) {
+                val types = row.elements().filter { it.isDav("propstat") }.flatMap { propstat ->
+                    val status = propstat.elements().singleOrNull { it.isDav("status") }?.textContent?.trim().orEmpty()
+                    if (!Regex("HTTP/\\S+ 200(?: .*|$)").matches(status)) emptyList()
+                    else propstat.elements().filter { it.isDav("prop") }.flatMap { prop ->
+                        prop.elements().filter { it.isDav("resourcetype") }
+                    }
+                }
+                if (types.size != 1 || types.single().elements().count { it.isDav("collection") } != 1) {
+                    integrity("RECORD_DAV_INVALID_LIST")
+                }
+            }
+        } else {
+            if (verifyCollection) integrity("RECORD_DAV_INVALID_LIST")
             if (path.size != prefix.size + 1 || path.dropLast(1) != prefix) integrity("RECORD_DAV_INVALID_LIST")
             val name = "records/${path.last()}"
             if (!recordFileName.matches(name)) integrity("RECORD_DAV_INVALID_LIST")
