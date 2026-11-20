@@ -169,7 +169,12 @@ fun LearningBanner(viewModel: TodoViewModel) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LearningTaskPicker(viewModel: TodoViewModel, onDismiss: () -> Unit) {
+private fun LearningTaskPicker(
+    viewModel: TodoViewModel,
+    onDismiss: () -> Unit,
+    recordDate: LocalDate = LocalDate.now(),
+    onSelectRecordTask: ((Todo) -> Unit)? = null
+) {
     dismissOnSourceChange(viewModel, onDismiss)
     val learning = currentLearningData(viewModel)
     val enabled by viewModel.timeTrackingEnabled.collectAsState()
@@ -181,29 +186,49 @@ private fun LearningTaskPicker(viewModel: TodoViewModel, onDismiss: () -> Unit) 
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val today = LocalDate.now()
+    val reassigning = onSelectRecordTask != null
     LaunchedEffect(enabled, learning.readOnly, data.timeEntries) {
-        if (!enabled || learning.readOnly || data.timeEntries.any { !it.deleted && it.ended_at == null }) onDismiss()
+        if (!enabled || learning.readOnly || (!reassigning && data.timeEntries.any { !it.deleted && it.ended_at == null })) onDismiss()
     }
-    val recent = Learning.recentTimingTasks(data.todos, data.timeEntries, data = data)
-    val candidates = if (other) TaskSeriesLogic.timingTodos(data)
+    val choices = remember(data, recordDate, reassigning) {
+        if (reassigning) Learning.recordTaskChoices(data, recordDate) else null
+    }
+    val recent = choices?.recent ?: Learning.recentTimingTasks(data.todos, data.timeEntries, data = data)
+    val candidates = if (other) (choices?.todos ?: TaskSeriesLogic.timingTodos(data))
         .sortedWith(compareByDescending<Todo> { it.date == today.toString() }.then(TodoComparator))
         .filter { it.content.contains(search.trim(), ignoreCase = true) }
         else recent.map { it.todo }
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true, confirmValueChange = { !busy })
     ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, sheetState = sheet) {
         Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).padding(horizontal = 20.dp).padding(bottom = 20.dp)) {
-            Text(if (other) "选择要计时的任务" else "最近计时的任务", style = MaterialTheme.typography.titleLarge)
+            val title = when {
+                !other -> "最近计时的任务"
+                reassigning -> "更换所属任务"
+                else -> "选择要计时的任务"
+            }
+            Text(title, style = MaterialTheme.typography.titleLarge)
             if (other) OutlinedTextField(search, onValueChange = { search = it }, label = { Text("搜索任务") },
                 enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp)) }
-            TaskSeriesLogic.duplicateTimingSeries(data).forEach { Text("${it.content}：本期存在重复任务，请到周期关联中核对") }
-            if (candidates.isEmpty()) SupportingText(if (other) "暂无匹配的可计时任务" else "暂无可继续计时的最近任务，请选择其他任务",
-                modifier = Modifier.padding(vertical = 16.dp))
+            if (!reassigning) TaskSeriesLogic.duplicateTimingSeries(data).forEach { Text("${it.content}：本期存在重复任务，请到周期关联中核对") }
+            if (candidates.isEmpty()) {
+                val message = when {
+                    other && reassigning -> "暂无匹配的任务"
+                    other -> "暂无匹配的可计时任务"
+                    reassigning -> "暂无最近计时的任务，请选择其他任务"
+                    else -> "暂无可继续计时的最近任务，请选择其他任务"
+                }
+                SupportingText(message, modifier = Modifier.padding(vertical = 16.dp))
+            }
             LazyColumn(Modifier.weight(1f, fill = false)) {
                 items(candidates, key = { it.id }) { todo ->
                     TextButton(enabled = !busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), onClick = click@ {
                         if (busy || viewModel.activeSource.value != target || !viewModel.timeTrackingEnabled.value) return@click
+                        if (onSelectRecordTask != null) {
+                            onSelectRecordTask(todo)
+                            return@click
+                        }
                         busy = true; error = null
                         scope.launch {
                             try {
@@ -215,6 +240,7 @@ private fun LearningTaskPicker(viewModel: TodoViewModel, onDismiss: () -> Unit) 
                     }) {
                         Column(Modifier.fillMaxWidth()) {
                             Text(todo.content)
+                            if (reassigning) todo.date?.let { SupportingText(it) }
                             if (!other) recent.find { it.todo.id == todo.id }?.let {
                                 Text(Learning.lastTimedText(it.endedAt), style = MaterialTheme.typography.bodySmall)
                             }
@@ -287,11 +313,13 @@ fun LearningRecords(viewModel: TodoViewModel, todo: Todo? = null, ids: List<Stri
     val scope = rememberCoroutineScope(); val context = LocalContext.current
     val ref = todo?.let { viewModel.learningReference(it) }
     var editing by remember { mutableStateOf<TimeEntry?>(null) }
+    var supplementing by remember { mutableStateOf(false) }
     val records = data.timeEntries.filter { !it.deleted && (ids?.contains(it.id) ?: (it.task_ref == ref)) }
         .sortedWith(compareBy<TimeEntry> { it.ended_at != null }.thenByDescending { it.started_at })
     if (todo != null && !learning.readOnly) {
         TextButton(onClick = {
             val now = nowIso()
+            supplementing = true
             editing = TimeEntry(UUID.randomUUID().toString(), ref!!, now, now, now, todo.content, todo.label, now)
         }) { Text("补录计时记录") }
     }
@@ -303,7 +331,7 @@ fun LearningRecords(viewModel: TodoViewModel, todo: Todo? = null, ids: List<Stri
             if (entry.ended_at != null) SupportingText(Learning.duration((Learning.instant(entry.ended_at)?.toEpochMilli() ?: 0) - (Learning.instant(entry.started_at)?.toEpochMilli() ?: 0)))
             if (entry.id in learning.conflicts) Text("待核对：与其他计时重叠，未计入统计")
             if (!learning.readOnly) Row {
-                TextButton(onClick = { editing = entry }) { Text("编辑记录") }
+                TextButton(onClick = { supplementing = false; editing = entry }) { Text("编辑记录") }
                 TextButton(onClick = click@ {
                     if (viewModel.activeSource.value != source) return@click
                     scope.launch {
@@ -320,33 +348,50 @@ fun LearningRecords(viewModel: TodoViewModel, todo: Todo? = null, ids: List<Stri
             HorizontalDivider()
         }
     }
-    editing?.let { entry -> TimeEntryEditor(entry, viewModel) { editing = null } }
+    editing?.let { entry -> TimeEntryEditor(entry, viewModel, isNew = supplementing) { editing = null } }
 }
 
 private fun displayLearningTime(value: String): String = Learning.instant(value)?.atZone(ZoneId.systemDefault())
     ?.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")) ?: value
 
 @Composable
-internal fun TimeEntryEditor(entry: TimeEntry, viewModel: TodoViewModel, onDismiss: () -> Unit) {
+internal fun TimeEntryEditor(entry: TimeEntry, viewModel: TodoViewModel, isNew: Boolean = false, onDismiss: () -> Unit) {
+    val baseline = remember(entry.id) { entry }
     val source = remember { viewModel.activeSource.value }
     val currentSource by viewModel.activeSource.collectAsState()
     LaunchedEffect(currentSource) { if (currentSource != source) onDismiss() }
-    if (currentLearningData(viewModel).readOnly) { LearningRecordsDialog(viewModel, listOf(entry.id), onDismiss); return }
-    var start by rememberSaveable(entry.id) { mutableStateOf(displayLearningTime(entry.started_at)) }
-    var end by rememberSaveable(entry.id) { mutableStateOf(entry.ended_at?.let(::displayLearningTime) ?: "") }
     val learning = currentLearningData(viewModel)
+    if (learning.readOnly) { LearningRecordsDialog(viewModel, listOf(entry.id), onDismiss); return }
+    val initialStart = remember(baseline) { displayLearningTime(baseline.started_at) }
+    val initialEnd = remember(baseline) { baseline.ended_at?.let(::displayLearningTime).orEmpty() }
+    var start by rememberSaveable(baseline.id) { mutableStateOf(initialStart) }
+    var end by rememberSaveable(baseline.id) { mutableStateOf(initialEnd) }
+    var selectedTaskId by rememberSaveable(baseline.id) { mutableStateOf<String?>(null) }
+    var choosingTask by rememberSaveable(baseline.id) { mutableStateOf(false) }
     val data = learning.data
     val tasks = learning.tasks
-    val currentLabel = Learning.resolveEntries(data.timeEntries + if (data.timeEntries.none { it.id == entry.id }) listOf(entry) else emptyList(), tasks).find { it.id == entry.id }?.label_snapshot ?: "未分类"
+    val selectedTask = selectedTaskId?.let { id ->
+        data.todos.find { it.id == id && !it.deleted && !TaskSeriesLogic.isDeleted(data, id) }
+    }
+    val taskName = when {
+        selectedTask != null -> TaskSeriesLogic.display(data, selectedTask.id)
+        selectedTaskId != null -> "所选任务已不可用"
+        else -> learning.display(baseline)
+    }
+    val currentLabel = if (selectedTaskId != null) Learning.label(selectedTask?.label) else {
+        val entries = if (isNew) data.timeEntries + baseline else data.timeEntries
+        Learning.resolveEntries(entries, tasks).find { it.id == baseline.id }?.label_snapshot
+    }
     var error by remember { mutableStateOf("") }; var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("编辑计时记录") }, text = {
+    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text(if (isNew) "补录计时记录" else "编辑计时记录") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("所属任务：${learning.display(entry)}")
+            Text("所属任务：$taskName")
+            if (!isNew) TextButton(enabled = !busy, onClick = { choosingTask = true }) { Text("更换任务") }
             SupportingText("日期和时间格式：2026-09-10 09:30:00")
             OutlinedTextField(start, { start = it }, label = { Text("开始日期和时间") }, enabled = !busy)
             OutlinedTextField(end, { end = it }, label = { Text("结束日期和时间（运行中可留空）") }, enabled = !busy)
-            Text("所属任务标签：$currentLabel（在任务编辑页修改）", style = MaterialTheme.typography.bodyMedium)
+            Text("所属任务标签：${currentLabel ?: "未分类"}（在任务编辑页修改）", style = MaterialTheme.typography.bodyMedium)
             if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
         }
     }, confirmButton = { TextButton(enabled = !busy, onClick = click@ {
@@ -355,11 +400,24 @@ internal fun TimeEntryEditor(entry: TimeEntry, viewModel: TodoViewModel, onDismi
             busy = true
             try {
                 fun parse(text: String) = LocalDateTime.parse(text.trim().replace(' ', 'T')).atZone(ZoneId.systemDefault()).toInstant().toString()
-                val result = viewModel.saveTimeEntry(entry.copy(started_at = parse(start), ended_at = end.takeIf { it.isNotBlank() }?.let(::parse)), source, expected = entry.takeIf { old -> data.timeEntries.any { it.id == old.id } })
+                val draft = baseline.copy(
+                    task_ref = selectedTaskId?.let { TaskReference(it) } ?: baseline.task_ref,
+                    started_at = if (start == initialStart) baseline.started_at else parse(start),
+                    ended_at = if (end == initialEnd) baseline.ended_at else end.takeIf { it.isNotBlank() }?.let(::parse)
+                )
+                val result = viewModel.saveTimeEntry(draft, source, expected = baseline.takeUnless { isNew })
                 if (result.isSuccess) onDismiss() else error = result.exceptionOrNull()?.message ?: "保存失败"
-            } catch (_: Exception) { error = "请输入有效的日期和时间" } finally { busy = false }
+            } catch (_: DateTimeException) { error = "请输入有效的日期和时间" } finally { busy = false }
         }
     }) { Text("保存记录") } }, dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") } })
+    if (choosingTask) {
+        val recordDate = runCatching { LocalDateTime.parse(start.trim().replace(' ', 'T')).toLocalDate() }.getOrNull()
+            ?: Learning.instant(baseline.started_at)?.atZone(ZoneId.systemDefault())?.toLocalDate() ?: LocalDate.now()
+        LearningTaskPicker(viewModel, onDismiss = { choosingTask = false }, recordDate = recordDate, onSelectRecordTask = { todo ->
+            selectedTaskId = todo.id.takeUnless { TaskReference(it) == baseline.task_ref }
+            choosingTask = false
+        })
+    }
 }
 
 @Composable

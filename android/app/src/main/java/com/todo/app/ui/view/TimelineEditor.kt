@@ -37,7 +37,7 @@ internal fun TimelineRecordEditor(viewModel: TodoViewModel, ids: List<String>, o
     val records = data.timeEntries.filter { it.id in ids && !it.deleted }
     var selected by remember(ids) { mutableStateOf(ids.distinct().singleOrNull()) }
     val entry = records.find { it.id == selected }
-    if (entry != null) TimeEntryEditor(entry, viewModel, onDismiss)
+    if (entry != null) TimeEntryEditor(entry, viewModel, onDismiss = onDismiss)
     else AlertDialog(onDismissRequest = onDismiss, title = { Text("选择计时记录") }, text = {
         Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
             if (records.isEmpty()) Text("该计时记录已删除")

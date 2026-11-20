@@ -25,6 +25,7 @@ function harness(entries = [], enabled = true, now = Date.now()) {
         const classes = new Set(className.split(' '));
         const listeners = new Map();
         const node = { tag, textContent: text, children: [], dataset: {}, isConnected: true, open: true,
+            get childElementCount() { return node.children.length; },
             classList: { add: name => classes.add(name), contains: name => classes.has(name) },
             append(...children) { for (const child of children) { child.parentElement = node; node.children.push(child); } },
             replaceChildren() { node.children.forEach(child => { child.isConnected = false; }); node.children = []; },
@@ -43,7 +44,7 @@ function harness(entries = [], enabled = true, now = Date.now()) {
             const b = Object.assign(element('button', text), { action });
             Object.defineProperty(b, 'text', { get: () => b.textContent }); buttons.push(b); return b;
         },
-        input: (type, value, caption, host) => { const label = element('label', caption), field = element('input'); field.type = type; field.value = value; label.append(field); host.append(label); return field; },
+        input: (type, value, caption, host) => { const label = element('label', caption), field = element('input'); field.type = type; field.value = value; field.focus = () => {}; label.append(field); host.append(label); return field; },
         modal: title => { const d = Object.assign(element('dialog'), { title }); d.append(element('h3', title)); dialogs.push(d); return d; },
         document: {
             getElementById: id => id === 'start-timer-btn' ? startButton : null,
@@ -67,6 +68,72 @@ function harness(entries = [], enabled = true, now = Date.now()) {
         } };
 }
 const entry = { id: 'e', task_content_snapshot: '测试计时', task_ref: { todo_id: 't' }, started_at: '2026-09-01T00:00:00Z', ended_at: null };
+
+it('更换所属任务时保存原计时精度和新任务快照，并从原任务的记录列表移出', async () => {
+    const original = { ...entry, started_at: '2026-09-01T08:00:00.125+08:00', ended_at: '2026-09-01T08:00:20.875+08:00' };
+    const h = harness([original], true, Date.parse('2026-11-19T12:00:00Z'));
+    const [oldTask] = h.state.todoData.todos;
+    const target = { id: 'right', content: '往期打卡', label: '学习', task_type: 'weekly_checkin', date: '2026-W36', completed: true };
+    h.state.todoData.todos.push(target);
+    const [normalized] = helpers.normalizeLearningData(h.state.todoData).time_entries;
+    h.api.showRecords([normalized], '计时记录', oldTask, helpers.taskReference(oldTask));
+    const records = h.dialogs.at(-1).querySelector('.learning-records-body');
+    await h.choose('编辑记录');
+    const editor = h.dialogs.at(-1);
+    await h.choose('更换任务');
+    const picker = h.dialogs.at(-1);
+    assert.equal(picker.querySelector('h3').textContent, '最近计时的任务');
+    assert.equal(picker.querySelector('label').hidden, true);
+    await h.choose('选择其他任务');
+    const search = picker.querySelector('label').children[0];
+    search.value = '往期'; search.oninput();
+    const option = picker.querySelector('.learning-timer-candidates').children[0];
+    assert.equal(option.children[0].textContent, target.content);
+    await option.action();
+    assert.ok(editor.children.some(node => node.textContent === '所属任务标签：学习（在任务编辑页修改）'));
+    assert.equal(h.commits(), 0);
+
+    target.deleted = true;
+    await h.choose('保存记录');
+    assert.equal(h.commits(), 0);
+    assert.match(editor.querySelector('.learning-error').textContent, /所选任务已不可用/);
+    target.deleted = false;
+    target.label = '阅读';
+    await h.choose('保存记录');
+    assert.equal(h.commits(), 1);
+    assert.equal(records.childElementCount, 0);
+    assert.deepEqual(structuredClone(h.state.todoData.time_entries), [{ ...normalized, task_ref: helpers.taskReference(target),
+        task_content_snapshot: target.content, label_snapshot: '阅读', updated_at: '2026-11-19T12:00:00.000Z' }]);
+});
+
+it('更换任务的最近列表和搜索都按关联去重，按计时开始日期选中对应一期', async () => {
+    const older = { id: '15518504-d36a-4344-9362-d659cc3e70d1', content: '旧名', task_type: 'weekly_checkin', date: '2026-W36' };
+    const newer = { ...older, id: '25518504-d36a-4344-9362-d659cc3e70d1', date: '2026-W37' };
+    const seriesId = '35518504-d36a-4344-9362-d659cc3e70d1';
+    const timer = { ...entry, started_at: '2026-09-02T08:00:00+08:00' };
+    const records = [timer, ...[older, newer].map((task, i) => ({ ...entry, id: `past-${i}`, task_ref: helpers.taskReference(task),
+        started_at: `2026-09-0${i + 3}T01:00:00Z`, ended_at: `2026-09-0${i + 3}T02:00:00Z` }))];
+    const h = harness(records);
+    h.state.todoData.todos = [{ id: 't', content: '原任务' }, { id: 'untimed', content: '未计时任务' }, older, newer];
+    const stamp = '2026-09-01T00:00:00Z';
+    h.state.todoData.task_series = [{ id: seriesId, content: '关联阅读', period_type: 'week', created_at: stamp, updated_at: stamp, content_updated_at: stamp }];
+    h.state.todoData.task_series_links = [older, newer].map(task => ({ todo_id: task.id, series_id: seriesId, period: task.date, created_at: stamp, updated_at: stamp }));
+    helpers.normalizeLearningData(h.state.todoData);
+    h.api.editRecord(timer);
+    await h.choose('更换任务');
+    const picker = h.dialogs.at(-1);
+    const options = () => picker.querySelector('.learning-timer-candidates').children.filter(node => node.tag === 'button');
+    assert.deepEqual(options().map(node => node.children[0].textContent), ['关联阅读']);
+    await h.choose('选择其他任务');
+    const search = picker.querySelector('label').children[0]; search.value = '关联'; search.oninput();
+    assert.equal(options().length, 1);
+    assert.match(options()[0].children[1].textContent, /2026-W36/);
+    await h.choose('返回最近任务');
+    assert.equal(picker.querySelector('label').hidden, true);
+    await options()[0].action();
+    await h.choose('保存记录');
+    assert.equal(h.state.todoData.time_entries.find(record => record.id === timer.id).task_ref.todo_id, older.id);
+});
 
 describe('统一计时入口实际交互', () => {
     const candidates = dialog => dialog.querySelector('.learning-timer-candidates').children.filter(child => child.tag === 'button');

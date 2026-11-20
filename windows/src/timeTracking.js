@@ -1,4 +1,4 @@
-import { normalizeSeriesData, displayTaskName, seriesFor, periodMembers, currentPeriod, timingPendingReason, isSeriesDeleted } from './taskSeries.js';
+import { normalizeSeriesData, displayTaskName, seriesFor, periodMembers, currentPeriod, timingPendingReason, isSeriesDeleted, visibleSeriesTodos } from './taskSeries.js';
 import { getISOWeekString } from './dateUtils.js';
 
 // 学习记录的纯逻辑；按设备本地自然日统计。
@@ -44,13 +44,40 @@ export function timingTodos(data, now = new Date()) {
 
 export function recentTimingTasks(todos, entries, data = { todos }) {
     if (entries.some(e => !e.deleted && e.ended_at == null)) return [];
-    const available = new Map(timingTodos(data).map(todo => [seriesFor(data, todo.id)?.id || todo.id, todo]));
+    return recentTaskChoices(data, entries, timingTodos(data));
+}
+
+function timingTaskKey(data, todoId) {
+    const series = seriesFor(data, todoId);
+    return series ? `series:${series.id}` : `todo:${todoId}`;
+}
+
+export function recordTaskChoices(data, date) {
+    const todos = [];
+    const groups = new Map();
+    for (const todo of visibleSeriesTodos(data)) {
+        if (todo.deleted) continue;
+        const series = seriesFor(data, todo.id);
+        if (!series) { todos.push(todo); continue; }
+        if (!groups.has(series.id)) groups.set(series.id, { series, members: [] });
+        groups.get(series.id).members.push(todo);
+    }
+    for (const { series, members } of groups.values()) {
+        const period = currentPeriod(series.period_type, date);
+        members.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+        const earlier = members.filter(todo => todo.date <= period);
+        todos.push(earlier.at(-1) ?? members[0]);
+    }
+    return { todos, recent: recentTaskChoices(data, data.time_entries || [], todos) };
+}
+
+function recentTaskChoices(data, entries, candidates) {
+    const available = new Map(candidates.map(todo => [timingTaskKey(data, todo.id), todo]));
     const latest = new Map();
     for (const entry of entries) {
         const ref = entry.task_ref;
         if (entry.deleted || (ref?.source_type || 'personal') !== 'personal' || ref?.source_id != null) continue;
-        const key = seriesFor(data, ref?.todo_id)?.id || ref?.todo_id;
-        const todo = available.get(key);
+        const todo = available.get(timingTaskKey(data, ref?.todo_id));
         const start = timingTimestamp(entry.started_at), end = timingTimestamp(entry.ended_at);
         if (!todo || !Number.isFinite(start) || !Number.isFinite(end) || end - start <= 30000) continue;
         const previous = latest.get(todo.id);

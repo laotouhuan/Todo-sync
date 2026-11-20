@@ -99,8 +99,12 @@ try {
             const operation = planningChange({}, { kind: 'rate', date, score: index + 1 }, { id: recordId, at });
             saved.set(id(1), candidate(saved.get(id(1)), { id: recordId, created_at: at, operations: [operation] }));
         }
-        window.focusFixture = { prompts: 0, confirm: false, capabilities: false, upgraded: false, cloudWrites: [] };
-        window.confirm = () => { focusFixture.prompts++; return focusFixture.confirm; };
+        window.focusFixture = { nativeConfirmError: '', capabilities: false, upgraded: false, cloudWrites: [] };
+        const aclError = 'Command plugin:dialog|confirm not allowed by ACL';
+        window.confirm = () => Promise.reject(new Error(aclError));
+        window.addEventListener('unhandledrejection', event => {
+            if (event.reason?.message === aclError) focusFixture.nativeConfirmError = aclError;
+        });
         const invoke = async (command, args) => {
             if (command === 'open_personal_planning_target') return {
                 datasetId: args.target === 'weekly-fixture' ? id(1) : id(5), actorId: id(2), at
@@ -182,25 +186,47 @@ try {
     assert.equal(await browser.evaluate('weekFocus().disabled'), false);
     await browser.evaluate(`fillWeekFocus('直接保存的重点'); insightClick('#stats-planning button', '保存计划');`);
     await waitFor(browser, 'document.querySelector(".insight-focus")?.textContent === "直接保存的重点"');
-    assert.equal(await browser.evaluate('focusFixture.prompts'), 0);
+    assert.equal(await browser.evaluate('focusFixture.nativeConfirmError'), '');
 
     await browser.evaluate(`focusFixture.controller.setContext('cloud-fixture', 'week', '2026-01-12', { sync_mode: 'webdav',
         webdav_url: 'https://dav.jianguoyun.com/dav/', webdav_username: 'fixture', webdav_password: 'fake',
         webdav_filepath: 'fixture/todo_data.json' }, true);`);
     await waitFor(browser, 'document.querySelector("#enable-planning-focus").disabled === false');
+    const upgradeDialog = `document.querySelector('dialog[aria-label="升级云端周计划格式"]')`;
+    const upgradePrompt = `${upgradeDialog}?.open === true`;
+    await browser.evaluate('document.getElementById("enable-planning-focus").click()');
+    await waitFor(browser, upgradePrompt);
+    await browser.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await browser.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await waitFor(browser, `!${upgradeDialog}`);
+    assert.equal(await browser.evaluate('focusFixture.upgraded'), false);
     await browser.evaluate(`insightClick('#stats-planning button', '查看本周详情');
         const day = document.querySelectorAll('#stats-planning .planning-fields textarea')[1];
         day.value = '旧格式安排'; day.dispatchEvent(new Event('input'));
         insightClick('#stats-planning button', '保存计划');`);
-    await waitFor(browser, 'focusFixture.cloudWrites.length === 1');
-    assert.equal(await browser.evaluate('Object.hasOwn(focusFixture.cloudWrites[0].version, "focus") || focusFixture.prompts > 0'), false);
+    await waitFor(browser, 'focusFixture.cloudWrites.length === 1 && !document.querySelector("#stats-planning [data-content]").disabled');
+    assert.equal(await browser.evaluate('Object.hasOwn(focusFixture.cloudWrites[0].version, "focus")'), false);
     await browser.evaluate(`fillWeekFocus('云端重点草稿'); insightClick('#stats-planning button', '保存计划');`);
-    assert.equal(await browser.evaluate('focusFixture.prompts'), 1);
+    await waitFor(browser, `focusFixture.nativeConfirmError || ${upgradePrompt}`);
+    assert.equal(await browser.evaluate('focusFixture.nativeConfirmError'), '');
+    assert.equal(await browser.evaluate(upgradePrompt), true);
     assert.equal(await browser.evaluate('focusFixture.upgraded'), false);
+    await browser.evaluate(`insightClick('dialog[open] button', '取消');`);
+    await waitFor(browser, `!${upgradeDialog}`);
     assert.equal(await browser.evaluate('weekFocus().value'), '云端重点草稿');
-    await browser.evaluate(`focusFixture.confirm = true; insightClick('#stats-planning button', '保存计划');`);
+    assert.equal(await browser.evaluate('focusFixture.cloudWrites.length'), 1);
+    await browser.evaluate(`insightClick('#stats-planning button', '保存计划');`);
+    await waitFor(browser, upgradePrompt);
+    await browser.evaluate(`insightClick('dialog[open] button', '确认升级');`);
     await waitFor(browser, 'document.querySelector(".insight-focus")?.textContent === "云端重点草稿"');
+    assert.equal(await browser.evaluate('focusFixture.nativeConfirmError'), '');
     assert.equal(await browser.evaluate('focusFixture.upgraded && focusFixture.cloudWrites[1].version.focus'), '云端重点草稿');
+    await browser.evaluate(`insightClick('#stats-planning button', '删除历史版本');`);
+    const deletePrompt = `!!document.querySelector('dialog[open][aria-label="删除此历史版本？"]')`;
+    await waitFor(browser, deletePrompt);
+    await browser.evaluate(`insightClick('dialog[open] button', '取消');`);
+    await waitFor(browser, `!(${deletePrompt})`);
+    assert.equal(await browser.evaluate('focusFixture.cloudWrites.length'), 2);
     console.log('PASS 首次评分只读、当日回顾草稿保留、部分保存重试和历史日期跳转');
     console.log('PASS 周摘要只显示重点和只读评分，完整安排在详情内');
     console.log('PASS 本机直接保存重点，旧云端按需确认，取消保留草稿');

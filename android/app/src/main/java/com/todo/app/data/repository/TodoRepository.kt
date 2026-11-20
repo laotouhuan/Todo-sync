@@ -396,16 +396,24 @@ class TodoRepository(private val context: Context) {
 
     suspend fun saveTimeEntry(entry: com.todo.app.data.model.TimeEntry, expected: com.todo.app.data.model.TimeEntry? = null): Result<Unit> = changeLearning { data ->
         require(configManager.timeTrackingEnabled) { "本机任务计时已关闭" }
-        if (expected != null) require(data.timeEntries.find { it.id == entry.id } == expected) { "记录已变化，请保留输入并核对最新记录" }
-        val pending = data.timeEntries.find { it.id == entry.id }?.let { com.todo.app.data.model.TaskSeriesLogic.pending(data, it) } != null
+        val latest = data.timeEntries.find { it.id == entry.id }
+        if (expected != null) require(latest == expected) { "记录已变化，请保留输入并核对最新记录" }
+        val pending = latest?.let { com.todo.app.data.model.TaskSeriesLogic.pending(data, it) } != null
+        val reassigning = latest != null && !entry.deleted && latest.task_ref != entry.task_ref
+        val saved = if (reassigning) {
+            require(!latest.deleted) { "该计时记录已删除" }
+            com.todo.app.data.model.Learning.reassignToPersonalTask(data, entry)
+        } else entry
         if (!entry.deleted) {
             require(!pending || entry.ended_at != null) { "请填写实际结束时间" }
-            require(entry.ended_at != null || data.timeEntries.any { it.id == entry.id && it.ended_at == null && !it.deleted }) { "补录必须填写结束时间" }
-            val error = com.todo.app.data.model.Learning.validate(entry, data.timeEntries, allowShort = pending)
-            require(error == null) { error ?: "记录无效" }
+            require(entry.ended_at != null || (latest != null && latest.ended_at == null && !latest.deleted)) { "补录必须填写结束时间" }
+            if (!reassigning || entry.started_at != latest.started_at || entry.ended_at != latest.ended_at) {
+                val error = com.todo.app.data.model.Learning.validate(entry, data.timeEntries, allowShort = pending)
+                require(error == null) { error ?: "记录无效" }
+            }
         }
-        data.copy(timeEntries = com.todo.app.data.model.Learning.mergeTimes(data.timeEntries.filter { it.id != entry.id } + entry.copy(
-            updated_at = nowIso(), label_snapshot = com.todo.app.data.model.Learning.label(entry.label_snapshot))))
+        data.copy(timeEntries = com.todo.app.data.model.Learning.mergeTimes(data.timeEntries.filter { it.id != entry.id } + saved.copy(
+            updated_at = nowIso(), label_snapshot = com.todo.app.data.model.Learning.label(saved.label_snapshot))))
     }
 
     suspend fun saveTimingPreferences(dueDate: String, insertion: String, timing: Boolean,

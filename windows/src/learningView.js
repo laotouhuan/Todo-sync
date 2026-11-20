@@ -1,7 +1,7 @@
-import { seriesFor, timingPendingReason, displayTaskName, duplicateTimingSeries, periodDescription } from './taskSeries.js';
+import { seriesFor, timingPendingReason, displayTaskName, duplicateTimingSeries, periodDescription, isSeriesDeleted } from './taskSeries.js';
 import { editorProgressSections } from './editorSections.js';
 import { learningSnapshot, requirePersonalTarget } from './collaborationView.js';
-import { normalizeLabel, taskReference, sameTask, learningRange, summarizeLearning, formatDuration, validateTimeEntry, localDay, availableLabels, resolveLearningEntries, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE, canTimeTodo, lastTimedText, recentTimingTasks, createRunningTimeEntry, timingTodos, splitTimeEntry } from './timeTracking.js';
+import { normalizeLabel, taskReference, sameTask, learningRange, summarizeLearning, formatDuration, validateTimeEntry, localDay, availableLabels, resolveLearningEntries, finishTimeEntry, SHORT_TIME_ENTRY_MESSAGE, canTimeTodo, lastTimedText, recentTimingTasks, recordTaskChoices, createRunningTimeEntry, timingTodos, splitTimeEntry } from './timeTracking.js';
 import { sortFunc } from './dateUtils.js';
 import { reviewFields, reviewPreview, exportReviews } from './reviewUtils.js';
 import { canonicalJson } from './stableJsonDigest.js';
@@ -115,8 +115,8 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             d.time_entries.push(createRunningTimeEntry(d, todoId));
         });
     }
-    function showTimerPicker() {
-        if (readOnly() || !enabled() || running().length) return;
+    function showTimerPicker(reassignment = null) {
+        if (readOnly() || !enabled() || (!reassignment && running().length)) return;
         const target = { ...state.activeSource };
         const dialog = modal('最近计时的任务'); dialog.dataset.timing = 'true';
         dialog.classList.add('learning-timer-picker');
@@ -124,14 +124,18 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         const search = input('search', '', '搜索任务', dialog);
         const list = el('div', null, 'learning-timer-candidates');
         const error = el('p', '', 'learning-error'); error.setAttribute('role', 'alert');
-        const navigation = button('选择其他任务', () => { other = !other; search.value = ''; renderPicker(); });
+        const navigation = button('选择其他任务', () => {
+            other = !other; search.value = ''; renderPicker();
+            if (other && reassignment) search.focus();
+        });
         const cancel = button('取消', () => dialog.close());
         dialog.append(list, error, navigation, cancel);
-        async function select(todoId) {
+        async function select(todo) {
             if (busy) return;
+            if (reassignment) { reassignment.select(todo); dialog.close(); return; }
             busy = true; failure = ''; renderPicker();
             try {
-                await startTiming(todoId, target);
+                await startTiming(todo.id, target);
                 dialog.close();
             } catch (e) {
                 failure = e.message || String(e);
@@ -139,26 +143,35 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         }
         function renderPicker() {
             if (!enabled() || readOnly() || JSON.stringify(state.activeSource) !== JSON.stringify(target)) { dialog.close(); return; }
-            if (!busy && running().length) { dialog.close(); return; }
-            dialog.querySelector('h3').textContent = other ? '选择要计时的任务' : '最近计时的任务';
+            if (!reassignment && !busy && running().length) { dialog.close(); return; }
+            const allTasksTitle = reassignment ? '更换所属任务' : '选择要计时的任务';
+            dialog.querySelector('h3').textContent = other ? allTasksTitle : '最近计时的任务';
             search.parentElement.hidden = !other; search.disabled = busy;
             navigation.textContent = other ? '返回最近任务' : '选择其他任务';
             navigation.disabled = busy; cancel.disabled = busy; error.textContent = failure;
             list.replaceChildren();
             const today = localDay(new Date());
+            const choices = reassignment ? recordTaskChoices(state.todoData, reassignment.date) : null;
             let candidates;
             if (other) {
-                candidates = timingTodos(state.todoData)
+                candidates = (choices?.todos ?? timingTodos(state.todoData))
                     .sort((a, b) => Number(b.date === today) - Number(a.date === today) || sortFunc(a, b))
                     .filter(todo => todo.content.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()))
                     .map(todo => ({ todo }));
-            } else candidates = recentTimingTasks(state.todoData.todos, state.todoData.time_entries || [], state.todoData);
-            duplicateTimingSeries(state.todoData).forEach(s => list.append(el('p', s.content + '：本期存在重复任务，请到周期关联中核对')));
-            if (!candidates.length) list.append(el('p', other ? '暂无匹配的可计时任务' : '暂无可继续计时的最近任务，请选择其他任务', 'ui-note'));
+            } else candidates = choices?.recent ?? recentTimingTasks(state.todoData.todos, state.todoData.time_entries || [], state.todoData);
+            if (!reassignment) duplicateTimingSeries(state.todoData).forEach(s => list.append(el('p', s.content + '：本期存在重复任务，请到周期关联中核对')));
+            if (!candidates.length) {
+                const emptySearch = reassignment ? '暂无匹配的任务' : '暂无匹配的可计时任务';
+                const emptyRecent = reassignment ? '暂无最近计时的任务，请选择其他任务' : '暂无可继续计时的最近任务，请选择其他任务';
+                list.append(el('p', other ? emptySearch : emptyRecent, 'ui-note'));
+            }
             for (const { todo, endedAt } of candidates) {
-                const item = button('', () => select(todo.id)); item.classList.add('learning-timer-candidate'); item.disabled = busy;
+                const item = button('', () => select(todo)); item.classList.add('learning-timer-candidate'); item.disabled = busy;
                 item.append(el('span', todo.content));
-                if (!seriesFor(state.todoData, todo.id) && ['weekly_checkin', 'monthly_checkin'].includes(todo.task_type)) item.append(el('small', periodDescription(todo.date)));
+                const periodic = ['weekly_checkin', 'monthly_checkin'].includes(todo.task_type);
+                if ((reassignment && todo.date) || (!reassignment && periodic && !seriesFor(state.todoData, todo.id))) {
+                    item.append(el('small', periodDescription(todo.date)));
+                }
                 if (endedAt) item.append(el('small', lastTimedText(endedAt)));
                 list.append(item);
             }
@@ -175,27 +188,60 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
         const now = new Date().toISOString();
         const dialog = modal(original ? '编辑计时记录' : '补录计时记录');
         dialog.dataset.timing = 'true';
-        dialog.append(el('p', '所属任务：' + (original ? resolvedEntries().find(e => e.id === original.id)?.display_content || original.task_content_snapshot : todo?.content || '')));
+        const originalName = original ? resolvedEntries().find(e => e.id === original.id)?.display_content || original.task_content_snapshot : todo.content;
+        const originalLabel = original ? entryLabel(original) : normalizeLabel(todo.label);
+        const taskName = el('span', `所属任务：${originalName}`);
+        const taskLine = el('p'); taskLine.append(taskName);
+        dialog.append(taskLine);
         const start = input('datetime-local', localInput(original?.started_at || now), '开始日期和时间', dialog); start.step = '1';
         const end = input('datetime-local', localInput(original ? original.ended_at : now), '结束日期和时间（运行中的记录可留空）', dialog); end.step = '1';
-        dialog.append(el('p', '所属任务标签：' + (original ? entryLabel(original) : normalizeLabel(todo?.label) || '未分类') + '（在任务编辑页修改）'));
+        const initialStart = start.value, initialEnd = end.value;
+        const labelText = label => `所属任务标签：${label || '未分类'}（在任务编辑页修改）`;
+        const taskLabel = el('p', labelText(originalLabel));
+        let selectedTaskId = null;
+        const changeTask = original && button('更换任务', () => {
+            const date = [new Date(start.value), new Date(original.started_at)].find(value => Number.isFinite(value.getTime())) ?? new Date();
+            showTimerPicker({ date, select: task => {
+                selectedTaskId = sameTask(taskReference(task), original.task_ref) ? null : task.id;
+                taskName.textContent = `所属任务：${task.content}`;
+                taskLabel.textContent = labelText(normalizeLabel(task.label));
+            } });
+        });
+        if (changeTask) taskLine.append(changeTask);
+        dialog.append(taskLabel);
         const error = el('p', '', 'learning-error'); dialog.append(error);
         dialog.append(button('保存记录', async () => {
+            if (changeTask) changeTask.disabled = true;
             try {
                 if (!start.value || (!original && !end.value)) throw new Error('请填写开始和结束时间');
+                const reassignedId = selectedTaskId;
                 const updated = { ...(original || { id: crypto.randomUUID(), task_ref: ref, task_content_snapshot: todo.content,
-                    created_at: now, deleted: false, label_snapshot: normalizeLabel(todo.label) }), started_at: new Date(start.value).toISOString(),
-                    ended_at: end.value ? new Date(end.value).toISOString() : null, updated_at: new Date().toISOString() };
+                    created_at: now, deleted: false, label_snapshot: normalizeLabel(todo.label) }),
+                    started_at: original && start.value === initialStart ? original.started_at : new Date(start.value).toISOString(),
+                    ended_at: original && end.value === initialEnd ? original.ended_at : end.value ? new Date(end.value).toISOString() : null };
                 await commit(d => {
                     requireEnabled();
                     const latest = d.time_entries.find(e => e.id === original?.id);
                     if (original && JSON.stringify(latest) !== JSON.stringify(original)) throw new Error('记录已变化，请保留输入并核对最新记录');
-                    if (original && timingPendingReason(d, original) && !updated.ended_at) throw new Error('请填写实际结束时间');
+                    const pending = !!(original && timingPendingReason(d, original));
+                    if (pending && !updated.ended_at) throw new Error('请填写实际结束时间');
                     if (!updated.ended_at && !d.time_entries.some(e => e.id === updated.id && !e.deleted && !e.ended_at)) throw new Error('该记录已结束，请填写结束时间');
-                    const failure = validateTimeEntry(updated, d.time_entries, Date.now(), !!(original && timingPendingReason(d, original))); if (failure) throw new Error(failure);
-                    d.time_entries = [...d.time_entries.filter(e => e.id !== updated.id), updated];
+                    if (!reassignedId || updated.started_at !== original.started_at || updated.ended_at !== original.ended_at) {
+                        const failure = validateTimeEntry(updated, d.time_entries, Date.now(), pending);
+                        if (failure) throw new Error(failure);
+                    }
+                    const saved = { ...updated, updated_at: new Date().toISOString() };
+                    if (reassignedId) {
+                        const target = d.todos.find(t => t.id === reassignedId && !t.deleted);
+                        if (!target || isSeriesDeleted(d, reassignedId)) throw new Error('所选任务已不可用，请重新选择');
+                        saved.task_ref = taskReference(target);
+                        saved.task_content_snapshot = displayTaskName(d, target.id);
+                        saved.label_snapshot = normalizeLabel(target.label);
+                    }
+                    d.time_entries = [...d.time_entries.filter(e => e.id !== saved.id), saved];
                 }); dialog.close(); changed();
             } catch (e) { error.textContent = e.message || String(e); }
+            finally { if (changeTask) changeTask.disabled = false; }
         }, 'primary'), button('取消', () => dialog.close()));
     }
     function recordList(host, list, todo, ref) {
@@ -208,7 +254,11 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
             if (entry.ended_at) row.append(el('small', formatDuration(Date.parse(entry.ended_at) - Date.parse(entry.started_at))));
             else if (!pendingReason(entry)) row.append(clock(entry));
             if (conflicts().has(entry.id)) row.append(el('small', '待核对：与其他计时重叠，未计入统计'));
-            if (!readOnly()) row.append(button('编辑记录', () => editEntry(entry, todo, ref, () => recordList(host, list.map(e => entries().find(n => n.id === e.id) || e).filter(e => !e.deleted), todo, ref))),
+            if (!readOnly()) row.append(button('编辑记录', () => editEntry(entry, todo, ref, () => {
+                const ids = new Set(list.map(e => e.id));
+                const current = entries().filter(e => !e.deleted && (ref ? sameTask(e.task_ref, ref) : ids.has(e.id)));
+                recordList(host, current, todo, ref);
+            })),
                 button('删除', () => run(async () => { await remove(entry); row.remove(); }), 'danger'));
             host.append(row);
         }
@@ -744,7 +794,7 @@ export function createLearningView({ state, commit: commitPersonal, redraw, sync
     }
     function install() {
         const startButton = document.getElementById('start-timer-btn');
-        if (startButton) startButton.onclick = showTimerPicker;
+        if (startButton) startButton.onclick = () => showTimerPicker();
         const anchor = document.querySelector('.stats-list-toggle-container'); const host = el('div'); host.id = 'learning-insights'; anchor?.before(host);
         // 编辑弹窗阻止底层导航；关闭窗口也先处理未保存正文。
         window.addEventListener('beforeunload', e => { if (reviewLeave) { e.preventDefault(); e.returnValue = ''; } });

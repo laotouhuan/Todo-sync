@@ -25,6 +25,7 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
     let planningStatus = 'idle', planningError = '', retainedLocalPlanning = false;
     let weekDetails = null;
     let weekReviewList;
+    let confirmation;
     const drafts = new Map();
     const listeners = new Set();
     let loadError = '', lastOperationError = '', ratingDate, weekDraft, opening = false, onWriteSaved;
@@ -250,10 +251,14 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
                 [...inputs, focus, reason].forEach(input => input.addEventListener('input', rememberDraft));
                 const needsRead = ['unknown', 'invalid'].includes(state.focusStatus);
                 const needsFocusUpgrade = () => cloudActive && state.focusStatus === 'legacy' && Boolean(focus.value.trim());
-                const save = () => {
+                const save = async () => {
                     if (busy || needsRead) return false;
                     const upgrade = needsFocusUpgrade();
-                    if (upgrade && (!state.canEnableFocus || !confirmFocusUpgrade())) return false;
+                    if (upgrade) {
+                        const selected = session;
+                        if (!state.canEnableFocus || !await confirmFocusUpgrade()) return false;
+                        if (session !== selected || !isCurrent() || date.value !== day) return false;
+                    }
                     const submittedDraft = drafts.get(draftKey);
                     return action({ kind: 'save', versionId: generateUUID(), days: inputs.map(input => input.value),
                         ...(state.focusEnabled || upgrade ? { focus: focus.value } : {}),
@@ -286,8 +291,12 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
                 element('p', version.focus || '未填写本周重点', item).className = 'learning-text';
                 version.days.forEach((value, index) => element('p', `周${'一二三四五六日'[index]} ${value}`, item));
                 if (!plan.candidates.some(candidate => candidate.id === version.id)) {
-                    button('删除历史版本', item, () => {
-                        if (window.confirm('删除此历史版本？')) action({ kind: 'delete', versionId: version.id });
+                    button('删除历史版本', item, async () => {
+                        const selected = session;
+                        const confirmed = await confirmAction('删除此历史版本？', '', '删除', 'danger');
+                        if (confirmed && session === selected && date.value === day) {
+                            await action({ kind: 'delete', versionId: version.id });
+                        }
                     }, 'danger');
                 }
             }
@@ -409,8 +418,33 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
         }
     }
 
+    function confirmAction(title, message, label, variant = 'primary') {
+        if (confirmation) return Promise.resolve(false);
+        const dialog = document.createElement('dialog');
+        dialog.className = 'learning-dialog';
+        dialog.setAttribute('aria-label', title);
+        element('h3', title, dialog);
+        if (message) element('p', message, dialog);
+        const cancel = button('取消', dialog, () => dialog.close());
+        cancel.classList.add('ui-button');
+        cancel.autofocus = true;
+        const accept = button(label, dialog, () => dialog.close('confirm'));
+        accept.classList.add('ui-button', variant);
+        dialog.addEventListener('keydown', event => event.stopPropagation());
+        return new Promise(resolve => {
+            dialog.addEventListener('close', () => {
+                dialog.remove();
+                confirmation = null;
+                resolve(dialog.returnValue === 'confirm');
+            }, { once: true });
+            document.body.append(dialog);
+            confirmation = dialog;
+            dialog.showModal();
+        });
+    }
+
     function confirmFocusUpgrade() {
-        return window.confirm('保存本周重点需要升级云端周计划格式。请确认仍在使用此计划数据集的设备均已升级到兼容版本。');
+        return confirmAction('升级云端周计划格式', '请确认仍在使用此计划数据集的设备均已升级到兼容版本。', '确认升级');
     }
     function change(action, revision, onSaved, activateFocus = false) {
         if (busy || !session || (personal && !isCurrent())) return false;
@@ -496,6 +530,7 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
     }
     start?.addEventListener('click', () => run(() => connect(`${targetKey}-${selector.value}`)));
     function close() {
+        if (confirmation?.open) confirmation.close();
         if (busy) {
             closeRequested = true;
             return;
@@ -551,8 +586,9 @@ export function bindRecordSandbox(document, invoke, panel = document.getElementB
         enableFocus?.addEventListener('click', async () => {
             if (!session) await refresh(true);
             if (!session || !isCurrent() || !state?.canEnableFocus) return;
-            if (cloudActive && !confirmFocusUpgrade()) return;
             const selected = session;
+            if (cloudActive && !await confirmFocusUpgrade()) return;
+            if (session !== selected || !isCurrent()) return;
             const ok = await run(() => selected.enableFocus(() => isCurrent() && session === selected));
             if (!ok && focusStatus) focusStatus.textContent = lastOperationError || '启用失败，请重试';
         });

@@ -16,6 +16,43 @@ class LearningTest {
         entry("record-$id-$startedAt", startedAt, Learning.instant(startedAt)!!.plusSeconds(60).toString())
             .copy(task_ref = TaskReference(id))
 
+    @Test fun reassignmentUsesCurrentPersonalTaskSnapshotsAndKeepsExactTimes() {
+        val target = timingTodo("target").copy(taskType = TaskType.WEEKLY_CHECKIN, date = "2026-W36",
+            completed = true, label = " 学习 ")
+        val draft = entry("timer", "2026-09-01T08:00:00.125+08:00", "2026-09-01T08:00:20.875+08:00")
+            .copy(task_ref = TaskReference(target.id))
+        val data = TodoData(1, draft.updated_at, listOf(target))
+        assertEquals(draft.copy(task_content_snapshot = target.content, label_snapshot = "学习"),
+            Learning.reassignToPersonalTask(data, draft))
+        assertThrows(IllegalArgumentException::class.java) {
+            Learning.reassignToPersonalTask(data.copy(todos = listOf(target.copy(deleted = true))), draft)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            Learning.reassignToPersonalTask(data, draft.copy(task_ref = TaskReference(target.id, "collaboration", "shared")))
+        }
+    }
+
+    @Test fun recordTaskChoicesConsolidateSeriesAndUseRecordPeriodDuringActiveTiming() {
+        val older = timingTodo("week-36").copy(taskType = TaskType.WEEKLY_CHECKIN, date = "2026-W36", completed = true)
+        val newer = older.copy(id = "week-38", date = "2026-W38")
+        val untimed = timingTodo("untimed")
+        val stamp = "2026-09-01T00:00:00Z"
+        val series = TaskSeries("series", "阅读", stamp, "week", stamp, stamp)
+        val history = listOf(history(older.id, "2026-09-01T01:00:00Z"), history(newer.id, "2026-09-16T01:00:00Z"))
+        val data = TodoData(1, stamp, listOf(older, newer, untimed),
+            timeEntries = history + entry("running", "2026-09-20T01:00:00Z", null), taskSeries = listOf(series),
+            taskSeriesLinks = listOf(older, newer).map { TaskSeriesLink(it.id, series.id, it.date!!, stamp, stamp) })
+        for ((date, expected) in listOf("2026-08-18" to older, "2026-09-02" to older, "2026-09-09" to older, "2026-09-16" to newer)) {
+            val choices = Learning.recordTaskChoices(data, LocalDate.parse(date))
+            assertEquals(setOf(untimed.id, expected.id), choices.todos.map { it.id }.toSet())
+            assertEquals(2, choices.todos.size)
+            val recent = choices.recent.single()
+            assertEquals(expected.id, recent.todo.id)
+            assertEquals(series.content, recent.todo.content)
+            assertEquals(Learning.instant(history.last().ended_at), recent.endedAt)
+        }
+    }
+
     @Test fun recentTasksFilterDeduplicateAndTakeFiveAfterSorting() {
         val todos = (0..7).map { timingTodo(it.toString()) }
         val records = todos.mapIndexed { i, todo -> history(todo.id, "2026-09-10T0$i:00:00Z") } +

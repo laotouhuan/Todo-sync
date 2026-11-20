@@ -32,10 +32,19 @@ data class LearningGroup(val label: String, val duration: Long, val count: Int)
 data class LearningSummary(val duration: Long, val count: Int, val parts: List<LearningPart>,
     val groups: List<LearningGroup>, val pending: Int, val running: Int)
 data class RecentTimingTask(val todo: Todo, val startedAt: Instant, val endedAt: Instant)
+internal data class RecordTaskChoices(val todos: List<Todo>, val recent: List<RecentTimingTask>)
 
 object Learning {
     const val SHORT_TIME_ENTRY_MESSAGE = "计时未超过 30 秒，不保存为记录。"
     private val minimumDuration = Duration.ofSeconds(30)
+
+    internal fun reassignToPersonalTask(data: TodoData, entry: TimeEntry): TimeEntry {
+        val ref = entry.task_ref
+        val target = data.todos.find { it.id == ref.todo_id && !it.deleted }
+        require(ref.source_type == "personal" && ref.source_id == null && target != null &&
+            !TaskSeriesLogic.isDeleted(data, ref.todo_id)) { "所选任务已不可用，请重新选择" }
+        return entry.copy(task_content_snapshot = TaskSeriesLogic.display(data, target.id), label_snapshot = label(target.label))
+    }
 
     // 计时资格使用本地周期计数，不改写旧完成状态或原始打卡记录。
     fun canTimeTodo(todo: Todo, zone: ZoneId = ZoneId.systemDefault()): Boolean {
@@ -54,11 +63,30 @@ object Learning {
 
     fun recentTimingTasks(todos: List<Todo>, entries: List<TimeEntry>, zone: ZoneId = ZoneId.systemDefault(), data: TodoData = TodoData(1, "", todos)): List<RecentTimingTask> {
         if (entries.any { !it.deleted && it.ended_at == null }) return emptyList()
-        val available = TaskSeriesLogic.timingTodos(data, LocalDate.now(zone)).associateBy { TaskSeriesLogic.series(data, it.id)?.id ?: it.id }
+        return recentTaskChoices(data, entries, TaskSeriesLogic.timingTodos(data, LocalDate.now(zone)))
+    }
+
+    private fun timingTaskKey(data: TodoData, todoId: String): String =
+        TaskSeriesLogic.series(data, todoId)?.let { "series:${it.id}" } ?: "todo:$todoId"
+
+    internal fun recordTaskChoices(data: TodoData, date: LocalDate): RecordTaskChoices {
+        val active = TaskSeriesLogic.visible(data).filterNot { it.deleted }
+        val groups = active.groupBy { TaskSeriesLogic.series(data, it.id) }
+        val todos = groups[null].orEmpty() + groups.mapNotNull { (series, members) ->
+            if (series == null) return@mapNotNull null
+            val period = TaskSeriesLogic.current(series.period_type, date)
+            val ordered = members.sortedWith(compareBy<Todo> { it.date }.thenBy { it.id })
+            ordered.lastOrNull { it.date.orEmpty() <= period } ?: ordered.first()
+        }
+        return RecordTaskChoices(todos, recentTaskChoices(data, data.timeEntries, todos))
+    }
+
+    private fun recentTaskChoices(data: TodoData, entries: List<TimeEntry>, candidates: List<Todo>): List<RecentTimingTask> {
+        val available = candidates.associateBy { timingTaskKey(data, it.id) }
         val latest = mutableMapOf<String, RecentTimingTask>()
         for (entry in entries) {
             if (entry.deleted || entry.task_ref.source_type != "personal" || entry.task_ref.source_id != null) continue
-            val todo = available[TaskSeriesLogic.series(data, entry.task_ref.todo_id)?.id ?: entry.task_ref.todo_id] ?: continue
+            val todo = available[timingTaskKey(data, entry.task_ref.todo_id)] ?: continue
             val start = instant(entry.started_at) ?: continue
             val end = instant(entry.ended_at) ?: continue
             if (Duration.between(start, end) <= minimumDuration) continue
